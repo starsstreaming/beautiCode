@@ -16,11 +16,13 @@
   <strong>工作不一定只能盯着灰色界面。</strong>
 </p>
 
+![Uploading QQ20260729-214857.gif…]()
 
 ---
 
 
-<img width="960" height="601" alt="QQ20260729-211119-10MB-1 5x" src="https://github.com/user-attachments/assets/a743dffc-dbe2-48d5-80fa-46a4b5a41dcb" />
+
+
 
 ## 它是什么？
 
@@ -148,9 +150,6 @@ Ctrl + Shift + Space
 背景不会抢走鼠标，也不会挡住点击。
 
 它更像一层安静的环境，而不是盖在 Codex 上面的播放器。
-
-
-<img width="1280" height="826" alt="QQ20260729-213150" src="https://github.com/user-attachments/assets/90e790dc-0a02-419b-8058-6d6ddfc74ae0" />
 
 
 
