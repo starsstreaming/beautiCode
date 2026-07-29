@@ -44,8 +44,9 @@ beautiCode 是一个 Codex Desktop 背景工具。
 
 你可以继续写代码，也可以让喜欢的画面安静地陪着你。
 
+<img width="1920" height="1240" alt="QQ20260729-212506-HD" src="https://github.com/user-attachments/assets/9ff2e524-c3cf-4a97-9c9c-da57b0dd3a24" />
 
-https://github.com/user-attachments/assets/a068e4b0-5705-4ad9-acb1-cfef743263a5
+
 
 
 
@@ -73,7 +74,7 @@ beautiCode 可以让你：
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
 
 
-https://github.com/user-attachments/assets/5751a808-455d-4d12-967c-f5c302b77c10
+<img width="1280" height="826" alt="QQ20260729-213428" src="https://github.com/user-attachments/assets/3c028e10-bc4a-4ffa-83b8-46733c6dae65" />
 
 
 
@@ -149,7 +150,8 @@ Ctrl + Shift + Space
 它更像一层安静的环境，而不是盖在 Codex 上面的播放器。
 
 
-https://github.com/user-attachments/assets/dbb918d3-0ee8-45ae-ba6a-dae558f3590c
+<img width="1280" height="826" alt="QQ20260729-213150" src="https://github.com/user-attachments/assets/90e790dc-0a02-419b-8058-6d6ddfc74ae0" />
+
 
 
 
