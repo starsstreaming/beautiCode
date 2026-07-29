@@ -1,11 +1,11 @@
 # beautiCode
 
 <p align="center">
-  <strong>把你喜欢的画面，放进写代码的每一分钟。</strong>
+  <strong>把你喜欢的画面，放进vibeCoding的每一分钟。</strong>
 </p>
 
 <p align="center">
-  为 Codex Desktop 添加图片与 MP4 视频背景。<br>
+  为 Codex Desktop 添加图片与视频背景。<br>
   可以是一张壁纸，也可以是一部番剧、一场电影，或者一段陪你度过漫长工作的风景。
 </p>
 
@@ -111,7 +111,6 @@ beautiCode 对视频并不是简单地“放进去就算完成”。
 * 视频播放失败时保留原来的背景
 * 已保存视频的播放进度记录
 
-建议使用常见的 H.264 编码 MP4，以获得更好的兼容性。
 
 ---
 
