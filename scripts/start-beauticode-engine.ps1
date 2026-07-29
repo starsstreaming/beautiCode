@@ -22,6 +22,7 @@ if ($Port -lt 0 -or $Port -gt 65535) {
 }
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $TrayScript = Join-Path $RepoRoot "apps\tray\start-tray.ps1"
+$ReleaseManifest = Join-Path $RepoRoot "release-manifest.json"
 $CodexAppUserModelId = "OpenAI.Codex_2p2nqsd0c76g0!App"
 $LogPath = Join-Path $env:LOCALAPPDATA "beautiCode\engine-launcher.log"
 $TrayMutexName = "Local\beautiCode.Engine.Tray.v1"
@@ -188,6 +189,9 @@ function Start-BcTray([int]$CdpPort) {
   if ($CdpPort -gt 0) {
     [void]$argList.Add("-Port")
     [void]$argList.Add("$CdpPort")
+  }
+  if (Test-Path -LiteralPath $ReleaseManifest -PathType Leaf) {
+    [void]$argList.Add("-SkipBuild")
   }
   # The tray owns the source-vs-dist freshness check and rebuilds stale dist.
   $psi = New-Object System.Diagnostics.ProcessStartInfo

@@ -152,18 +152,42 @@ Ctrl + Shift + Space
 
 ## 使用方式
 
-### 运行托盘程序
+### Windows 安装包（推荐）
 
-目前版本需要安装 Node.js 22 或更高版本。
+运行：
 
-在项目目录执行：
+```text
+beautiCode-Setup-0.1.0-win-x64.exe
+```
+
+安装包自带 Node.js 运行时。使用者不需要安装 Node.js、npm，也不需要保留
+项目源码。安装完成后启动 beautiCode，Windows 右下角会出现托盘图标；
+如果 Codex Desktop 尚未启动，引擎会尝试启动并连接它。
+
+当前安装包尚未进行商业代码签名，Windows 可能显示 SmartScreen 提示。
+用户导入的图片、视频和已保存主题位于
+`%LOCALAPPDATA%\beautiCode`，卸载程序默认保留这些数据。
+
+### 从源码运行
+
+源码开发需要 Node.js 22 或更高版本。在项目目录执行：
 
 ```bash
 npm install
 npm run tray
 ```
 
-启动后，Windows 右下角会出现 beautiCode 托盘图标。
+构建 Windows 安装包：
+
+```powershell
+npm run installer:windows
+```
+
+输出位于：
+
+```text
+artifacts\windows\installer\
+```
 
 通过托盘菜单可以：
 

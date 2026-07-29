@@ -2,6 +2,7 @@
 param(
   [int]$Port = 0,
   [string]$DataRoot = "",
+  [string]$NodePath = "",
   [switch]$SkipBuild
 )
 
@@ -180,7 +181,25 @@ public sealed class BeautiCodeToggle : Control {
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $HostScript = Join-Path $PSScriptRoot "session-host.mjs"
-$Node = (Get-Command node -ErrorAction Stop).Source
+$ReleaseManifest = Join-Path $RepoRoot "release-manifest.json"
+$BundledNode = Join-Path $RepoRoot "runtime\node.exe"
+$coreDist = Join-Path $RepoRoot "packages\core\dist\index.js"
+$adapterDist = Join-Path $RepoRoot "packages\adapter-codex\dist\index.js"
+
+if ($NodePath) {
+  if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+    throw ("Node executable not found: {0}" -f $NodePath)
+  }
+  $Node = (Resolve-Path -LiteralPath $NodePath).Path
+} elseif (Test-Path -LiteralPath $BundledNode -PathType Leaf) {
+  $Node = $BundledNode
+} else {
+  $Node = (Get-Command node -ErrorAction Stop).Source
+}
+
+if (Test-Path -LiteralPath $ReleaseManifest -PathType Leaf) {
+  $SkipBuild = $true
+}
 
 # Known ChatGPT / Codex Desktop AppX application user model id (Windows).
 $script:CodexAppUserModelId = "OpenAI.Codex_2p2nqsd0c76g0!App"
@@ -192,8 +211,6 @@ if (-not (Test-Path -LiteralPath $HostScript)) {
 if (-not $SkipBuild) {
   # Only build when dist is missing — full npm build on every tray start was a
   # multi-second tax. Development rebuilds: npm run build / npm run tray.
-  $coreDist = Join-Path $RepoRoot "packages\core\dist\index.js"
-  $adapterDist = Join-Path $RepoRoot "packages\adapter-codex\dist\index.js"
   $needBuild = -not ((Test-Path -LiteralPath $coreDist) -and (Test-Path -LiteralPath $adapterDist))
   if (-not $needBuild) {
     $distCutoff = @(
@@ -234,6 +251,12 @@ if (-not $SkipBuild) {
     } finally {
       Pop-Location
     }
+  }
+}
+
+foreach ($requiredRuntimeFile in @($HostScript, $coreDist, $adapterDist)) {
+  if (-not (Test-Path -LiteralPath $requiredRuntimeFile -PathType Leaf)) {
+    throw ("Missing beautiCode runtime file: {0}" -f $requiredRuntimeFile)
   }
 }
 
