@@ -16,8 +16,6 @@
   <strong>工作不一定只能盯着灰色界面。</strong>
 </p>
 
-<img width="1280" height="794" alt="QQ20260729-214857" src="https://github.com/user-attachments/assets/790a9ecd-e432-4afe-8b7c-1fbb5b32bdaa" />
-
 
 ---
 
