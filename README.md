@@ -1,4 +1,7 @@
-# beautiCode
+<div align="center">
+  <h1>beautiCode</h1>
+  <img src="./assets/beauticode-icon-borderless.png" alt="beautiCode icon" width="200">
+</div>
 
 <p align="center">
   <strong>把你喜欢的画面，放进vibeCoding的每一分钟。</strong>
