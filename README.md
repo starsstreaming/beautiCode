@@ -1,100 +1,286 @@
 # beautiCode
 
-Unofficial local tool that applies an **image or MP4 video background** to
-supported coding hosts. v1 targets **Codex Desktop** via loopback CDP.
+<p align="center">
+  <strong>把你喜欢的画面，放进写代码的每一分钟。</strong>
+</p>
 
-> Not affiliated with OpenAI, Anthropic, or any host vendor.
-> See [NOTICE.md](./NOTICE.md) and [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+<p align="center">
+  为 Codex Desktop 添加图片与 MP4 视频背景。<br>
+  可以是一张壁纸，也可以是一部番剧、一场电影，或者一段陪你度过漫长工作的风景。
+</p>
 
-## Status
+<p align="center">
+  <strong>工作不一定只能盯着灰色界面。</strong>
+</p>
 
-Early rewrite. The first milestone is the closed loop:
+---
 
-**choose image/video → validate → recoverable directory swap → host apply →
-live verify → finalize or rollback**
+## 它是什么？
 
-Theme shops, ZIP packs, Safe CSS, and full chrome restyling are **out of scope**.
+beautiCode 是一个 Codex Desktop 背景工具。
 
-## Layout
+你可以把电脑里的：
+
+* 图片
+* 动态壁纸
+* MP4 视频
+* 番剧
+* 电影
+* MV
+* 风景延时摄影
+
+直接设置成 Codex 的背景。
+
+它不会把 Codex 变成一个播放器窗口，而是让视频自然地出现在工作界面背后。
+
+代码、对话框和按钮仍然可以正常使用。
+
+你可以继续写代码，也可以让喜欢的画面安静地陪着你。
+
+---
+
+## 一边工作，一边看点喜欢的
+
+有时候并不是想认真看完一整部电影。
+
+只是希望写代码、等 AI 回复、跑构建或者排查 Bug 时，屏幕上不那么单调。
+
+beautiCode 可以让你：
+
+* 把番剧放在 Codex 背景中循环播放
+* 导入本地电影，边工作边慢慢看
+* 使用动漫场景作为动态桌面
+* 播放演唱会、MV 或直播录像
+* 放一段雨夜、海边、城市航拍作为工作氛围
+* 在等待 Codex 执行任务时随手摸一会儿鱼
+
+视频默认静音，不会突然打断工作。
+
+需要声音时，也可以随时打开。
+
+> 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
+
+---
+
+## 摸鱼模式
+
+按下快捷键：
 
 ```text
-packages/core/            validation, store, apply transaction, media server
-packages/adapter-codex/   background-only renderer + CDP helpers
-apps/tray/                Windows tray + authenticated loopback control plane
-docs/                     behavior contracts
+Ctrl + Shift + Space
 ```
 
-## Contracts
+即可进入摸鱼模式。
 
-- [docs/media-contract.md](./docs/media-contract.md)
-- [docs/apply-transaction.md](./docs/apply-transaction.md)
-- [docs/host-adapter.md](./docs/host-adapter.md)
-- [docs/security-boundaries.md](./docs/security-boundaries.md)
-- [docs/upstream-reference.md](./docs/upstream-reference.md)
-- [docs/live-smoke.md](./docs/live-smoke.md)
-- [docs/codex-cdp-setup.md](./docs/codex-cdp-setup.md)
+进入后：
 
-## Develop
+* Codex 的主要内容暂时隐藏
+* 图片或视频完整显示
+* 视频保持正常播放
+* 再按一次快捷键即可回到工作界面
+
+适合这些时刻：
+
+* Codex 正在执行一个较长的任务
+* 项目正在编译
+* 下载或测试还没结束
+* 想暂停几分钟看看番
+* 想把 Codex 临时变成一个小播放器
+
+不用退出 Codex，也不用在多个窗口之间来回切换。
+
+工作和摸鱼，只差一次快捷键。
+
+---
+
+## 支持视频背景
+
+beautiCode 对视频并不是简单地“放进去就算完成”。
+
+它会在真实 Codex 窗口中确认视频是否已经成功播放。
+
+切换视频时，旧画面会尽量保留到新视频准备完成，减少黑屏和闪烁。
+
+支持：
+
+* 本地 MP4 视频
+* 视频循环播放
+* 视频声音开关
+* 图片与视频快速切换
+* Codex 重启后自动恢复背景
+* 视频播放失败时保留原来的背景
+* 已保存视频的播放进度记录
+
+建议使用常见的 H.264 编码 MP4，以获得更好的兼容性。
+
+---
+
+## 保存喜欢的背景
+
+遇到喜欢的图片或视频，可以保存成一个主题。
+
+例如：
+
+```text
+雨夜写代码
+进击的巨人
+赛博城市
+海边下午
+电影摸鱼
+深夜电台
+```
+
+保存后，可以直接从托盘菜单切换。
+
+对于视频主题，beautiCode 还会记录播放进度。
+
+下次重新打开这个主题时，可以从上次看到的位置继续播放。
+
+不是每一次打开，都必须从片头重新开始。
+
+---
+
+## 工作时不会太抢眼
+
+首页可以完整展示背景，让画面更有氛围。
+
+进入项目或对话后，工作区域会自动变暗一些，避免视频影响文字阅读。
+
+左侧栏、输入框和主要按钮仍然可以正常操作。
+
+背景不会抢走鼠标，也不会挡住点击。
+
+它更像一层安静的环境，而不是盖在 Codex 上面的播放器。
+
+---
+
+## 不只是换一张皮肤
+
+Codex Dream Skin 更像一套完整的主题系统：
+
+* 调整颜色
+* 修改界面风格
+* 使用主题包
+* 浏览主题社区
+* 自定义更多界面元素
+
+beautiCode 的方向更简单：
+
+> **不重新设计 Codex，只专注于把图片和视频背景做好。**
+
+它不追求复杂的主题商店，也不试图改变每一个按钮。
+
+它更在意：
+
+* 视频能不能稳定播放
+* 切换时会不会闪烁
+* Codex 重启后能不能恢复
+* 视频失败后能不能退回原背景
+* 番剧和电影能不能自然地成为工作环境的一部分
+
+Dream Skin 是为工作空间换一套衣服。
+
+beautiCode 是为工作空间打开一扇窗。
+
+---
+
+## 使用方式
+
+### 运行托盘程序
+
+目前版本需要安装 Node.js 22 或更高版本。
+
+在项目目录执行：
 
 ```bash
 npm install
-npm test
-npm run build
-```
-
-Requires Node.js 22+ (the CDP adapter uses the built-in `WebSocket`).
-
-### CLI
-
-```bash
-# Offline: validate + atomic store only
-npm run bc -- apply-image ./wall.png
-npm run bc -- apply-video ./poster.jpg ./loop.mp4
-npm run bc -- status
-npm run bc -- clear
-
-# Live Codex Desktop (host must expose --remote-debugging-port)
-npm run bc -- probe --port 9222
-npm run bc -- apply-image ./wall.png --port 9222
-npm run bc -- apply-video ./poster.jpg ./loop.mp4 --port 9222
-npm run bc -- watch --port 9222
-```
-
-Live apply runs the full transaction: snapshot → stage/commit → inject →
-`__BEAUTICODE_BG__.snapshot()` verify → finalize or rollback. A second injector
-is rejected via `injector.lock` (stale dead-pid locks are taken over).
-
-### Find Codex CDP / tray
-
-```bash
-npm run bc -- discover
-npm run bc -- how-to-cdp
 npm run tray
 ```
 
-See [docs/codex-cdp-setup.md](./docs/codex-cdp-setup.md) and
-[apps/tray/README.md](./apps/tray/README.md).
+启动后，Windows 右下角会出现 beautiCode 托盘图标。
 
-### Live smoke (real Codex)
+通过托盘菜单可以：
 
-```bash
-# Find --remote-debugging-port on the Codex/ChatGPT main process, then:
-npm run smoke:live -- --port 9335
+* 更换图片
+* 更换视频
+* 清除背景
+* 打开或关闭视频声音
+* 进入摸鱼模式
+* 保存当前主题
+* 切换已保存主题
+* 删除主题
+
+后续版本会提供更适合普通用户的一键安装包。
+
+---
+
+## 当前支持情况
+
+目前主要支持：
+
+* Windows
+* Codex Desktop
+* JPG、JPEG、PNG、WebP 图片
+* MP4 视频
+
+当前仍处于早期版本，部分 Codex 更新可能会影响背景显示效果。
+
+如果发现视频无法播放，建议先确认：
+
+* 视频格式为 MP4
+* 视频采用常见编码
+* Codex 已正常启动
+* 没有同时运行两个 beautiCode 实例
+
+---
+
+## 关于本地视频
+
+beautiCode 只读取你主动选择的本地图片和视频。
+
+项目不会提供番剧、电影或其他受版权保护的内容。
+
+请只导入你拥有或有权使用的媒体文件，并遵守当地法律与内容版权要求。
+
+---
+
+## 为什么叫 beautiCode？
+
+因为代码工具不一定只能是冰冷、统一和毫无个性的。
+
+有人喜欢极简黑色。
+
+有人喜欢雨夜城市。
+
+有人喜欢动漫。
+
+有人喜欢在漫长的构建过程中，重新看一遍熟悉的电影。
+
+工具应该帮助人完成工作。
+
+但好的工具，也应该允许人把自己带进工作里。
+
+> **我们每天花很多时间面对代码。
+> beautiCode 想做的，只是让这些时间更像生活，而不只是等待完成的任务。**
+
+---
+
+## 致谢
+
+beautiCode 的部分媒体处理思路与实现经验参考并改编自：
+
+* Codex Dream Skin
+
+相关开源许可、代码来源和修改说明见：
+
+```text
+THIRD_PARTY_NOTICES.md
 ```
 
-Uses an isolated temp data root, rejects junk MP4, applies image/video, audits
-`pointer-events` / overflow / generation, then clears. See
-[docs/live-smoke.md](./docs/live-smoke.md).
+beautiCode 是非官方项目，与 OpenAI、Codex、Anthropic 或其他应用厂商没有隶属或合作关系。
 
-## Security highlights
-
-- Loopback-only control plane + random token kept out of process arguments
-- MP4 `ftyp` / image magic gates, size caps, symlink rejection
-- Cross-process leases + journaled active-directory swap/recovery
-- Apply transaction rolls back when live verify fails
-- Background CSS does not restyle the composer or arbitrary token classes
-- CDP JSON responses are stream-capped before allocation/parse
+---
 
 ## License
 
-MIT — [LICENSE](./LICENSE)
+MIT
