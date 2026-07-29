@@ -1,0 +1,24 @@
+{
+  "name": "beauticode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local image/video backgrounds for supported coding hosts. Unofficial.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @beauticode/core && npm run build -w @beauticode/adapter-codex",
+    "test": "npm run test -w @beauticode/core && npm run test -w @beauticode/adapter-codex",
+    "typecheck": "npm run typecheck -w @beauticode/core && npm run typecheck -w @beauticode/adapter-codex",
+    "discover": "node scripts/beauticode.mjs discover",
+    "bc": "node scripts/beauticode.mjs",
+    "smoke:live": "npm run build && node scripts/live-smoke.mjs",
+    "tray": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File apps/tray/start-tray.ps1 -SkipBuild"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

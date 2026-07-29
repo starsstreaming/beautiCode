@@ -1,0 +1,280 @@
+/* beautiCode — full-window background stage (Codex Desktop).
+   Modeled on Codex-Dream-Skin wide-art / video stage: transparent main
+   surface + sidebar so fixed stage shows through the whole window. */
+
+:root {
+  --bc-sidebar: rgba(25, 28, 34, 0.52);
+  --bc-main-edge: rgba(17, 19, 24, 0.40);
+  --bc-main-mid: rgba(17, 19, 24, 0.26);
+  --bc-main-far: rgba(17, 19, 24, 0.12);
+}
+
+/* Clear opaque page backdrops so the fixed stage can show through. */
+html[data-bc-active="true"],
+html[data-bc-active="true"] body {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Keep host UI above the fixed media stage. */
+html[data-bc-active="true"] body > #root {
+  position: relative !important;
+  z-index: 10 !important;
+  isolation: isolate;
+  background: transparent !important;
+}
+
+/* Dialogs/popovers sometimes mount under body, not #root. */
+html[data-bc-active="true"] body >
+  :is([role="dialog"], [aria-modal="true"], [data-radix-portal],
+    [data-radix-popper-content-wrapper]) {
+  z-index: 50 !important;
+}
+
+/* ---- Stage ---- */
+#beauticode-bg-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: transparent !important;
+}
+
+#beauticode-bg-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  /* Soft readability veil over art (Dream-Skin task shade/fade simplified). */
+  background:
+    linear-gradient(
+      180deg,
+      rgba(17, 19, 24, 0.10) 0%,
+      rgba(17, 19, 24, 0.18) 36%,
+      rgba(17, 19, 24, 0.42) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(17, 19, 24, 0.34) 0%,
+      rgba(17, 19, 24, 0.14) 52%,
+      rgba(17, 19, 24, 0.06) 100%
+    );
+}
+
+#beauticode-bg-stage img,
+#beauticode-bg-stage video {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 50%;
+  pointer-events: none;
+  border: 0;
+}
+
+#beauticode-bg-stage img {
+  z-index: 1;
+}
+
+#beauticode-bg-stage video {
+  z-index: 2;
+  /* Default hidden; inline style + ready attrs reveal after first frame.
+     Pending replacements stay opacity:0 via inline style so a handed-off
+     previous video (no inline opacity) can remain visible underneath. */
+  opacity: 0;
+  filter: brightness(1.08) saturate(1.03);
+}
+
+/* Ready video: CSS reveals elements that cleared their inline opacity:0. */
+html[data-bc-active="true"][data-bc-media="video"][data-bc-video-ready="true"]
+  #beauticode-bg-stage
+  video {
+  opacity: 1;
+}
+
+/* Hide poster once video is ready — display:none avoids stall flash where
+   Chromium re-exposes poster/img over a live element (PR #290). */
+html[data-bc-active="true"][data-bc-media="video"][data-bc-video-ready="true"]
+  #beauticode-bg-stage
+  img {
+  display: none !important;
+}
+
+/* Pending decode: keep poster img visible under the opacity-0 replacement. */
+html[data-bc-active="true"][data-bc-media="video-pending"]
+  #beauticode-bg-stage
+  img {
+  opacity: 1;
+  display: block;
+}
+
+html[data-bc-active="true"][data-bc-media="video"]
+  #beauticode-bg-stage::before,
+html[data-bc-active="true"][data-bc-media="video-pending"]
+  #beauticode-bg-stage::before {
+  opacity: 0.46;
+}
+
+/* Project/task focus dim — USER INTENT:
+   - LEFT sidebar: pixel-identical to home (same stage veil, same aside
+     chrome). Entering a project must not jump the left column's brightness.
+   - RIGHT main only: slightly darker for readability. Keep color (不变灰).
+   - Video keeps playing under both columns.
+   Implementation: do NOT retouch #beauticode-bg-stage::before or media
+   filters on working — those are full-window and would shift the left.
+   Dim only via main.main-surface wash. */
+
+/* ---- Left sidebar: translucent so art shows ---- */
+html[data-bc-active="true"] aside.app-shell-left-panel {
+  background: linear-gradient(
+    90deg,
+    var(--bc-sidebar),
+    var(--bc-main-edge) 100%
+  ) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(8px) saturate(112%) !important;
+}
+
+html[data-bc-active="true"] aside.app-shell-left-panel::after {
+  background: transparent !important;
+}
+
+html[data-bc-active="true"] aside.app-shell-left-panel nav {
+  background: transparent !important;
+}
+
+/* ---- Main surface ---- */
+html[data-bc-active="true"] main.main-surface {
+  position: relative !important;
+  background: linear-gradient(
+    90deg,
+    var(--bc-main-edge),
+    var(--bc-main-mid) 64%,
+    var(--bc-main-far)
+  ) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Task page: ONLY the right column. Stage veil + left aside stay as home
+   so home ↔ project transition is seamless on the sidebar. */
+html[data-bc-active="true"][data-bc-working="true"] main.main-surface {
+  /* Tiny step darker — keep translucent so thread text stays readable. */
+  background: linear-gradient(
+    90deg,
+    rgba(17, 19, 24, 0.90) 0%,
+    rgba(17, 19, 24, 0.80) 64%,
+    rgba(17, 19, 24, 0.70) 100%
+  ) !important;
+  transition: background 240ms ease;
+}
+
+/* No secondary art painted on main — stage owns the picture. */
+html[data-bc-active="true"] main.main-surface::before,
+html[data-bc-active="true"] main.main-surface::after {
+  content: none !important;
+  background-image: none !important;
+  background: transparent !important;
+}
+
+html[data-bc-active="true"] main.main-surface > header.app-header-tint {
+  background: transparent !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Main content frame / scroll fades that paint opaque tokens. */
+html[data-bc-active="true"] main.main-surface .app-shell-main-content-frame,
+html[data-bc-active="true"] main.main-surface .app-shell-main-content-top-fade {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-bc-active="true"] main.main-surface
+  .thread-scroll-container
+  .bg-gradient-to-t.from-token-main-surface-primary {
+  background-image: none !important;
+  background: transparent !important;
+}
+
+/* Home hero card chrome — keep interactive, drop solid fill. */
+html[data-bc-active="true"] main.main-surface
+  [role="main"]:has([data-testid="home-icon"])
+  > div:first-child
+  > div:first-child
+  > div:first-child {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html[data-bc-active="true"] main.main-surface
+  [role="main"]:has([data-testid="home-icon"])
+  > div:first-child
+  > div:first-child
+  > div:first-child::before {
+  content: none !important;
+}
+
+/* role=main region itself */
+html[data-bc-active="true"] main.main-surface [role="main"] {
+  background: transparent !important;
+}
+
+/* ---- Fish mode (摸鱼): content-area wallpaper only ----
+   Hide host chrome content; keep window chrome/titlebar as-is.
+   Zero media rebuild — attribute toggle only. Media at source brightness
+   (no veil, no filter, no panel wash). Stage stays pointer-events:none. */
+html[data-bc-active="true"][data-bc-fish="true"] body > #root {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+html[data-bc-active="true"][data-bc-fish="true"] body >
+  :is([role="dialog"], [aria-modal="true"], [data-radix-portal],
+    [data-radix-popper-content-wrapper]) {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+}
+
+html[data-bc-active="true"][data-bc-fish="true"] #beauticode-bg-stage {
+  z-index: 2147483000 !important;
+}
+
+html[data-bc-active="true"][data-bc-fish="true"] #beauticode-bg-stage::before {
+  opacity: 0 !important;
+  background: none !important;
+}
+
+html[data-bc-active="true"][data-bc-fish="true"] #beauticode-bg-stage img,
+html[data-bc-active="true"][data-bc-fish="true"] #beauticode-bg-stage video {
+  filter: none !important;
+}
+
+/* Ready video must stay fully opaque at native brightness. */
+html[data-bc-active="true"][data-bc-fish="true"][data-bc-media="video"][data-bc-video-ready="true"]
+  #beauticode-bg-stage
+  video {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+/* Hidden file input must never surface. */
+html[data-bc-active="true"][data-bc-fish="true"] #beauticode-video-input {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}

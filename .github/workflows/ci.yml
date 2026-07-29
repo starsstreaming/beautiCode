@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Parse JavaScript entry points
+        run: |
+          node --check apps/tray/session-host.mjs
+          node --check scripts/beauticode.mjs
+          node --check scripts/live-smoke.mjs
+          node --check packages/adapter-codex/src/renderer/background-runtime.js
+      - name: Parse PowerShell launchers
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $scripts = @(
+            "apps/tray/start-tray.ps1",
+            "scripts/start-beauticode-engine.ps1",
+            "scripts/install-desktop-shortcut.ps1"
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+          }
