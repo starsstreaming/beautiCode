@@ -16,7 +16,11 @@
   <strong>工作不一定只能盯着灰色界面。</strong>
 </p>
 
+
 ---
+
+
+<img width="960" height="601" alt="QQ20260729-211119-10MB-1 5x" src="https://github.com/user-attachments/assets/a743dffc-dbe2-48d5-80fa-46a4b5a41dcb" />
 
 ## 它是什么？
 
@@ -40,6 +44,11 @@ beautiCode 是一个 Codex Desktop 背景工具。
 
 你可以继续写代码，也可以让喜欢的画面安静地陪着你。
 
+
+https://github.com/user-attachments/assets/a068e4b0-5705-4ad9-acb1-cfef743263a5
+
+
+
 ---
 
 ## 一边工作，一边看点喜欢的
@@ -62,6 +71,11 @@ beautiCode 可以让你：
 需要声音时，也可以随时打开。
 
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
+
+
+https://github.com/user-attachments/assets/5751a808-455d-4d12-967c-f5c302b77c10
+
+
 
 ---
 
@@ -96,26 +110,6 @@ Ctrl + Shift + Space
 
 ---
 
-## 支持视频背景
-
-beautiCode 对视频并不是简单地“放进去就算完成”。
-
-它会在真实 Codex 窗口中确认视频是否已经成功播放。
-
-切换视频时，旧画面会尽量保留到新视频准备完成，减少黑屏和闪烁。
-
-支持：
-
-* 本地 MP4 视频
-* 视频循环播放
-* 视频声音开关
-* 图片与视频快速切换
-* Codex 重启后自动恢复背景
-* 视频播放失败时保留原来的背景
-* 已保存视频的播放进度记录
-
-
----
 
 ## 保存喜欢的背景
 
@@ -153,6 +147,10 @@ beautiCode 对视频并不是简单地“放进去就算完成”。
 背景不会抢走鼠标，也不会挡住点击。
 
 它更像一层安静的环境，而不是盖在 Codex 上面的播放器。
+
+
+https://github.com/user-attachments/assets/dbb918d3-0ee8-45ae-ba6a-dae558f3590c
+
 
 
 ---
