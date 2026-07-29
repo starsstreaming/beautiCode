@@ -16,9 +16,6 @@
   <strong>工作不一定只能盯着灰色界面。</strong>
 </p>
 
-<img width="1280" height="794" alt="QQ20260729-214857" src="https://github.com/user-attachments/assets/3054438f-cf2e-4d2d-a96a-02784153d5da" />
-
-
 
 ---
 
@@ -49,6 +46,7 @@ beautiCode 是一个 Codex Desktop 背景工具。
 你可以继续写代码，也可以让喜欢的画面安静地陪着你。
 
 
+<img width="1280" height="794" alt="download" src="https://github.com/user-attachments/assets/186162ec-b42a-4846-b2d8-08ab4ad81313" />
 
 
 ---
