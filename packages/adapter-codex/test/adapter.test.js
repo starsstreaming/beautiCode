@@ -591,6 +591,43 @@ test("BeautiSession applies image against mock CDP", async () => {
   }
 });
 
+test("BeautiSession reapply reconnects after CDP browser identity changes", async () => {
+  const mock = await startMockCdp();
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-restart-"));
+  const png = Buffer.from(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
+    "hex",
+  );
+  const imagePath = path.join(root, "a.png");
+  await fs.writeFile(imagePath, png);
+  const errors = [];
+  const session = new BeautiSession({
+    port: mock.port,
+    dataRoot: path.join(root, "data"),
+    verifyDeadlineMs: 5_000,
+    pollMs: 10_000,
+    autoDiscover: false,
+    deferHostConnect: false,
+    onError: (err) => errors.push(err),
+  });
+  try {
+    await session.start();
+    const applied = await session.apply({ type: "image", imagePath });
+    assert.equal(applied.ok, true, applied.ok ? "" : applied.error);
+
+    mock.rotateBrowserIdentity("test-browser-after-restart");
+    const reapplied = await session.reapply();
+
+    assert.equal(reapplied.ok, true, reapplied.ok ? "" : reapplied.error);
+    assert.equal(session.isHostReady, true);
+    assert.equal(errors.length, 0);
+  } finally {
+    await session.stop();
+    await mock.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("BeautiSession stop drains a deferred startup and releases its lock", async () => {
   const mock = await startMockCdp();
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-stop-"));

@@ -24,6 +24,7 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $TrayScript = Join-Path $RepoRoot "apps\tray\start-tray.ps1"
 $CodexAppUserModelId = "OpenAI.Codex_2p2nqsd0c76g0!App"
 $LogPath = Join-Path $env:LOCALAPPDATA "beautiCode\engine-launcher.log"
+$TrayMutexName = "Local\beautiCode.Engine.Tray.v1"
 
 function Write-BcLog([string]$Message) {
   try {
@@ -96,9 +97,25 @@ function Find-BcCdpPortFast([int]$Preferred = 9335) {
   return 0
 }
 
+function Test-BcTrayRunningFast {
+  $mutex = $null
+  try {
+    $mutex = [System.Threading.Mutex]::OpenExisting($TrayMutexName)
+    return $true
+  } catch [System.Threading.WaitHandleCannotBeOpenedException] {
+    return $false
+  } catch {
+    # Fail open: the session-host injector lock still rejects duplicate owners.
+    return $false
+  } finally {
+    if ($null -ne $mutex) {
+      try { $mutex.Dispose() } catch {}
+    }
+  }
+}
+
 function Get-BcTrayPids {
-  # Narrow Get-CimInstance filter is still heavy; use process name + command line
-  # only when ForceRestart needs it.
+  # Win32_Process command-line inspection is intentionally ForceRestart-only.
   $pids = New-Object System.Collections.ArrayList
   try {
     Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'pwsh.exe' OR Name = 'node.exe'" -ErrorAction SilentlyContinue |
@@ -207,12 +224,10 @@ try {
     }
     Start-Sleep -Milliseconds 400
   } else {
-    # Cheap duplicate check: if session-host already listening via our prior
-    # run, avoid Win32_Process scan when possible by looking for node+tray only
-    # when ForceRestart is off and user double-clicks.
-    $existing = @(Get-BcTrayPids)
-    if ($existing.Count -gt 0) {
-      Write-BcLog ("engine already running count={0}" -f $existing.Count)
+    # The tray owns this process-lifetime mutex. Checking it avoids the
+    # 0.3-1.0s Win32_Process scan on every normal launch.
+    if (Test-BcTrayRunningFast) {
+      Write-BcLog "engine already running mutex=True"
       # No modal dialog — tray icon is already the signal. Exit quietly.
       exit 0
     }
@@ -221,23 +236,9 @@ try {
   # 1) Fast CDP probe (preferred port only, ~100–300ms worst case miss).
   $cdpPort = Find-BcCdpPortFast -Preferred $Port
 
-  # 2) If no CDP, kick Codex launch WITHOUT waiting for it — tray starts now.
-  #    session-host deferHostConnect + watch loop will attach when CDP appears.
-  #    Tray "应用或重新应用" can also force launch/restart later.
-  if ($cdpPort -le 0 -and -not $NoLaunchCodex) {
-    Write-BcLog "no CDP yet - launching Codex in parallel with tray"
-    [void](Start-CodexWithCdpFast -CdpPort $Port)
-    # Tiny second chance (~0.6s) in case Codex CDP is already warm from a
-    # previous partial start; do NOT block for a full minute.
-    $deadline = (Get-Date).AddMilliseconds(600)
-    while ((Get-Date) -lt $deadline) {
-      $cdpPort = Find-BcCdpPortFast -Preferred $Port
-      if ($cdpPort -gt 0) { break }
-      Start-Sleep -Milliseconds 120
-    }
-  }
-
-  # 3) Start tray. Port 0 → session-host auto-discovers in background.
+  # 2) Spawn the tray before AppX lookup / Codex cold start. The session-host
+  #    connects in the background, so neither task needs to block tray startup.
+  #    Port 0 → session-host auto-discovers in background.
   # Preserve an explicitly requested port while Codex is still starting.
   $trayPort = if ($cdpPort -gt 0) {
     $cdpPort
@@ -247,6 +248,15 @@ try {
     0
   }
   Start-BcTray -CdpPort $trayPort
+  Write-BcLog ("tray spawned in {0}ms" -f $sw.ElapsedMilliseconds)
+
+  # 3) If no CDP, kick Codex launch after the tray process is already running.
+  #    The session-host watch loop attaches when CDP appears.
+  if ($cdpPort -le 0 -and -not $NoLaunchCodex) {
+    Write-BcLog "no CDP yet - launching Codex after tray spawn"
+    [void](Start-CodexWithCdpFast -CdpPort $Port)
+  }
+
   $sw.Stop()
   Write-BcLog ("launcher done in {0}ms cdp={1}" -f $sw.ElapsedMilliseconds, $cdpPort)
   exit 0
