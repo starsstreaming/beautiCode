@@ -61,6 +61,17 @@ test("validateVideoFile enforces extension, size, ftyp, no symlink", async () =>
       await fs.symlink(good, link);
       await assert.rejects(() => validateVideoFile(link), /symbolic link/);
     }
+
+    const linkedRoot = path.join(root, "linked-root");
+    await fs.symlink(
+      root,
+      linkedRoot,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await assert.rejects(
+      () => validateVideoFile(path.join(linkedRoot, "background.mp4")),
+      /symbolic link|reparse point/,
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

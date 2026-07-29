@@ -29,6 +29,22 @@ export class MediaValidationError extends Error {
   }
 }
 
+async function assertNoSymbolicLinkSegments(filePath: string): Promise<void> {
+  const root = path.parse(filePath).root;
+  const relative = path.relative(root, filePath);
+  let current = root;
+  for (const segment of relative.split(path.sep)) {
+    if (!segment) continue;
+    current = path.join(current, segment);
+    const segmentStat = await fs.lstat(current);
+    if (segmentStat.isSymbolicLink()) {
+      throw new MediaValidationError(
+        "Media path must not traverse a symbolic link or reparse point.",
+      );
+    }
+  }
+}
+
 export function isMp4Container(
   bytes: Uint8Array,
   totalSize: number = bytes?.byteLength ?? 0,
@@ -65,11 +81,9 @@ async function assertRegularFile(filePath: string): Promise<{
     return process.platform === "win32" ? resolved.toLowerCase() : resolved;
   };
   if (normalizeForCompare(realPath) !== normalizeForCompare(resolvedInput)) {
-    // realpath changed the path: an intermediate link or reparse point was
-    // traversed. The leaf-link case was rejected above.
-    throw new MediaValidationError(
-      "Media path must not traverse a symbolic link or reparse point.",
-    );
+    // realpath can also expand a harmless Windows 8.3 path alias. Inspect each
+    // segment so only an actual symlink or junction is rejected.
+    await assertNoSymbolicLinkSegments(resolvedInput);
   }
   const stat = await fs.stat(realPath);
   if (!stat.isFile()) {
