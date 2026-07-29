@@ -1,4 +1,5 @@
 # beautiCode
+<img width="200" height="200" alt="beautiCode_icon_200x200" src="https://github.com/user-attachments/assets/d4fc7131-3ae5-49a7-b471-45c0a7ae982a" />
 
 <p align="center">
   <strong>把你喜欢的画面，放进vibeCoding的每一分钟。</strong>
