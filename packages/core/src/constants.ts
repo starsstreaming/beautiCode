@@ -3,7 +3,7 @@ export const SCHEMA_ID = "beauticode.background/v1" as const;
 // Images are embedded into one CDP Runtime.evaluate payload. Keep validation
 // and injection limits identical so an accepted import is always publishable.
 export const MAX_IMAGE_BYTES = 18 * 1024 * 1024;
-export const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 800 * 1024 * 1024;
 
 /**
  * Max raw media bytes embedded as a data: URL inside one CDP evaluate.
