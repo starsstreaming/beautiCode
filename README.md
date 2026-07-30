@@ -72,6 +72,11 @@ beautiCode 可以让你：
 
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
 
+### v0.1 安装包
+
+想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v0.1)。
+安装包自带运行时，不需要另外安装 Node.js 或 npm；使用前请先安装 Codex Desktop。
+
 
 
 ---
