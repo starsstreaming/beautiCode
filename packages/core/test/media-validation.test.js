@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { MAX_VIDEO_BYTES } from "../dist/constants.js";
 import {
   assertSafeBasename,
   isMp4Container,
@@ -71,6 +72,23 @@ test("validateVideoFile enforces extension, size, ftyp, no symlink", async () =>
     await assert.rejects(
       () => validateVideoFile(path.join(linkedRoot, "background.mp4")),
       /symbolic link|reparse point/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validateVideoFile defaults to an 800 MiB limit", async () => {
+  assert.equal(MAX_VIDEO_BYTES, 800 * 1024 * 1024);
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-video-limit-"));
+  try {
+    const oversized = path.join(root, "oversized.mp4");
+    await fs.writeFile(oversized, mp4Fixture());
+    await fs.truncate(oversized, MAX_VIDEO_BYTES + 1);
+    await assert.rejects(
+      () => validateVideoFile(oversized),
+      /no larger than 838860800 bytes/,
     );
   } finally {
     await fs.rm(root, { recursive: true, force: true });

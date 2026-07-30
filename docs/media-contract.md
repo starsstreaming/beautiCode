@@ -57,7 +57,7 @@ Rules:
 | Extension | `.mp4` only |
 | Type | regular file after `lstat` + `realpath` |
 | Symlink / reparse | rejected |
-| Size | `1 byte … 500 MiB` |
+| Size | `1 byte … 800 MiB` |
 | Container | first ISO-BMFF box size sane and type `ftyp` |
 | Companion image | required |
 
