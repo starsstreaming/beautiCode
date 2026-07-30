@@ -583,6 +583,23 @@ test("data root ownership adopts a valid legacy active manifest", async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+test("data root tolerates launcher logs created before the ownership marker", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-root-log-"));
+  await fs.writeFile(path.join(root, "engine-launcher.log"), "old launcher\n", "utf8");
+  await fs.mkdir(path.join(root, "logs"));
+  await fs.writeFile(path.join(root, "logs", "tray.log"), "old tray\n", "utf8");
+
+  const store = new BackgroundStore({ root });
+  const manifest = await store.readActiveManifest();
+  assert.equal(manifest.background, null);
+  assert.equal(
+    JSON.parse(await fs.readFile(path.join(root, ".beauticode-root.json"), "utf8")).schema,
+    "beauticode.data-root/v1",
+  );
+
+  await fs.rm(root, { recursive: true, force: true });
+});
+
 test("saved theme quota and deletion are enforced", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-theme-quota-"));
   const fixtures = path.join(root, "fixtures");

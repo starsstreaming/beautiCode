@@ -723,6 +723,10 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
   assert.match(runtime, /setMuted/);
   assert.match(runtime, /isMuted/);
   assert.match(runtime, /applyMutePreference/);
+  assert.match(css, /data-bc-tone/);
+  assert.match(css, /prefers-color-scheme: light/);
+  assert.match(runtime, /setBackgroundTone/);
+  assert.match(runtime, /data-bc-tone/);
   assert.match(runtime, /getPlaybackPosition/);
   assert.match(runtime, /seekTo/);
   assert.match(runtime, /startAt/);
@@ -769,6 +773,44 @@ test("BeautiSession video mute defaults on and toggles without rebuild", async (
     assert.equal(session.isVideoMuted, true);
     const st1 = await session.status();
     assert.equal(st1.muted, true);
+  } finally {
+    await session.stop();
+    await mock.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("BeautiSession background tone changes CSS only and survives publish", async () => {
+  const mock = await startMockCdp();
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-tone-"));
+  const png = Buffer.from(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
+    "hex",
+  );
+  const imagePath = path.join(root, "a.png");
+  await fs.writeFile(imagePath, png);
+  const session = new BeautiSession({
+    port: mock.port,
+    dataRoot: path.join(root, "data"),
+    verifyDeadlineMs: 5_000,
+    pollMs: 200,
+    autoDiscover: false,
+    deferHostConnect: false,
+  });
+  try {
+    await session.start();
+    const applied = await session.apply({ type: "image", imagePath });
+    assert.equal(applied.ok, true, applied.ok ? "" : applied.error);
+    const generation = applied.generation;
+
+    const light = await session.setBackgroundTone("light");
+    assert.equal(light.ok, true, light.ok ? "" : light.error);
+    assert.equal(light.tone, "light");
+    const auto = await session.setBackgroundTone("auto");
+    assert.equal(auto.ok, true, auto.ok ? "" : auto.error);
+    const status = await session.status();
+    assert.equal(status.tone, "auto");
+    assert.equal(status.manifest.generation, generation);
   } finally {
     await session.stop();
     await mock.close();

@@ -208,6 +208,21 @@
     videoMuted = true;
   }
 
+  // Background tone is a CSS-only preference. Keep dark as the legacy
+  // default, and carry the preference across same-generation/rebuild paths.
+  const normalizeTone = (value) =>
+    value === "light" || value === "auto" ? value : "dark";
+  let backgroundTone = "dark";
+  try {
+    if (previous && typeof previous.getBackgroundTone === "function") {
+      backgroundTone = normalizeTone(previous.getBackgroundTone());
+    } else {
+      backgroundTone = normalizeTone(root.getAttribute("data-bc-tone"));
+    }
+  } catch (_) {
+    backgroundTone = "dark";
+  }
+
   // Optional initial seek for saved-theme restore (seconds). Applied once when
   // the live <video> has metadata. Invalid / past end → 0 (start over).
   let pendingStartAt = null;
@@ -712,6 +727,13 @@
     };
   };
 
+  const setBackgroundTone = (tone) => {
+    if (!isCurrent()) return false;
+    backgroundTone = normalizeTone(tone);
+    setAttrs();
+    return true;
+  };
+
   /**
    * Clamp a desired seek time against live duration.
    * Invalid / NaN / negative / past end → 0 (start over, per product rule).
@@ -842,6 +864,7 @@
       root.removeAttribute("data-bc-generation");
       root.removeAttribute("data-bc-working");
       root.removeAttribute("data-bc-fish");
+      root.removeAttribute("data-bc-tone");
       fishMode = false;
       stopWorkingWatch();
       return;
@@ -866,6 +889,7 @@
       videoReady || handoffReady ? "true" : "false",
     );
     root.setAttribute("data-bc-generation", String(gen));
+    root.setAttribute("data-bc-tone", backgroundTone);
     if (working) root.setAttribute("data-bc-working", "true");
     else root.removeAttribute("data-bc-working");
     applyFishAttr();
@@ -1756,6 +1780,7 @@
         root.removeAttribute("data-bc-generation");
         root.removeAttribute("data-bc-working");
         root.removeAttribute("data-bc-fish");
+        root.removeAttribute("data-bc-tone");
         fishMode = false;
       }
       // handoff: leave data-bc-fish for the next generation to inherit.
@@ -1771,6 +1796,12 @@
     },
     setMuted(muted) {
       return setMuted(muted);
+    },
+    isBackgroundTone() {
+      return backgroundTone;
+    },
+    setBackgroundTone(tone) {
+      return setBackgroundTone(tone);
     },
     /** Re-apply stored mute preference (used after CDP attach / heal). */
     applyMutePreference() {

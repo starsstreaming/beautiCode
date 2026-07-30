@@ -58,3 +58,15 @@ this pipeline for a commercial distribution.
 The installer targets x64-compatible Windows. It does not bundle, patch, or
 modify Codex Desktop. Runtime integration still depends on Codex exposing a
 healthy loopback CDP endpoint.
+
+The current bundled Node.js runtime requires 64-bit Windows 10 version 1809
+(build 17763) or newer. Codex Desktop must be installed separately. If Codex
+was already running without loopback CDP, use the tray's “Apply or re-apply”
+action; it will restart Codex only after the normal confirmation prompt.
+
+Startup diagnostics are written to:
+
+```text
+%LOCALAPPDATA%\beautiCode\logs\engine-launcher.log
+%LOCALAPPDATA%\beautiCode\logs\tray.log
+```

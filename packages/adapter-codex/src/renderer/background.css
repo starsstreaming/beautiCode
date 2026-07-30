@@ -7,6 +7,89 @@
   --bc-main-edge: rgba(17, 19, 24, 0.40);
   --bc-main-mid: rgba(17, 19, 24, 0.26);
   --bc-main-far: rgba(17, 19, 24, 0.12);
+  /* Keep the original dark treatment as the compatibility default. */
+  --bc-stage-veil:
+    linear-gradient(
+      180deg,
+      rgba(17, 19, 24, 0.10) 0%,
+      rgba(17, 19, 24, 0.18) 36%,
+      rgba(17, 19, 24, 0.42) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(17, 19, 24, 0.34) 0%,
+      rgba(17, 19, 24, 0.14) 52%,
+      rgba(17, 19, 24, 0.06) 100%
+    );
+  --bc-video-filter: brightness(1.08) saturate(1.03);
+  --bc-working-main:
+    linear-gradient(
+      90deg,
+      rgba(17, 19, 24, 0.90) 0%,
+      rgba(17, 19, 24, 0.80) 64%,
+      rgba(17, 19, 24, 0.70) 100%
+    );
+}
+
+/* Light background mode: use bright translucent glass layers so the image
+   remains visible. It only changes beautiCode's overlay, not Codex's native
+   application theme or text colors. */
+html[data-bc-tone="light"] {
+  --bc-sidebar: rgba(255, 255, 255, 0.56);
+  --bc-main-edge: rgba(255, 255, 255, 0.44);
+  --bc-main-mid: rgba(255, 255, 255, 0.30);
+  --bc-main-far: rgba(255, 255, 255, 0.16);
+  --bc-stage-veil:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.06) 0%,
+      rgba(255, 255, 255, 0.12) 36%,
+      rgba(255, 255, 255, 0.24) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.18) 0%,
+      rgba(255, 255, 255, 0.10) 52%,
+      rgba(255, 255, 255, 0.04) 100%
+    );
+  --bc-video-filter: brightness(0.98) saturate(0.96);
+  --bc-working-main:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.68) 0%,
+      rgba(255, 255, 255, 0.54) 64%,
+      rgba(255, 255, 255, 0.40) 100%
+    );
+}
+
+@media (prefers-color-scheme: light) {
+  html[data-bc-tone="auto"] {
+    --bc-sidebar: rgba(255, 255, 255, 0.56);
+    --bc-main-edge: rgba(255, 255, 255, 0.44);
+    --bc-main-mid: rgba(255, 255, 255, 0.30);
+    --bc-main-far: rgba(255, 255, 255, 0.16);
+    --bc-stage-veil:
+      linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.06) 0%,
+        rgba(255, 255, 255, 0.12) 36%,
+        rgba(255, 255, 255, 0.24) 100%
+      ),
+      linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.18) 0%,
+        rgba(255, 255, 255, 0.10) 52%,
+        rgba(255, 255, 255, 0.04) 100%
+      );
+    --bc-video-filter: brightness(0.98) saturate(0.96);
+    --bc-working-main:
+      linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.68) 0%,
+        rgba(255, 255, 255, 0.54) 64%,
+        rgba(255, 255, 255, 0.40) 100%
+      );
+  }
 }
 
 /* Clear opaque page backdrops so the fixed stage can show through. */
@@ -48,19 +131,7 @@ html[data-bc-active="true"] body >
   z-index: 3;
   pointer-events: none;
   /* Soft readability veil over art (Dream-Skin task shade/fade simplified). */
-  background:
-    linear-gradient(
-      180deg,
-      rgba(17, 19, 24, 0.10) 0%,
-      rgba(17, 19, 24, 0.18) 36%,
-      rgba(17, 19, 24, 0.42) 100%
-    ),
-    linear-gradient(
-      90deg,
-      rgba(17, 19, 24, 0.34) 0%,
-      rgba(17, 19, 24, 0.14) 52%,
-      rgba(17, 19, 24, 0.06) 100%
-    );
+  background: var(--bc-stage-veil);
 }
 
 #beauticode-bg-stage img,
@@ -86,7 +157,7 @@ html[data-bc-active="true"] body >
      Pending replacements stay opacity:0 via inline style so a handed-off
      previous video (no inline opacity) can remain visible underneath. */
   opacity: 0;
-  filter: brightness(1.08) saturate(1.03);
+  filter: var(--bc-video-filter);
 }
 
 /* Ready video: CSS reveals elements that cleared their inline opacity:0. */
@@ -167,12 +238,7 @@ html[data-bc-active="true"] main.main-surface {
    so home ↔ project transition is seamless on the sidebar. */
 html[data-bc-active="true"][data-bc-working="true"] main.main-surface {
   /* Tiny step darker — keep translucent so thread text stays readable. */
-  background: linear-gradient(
-    90deg,
-    rgba(17, 19, 24, 0.90) 0%,
-    rgba(17, 19, 24, 0.80) 64%,
-    rgba(17, 19, 24, 0.70) 100%
-  ) !important;
+  background: var(--bc-working-main) !important;
   transition: background 240ms ease;
 }
 

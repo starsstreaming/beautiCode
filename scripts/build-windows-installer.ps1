@@ -207,6 +207,7 @@ foreach ($relativeFile in @(
     "apps\tray\session-host.mjs",
     "apps\tray\start-tray.ps1",
     "assets\beauticode-icon-borderless.png",
+    "scripts\codex-launch.ps1",
     "scripts\start-beauticode-engine.ps1",
     "packages\core\package.json",
     "packages\adapter-codex\package.json",

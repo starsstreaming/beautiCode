@@ -1,3 +1,5 @@
+#pragma codepage "utf-8"
+
 #define MyAppName "beautiCode"
 #define MyAppPublisher "beautiCode"
 
@@ -22,6 +24,7 @@ DefaultDirName={localappdata}\Programs\beautiCode
 DefaultGroupName=beautiCode
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+MinVersion=10.0.17763
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
