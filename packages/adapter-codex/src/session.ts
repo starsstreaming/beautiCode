@@ -210,13 +210,34 @@ export class BeautiSession {
         this.host = this.createHost(this.port);
         this.detachedVideoKey = "";
       }
-      if (this.host.activeSessionCount === 0) {
-        await this.host.connect();
-      } else {
-        await this.host.reconcileSessions();
+      const connectCurrentHost = async () => {
+        if (!this.host) throw new CdpError("Host is not connected");
         if (this.host.activeSessionCount === 0) {
           await this.host.connect();
+        } else {
+          await this.host.reconcileSessions();
+          if (this.host.activeSessionCount === 0) {
+            await this.host.connect();
+          }
         }
+      };
+
+      try {
+        await connectCurrentHost();
+      } catch (err) {
+        if (!(err instanceof CdpIdentityMismatchError) || this.port == null) {
+          throw err;
+        }
+
+        // A normal Codex restart keeps the loopback port but replaces the
+        // Chromium browser identity. Drop every stale target and bind once to
+        // the freshly probed browser so the triggering user action can finish.
+        this.onStatus?.(`Codex CDP restarted on :${this.port}; reconnecting…`);
+        this.host?.close();
+        this.host = this.createHost(this.port);
+        this.detachedVideoKey = "";
+        this.lastPublishSessionKey = "";
+        await connectCurrentHost();
       }
       if (this.closed) {
         this.host.close();

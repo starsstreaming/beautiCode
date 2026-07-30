@@ -8,7 +8,7 @@ import { WebSocketServer } from "ws";
  */
 
 export async function startMockCdp(opts = {}) {
-  const browserId = "test-browser";
+  let browserId = "test-browser";
   const pageId = "page-test";
   const state = {
     body: true,
@@ -344,9 +344,15 @@ export async function startMockCdp(opts = {}) {
 
   return {
     port,
-    browserId,
+    get browserId() {
+      return browserId;
+    },
     pageId,
     state,
+    rotateBrowserIdentity(nextId = `test-browser-${Date.now()}`) {
+      browserId = nextId;
+      return browserId;
+    },
     setEvaluateImpl(fn) {
       evaluateImpl = fn;
     },

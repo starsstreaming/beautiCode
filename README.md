@@ -73,6 +73,11 @@ beautiCode 可以让你：
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
 <img width="1920" height="1240" alt="QQ20260729-212506-HD" src="https://github.com/user-attachments/assets/ca0ef07f-2aec-46b0-b996-1db9913efa6d" />
 
+### v0.1 安装包
+
+想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v0.1)。
+安装包自带运行时，不需要另外安装 Node.js 或 npm；使用前请先安装 Codex Desktop。
+
 
 
 ---
@@ -153,18 +158,42 @@ Ctrl + Shift + Space
 
 ## 使用方式
 
-### 运行托盘程序
+### Windows 安装包（推荐）
 
-目前版本需要安装 Node.js 22 或更高版本。
+运行：
 
-在项目目录执行：
+```text
+beautiCode-Setup-0.1.0-win-x64.exe
+```
+
+安装包自带 Node.js 运行时。使用者不需要安装 Node.js、npm，也不需要保留
+项目源码。安装完成后启动 beautiCode，Windows 右下角会出现托盘图标；
+如果 Codex Desktop 尚未启动，引擎会尝试启动并连接它。
+
+当前安装包尚未进行商业代码签名，Windows 可能显示 SmartScreen 提示。
+用户导入的图片、视频和已保存主题位于
+`%LOCALAPPDATA%\beautiCode`，卸载程序默认保留这些数据。
+
+### 从源码运行
+
+源码开发需要 Node.js 22 或更高版本。在项目目录执行：
 
 ```bash
 npm install
 npm run tray
 ```
 
-启动后，Windows 右下角会出现 beautiCode 托盘图标。
+构建 Windows 安装包：
+
+```powershell
+npm run installer:windows
+```
+
+输出位于：
+
+```text
+artifacts\windows\installer\
+```
 
 通过托盘菜单可以：
 

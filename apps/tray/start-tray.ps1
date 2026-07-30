@@ -2,10 +2,25 @@
 param(
   [int]$Port = 0,
   [string]$DataRoot = "",
+  [string]$NodePath = "",
   [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
+
+$script:trayInstanceMutex = $null
+$script:trayInstanceMutexOwned = $false
+$createdNew = $false
+$script:trayInstanceMutex = [System.Threading.Mutex]::new(
+  $true,
+  "Local\beautiCode.Engine.Tray.v1",
+  [ref]$createdNew
+)
+if (-not $createdNew) {
+  $script:trayInstanceMutex.Dispose()
+  exit 0
+}
+$script:trayInstanceMutexOwned = $true
 
 $dpiNativeCode = @'
 using System;
@@ -53,9 +68,138 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
+if (-not ("BeautiCodeToggle" -as [type])) {
+  $toggleCode = @'
+using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Windows.Forms;
+
+public sealed class BeautiCodeToggle : Control {
+  private bool isChecked;
+
+  public BeautiCodeToggle() {
+    SetStyle(
+      ControlStyles.AllPaintingInWmPaint |
+      ControlStyles.OptimizedDoubleBuffer |
+      ControlStyles.ResizeRedraw |
+      ControlStyles.UserPaint,
+      true
+    );
+    Cursor = Cursors.Hand;
+    TabStop = true;
+  }
+
+  public bool Checked {
+    get { return isChecked; }
+    set {
+      if (isChecked == value) return;
+      isChecked = value;
+      Invalidate();
+    }
+  }
+
+  public Color TrackOnColor { get; set; }
+  public Color TrackOffColor { get; set; }
+  public Color BorderOnColor { get; set; }
+  public Color BorderOffColor { get; set; }
+  public Color KnobColor { get; set; }
+
+  private static GraphicsPath RoundedRect(RectangleF rect) {
+    float diameter = rect.Height;
+    GraphicsPath path = new GraphicsPath();
+    path.AddArc(rect.Left, rect.Top, diameter, diameter, 90, 180);
+    path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 180);
+    path.CloseFigure();
+    return path;
+  }
+
+  protected override void OnPaint(PaintEventArgs e) {
+    base.OnPaint(e);
+    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+    e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+    RectangleF track = new RectangleF(
+      0.75f,
+      0.75f,
+      Math.Max(1f, ClientSize.Width - 1.5f),
+      Math.Max(1f, ClientSize.Height - 1.5f)
+    );
+    Color trackColor = isChecked ? TrackOnColor : TrackOffColor;
+    Color borderColor = isChecked ? BorderOnColor : BorderOffColor;
+
+    using (GraphicsPath path = RoundedRect(track))
+    using (SolidBrush trackBrush = new SolidBrush(trackColor))
+    using (Pen borderPen = new Pen(borderColor, 1f)) {
+      e.Graphics.FillPath(trackBrush, path);
+      e.Graphics.DrawPath(borderPen, path);
+    }
+
+    float inset = Math.Max(3f, track.Height * 0.14f);
+    float knobSize = Math.Max(8f, track.Height - (inset * 2f));
+    float knobX = isChecked
+      ? track.Right - inset - knobSize
+      : track.Left + inset;
+    RectangleF knob = new RectangleF(
+      knobX,
+      track.Top + inset,
+      knobSize,
+      knobSize
+    );
+    RectangleF shadow = knob;
+    shadow.Y += Math.Max(1f, track.Height * 0.04f);
+
+    using (SolidBrush shadowBrush = new SolidBrush(Color.FromArgb(58, 0, 0, 0)))
+    using (SolidBrush knobBrush = new SolidBrush(KnobColor)) {
+      e.Graphics.FillEllipse(shadowBrush, shadow);
+      e.Graphics.FillEllipse(knobBrush, knob);
+    }
+
+    if (Focused && ShowFocusCues) {
+      Rectangle focus = ClientRectangle;
+      focus.Inflate(-2, -2);
+      ControlPaint.DrawFocusRectangle(e.Graphics, focus);
+    }
+  }
+
+  protected override void OnKeyDown(KeyEventArgs e) {
+    if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter) {
+      OnClick(EventArgs.Empty);
+      e.Handled = true;
+      e.SuppressKeyPress = true;
+      return;
+    }
+    base.OnKeyDown(e);
+  }
+}
+'@
+  Add-Type -TypeDefinition $toggleCode -ReferencedAssemblies @(
+    "System.Drawing",
+    "System.Windows.Forms"
+  ) -ErrorAction Stop
+}
+
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $HostScript = Join-Path $PSScriptRoot "session-host.mjs"
-$Node = (Get-Command node -ErrorAction Stop).Source
+$ReleaseManifest = Join-Path $RepoRoot "release-manifest.json"
+$BundledNode = Join-Path $RepoRoot "runtime\node.exe"
+$coreDist = Join-Path $RepoRoot "packages\core\dist\index.js"
+$adapterDist = Join-Path $RepoRoot "packages\adapter-codex\dist\index.js"
+
+if ($NodePath) {
+  if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+    throw ("Node executable not found: {0}" -f $NodePath)
+  }
+  $Node = (Resolve-Path -LiteralPath $NodePath).Path
+} elseif (Test-Path -LiteralPath $BundledNode -PathType Leaf) {
+  $Node = $BundledNode
+} else {
+  $Node = (Get-Command node -ErrorAction Stop).Source
+}
+
+if (Test-Path -LiteralPath $ReleaseManifest -PathType Leaf) {
+  $SkipBuild = $true
+}
 
 # Known ChatGPT / Codex Desktop AppX application user model id (Windows).
 $script:CodexAppUserModelId = "OpenAI.Codex_2p2nqsd0c76g0!App"
@@ -67,8 +211,6 @@ if (-not (Test-Path -LiteralPath $HostScript)) {
 if (-not $SkipBuild) {
   # Only build when dist is missing — full npm build on every tray start was a
   # multi-second tax. Development rebuilds: npm run build / npm run tray.
-  $coreDist = Join-Path $RepoRoot "packages\core\dist\index.js"
-  $adapterDist = Join-Path $RepoRoot "packages\adapter-codex\dist\index.js"
   $needBuild = -not ((Test-Path -LiteralPath $coreDist) -and (Test-Path -LiteralPath $adapterDist))
   if (-not $needBuild) {
     $distCutoff = @(
@@ -109,6 +251,12 @@ if (-not $SkipBuild) {
     } finally {
       Pop-Location
     }
+  }
+}
+
+foreach ($requiredRuntimeFile in @($HostScript, $coreDist, $adapterDist)) {
+  if (-not (Test-Path -LiteralPath $requiredRuntimeFile -PathType Leaf)) {
+    throw ("Missing beautiCode runtime file: {0}" -f $requiredRuntimeFile)
   }
 }
 
@@ -1445,14 +1593,19 @@ function Add-BcSwitchRow {
   $row.Cursor = [System.Windows.Forms.Cursors]::Hand
   $titleLabel = New-BcUiLabel -Text $Title -X 12 -Y 7 -Width 205 -Height 28 `
     -Font $script:bcBodyFont -Color $script:bcUiColors.Text
-  $stateLabel = New-BcUiLabel -Text "" -X 220 -Y 7 -Width 104 -Height 28 `
+  $stateLabel = New-BcUiLabel -Text "" -X 218 -Y 7 -Width 96 -Height 28 `
     -Font $script:bcMetaFont -Color $script:bcUiColors.Muted `
     -Align ([System.Drawing.ContentAlignment]::MiddleRight)
-  $toggle = New-BcUiButton -Text ([string][char]0x25CF) -X 334 -Y 11 -Width 38 -Height 20 `
-    -Font $script:bcToggleFont -BackColor $script:bcUiColors.ToggleOff `
-    -ForeColor $script:bcUiColors.ToggleKnob -BorderColor $script:bcUiColors.ToggleOff `
-    -Align ([System.Drawing.ContentAlignment]::MiddleLeft)
-  $toggle.FlatAppearance.BorderSize = 0
+  $toggle = New-Object BeautiCodeToggle
+  $toggle.Location = New-Object System.Drawing.Point(326, 9)
+  $toggle.Size = New-Object System.Drawing.Size(48, 24)
+  $toggle.BackColor = $script:bcUiColors.Panel
+  $toggle.TrackOnColor = $script:bcUiColors.JadeDeep
+  $toggle.TrackOffColor = $script:bcUiColors.ToggleOff
+  $toggle.BorderOnColor = $script:bcUiColors.Jade
+  $toggle.BorderOffColor = $script:bcUiColors.ToggleOffBorder
+  $toggle.KnobColor = $script:bcUiColors.ToggleKnob
+  $toggle.AccessibleName = $Title
   Register-BcPanelAction -Control $row -ActionName $ActionName
   Register-BcPanelAction -Control $titleLabel -ActionName $ActionName
   Register-BcPanelAction -Control $stateLabel -ActionName $ActionName
@@ -1461,7 +1614,6 @@ function Add-BcSwitchRow {
   [void]$row.Controls.Add($stateLabel)
   [void]$row.Controls.Add($toggle)
   [void]$Parent.Controls.Add($row)
-  Set-BcRoundedRegion -Control $toggle -Radius 10
   return @{
     Panel = $row
     State = $stateLabel
@@ -1623,21 +1775,13 @@ function Update-BcTrayPanel {
 
   $fishOn = [bool]$script:fishMode
   $script:bcFishSwitch.State.Text = if ($fishOn) { $L.EnabledLabel } else { $L.DisabledLabel }
-  $script:bcFishSwitch.Toggle.BackColor = if ($fishOn) { $script:bcUiColors.JadeDeep } else { $script:bcUiColors.ToggleOff }
-  $script:bcFishSwitch.Toggle.TextAlign = if ($fishOn) {
-    [System.Drawing.ContentAlignment]::MiddleRight
-  } else {
-    [System.Drawing.ContentAlignment]::MiddleLeft
-  }
+  $script:bcFishSwitch.State.ForeColor = if ($fishOn) { $script:bcUiColors.Jade } else { $script:bcUiColors.Muted }
+  $script:bcFishSwitch.Toggle.Checked = $fishOn
 
   $soundOn = -not [bool]$script:videoMuted
   $script:bcSoundSwitch.State.Text = if ($soundOn) { $L.EnabledLabel } else { $L.DisabledLabel }
-  $script:bcSoundSwitch.Toggle.BackColor = if ($soundOn) { $script:bcUiColors.JadeDeep } else { $script:bcUiColors.ToggleOff }
-  $script:bcSoundSwitch.Toggle.TextAlign = if ($soundOn) {
-    [System.Drawing.ContentAlignment]::MiddleRight
-  } else {
-    [System.Drawing.ContentAlignment]::MiddleLeft
-  }
+  $script:bcSoundSwitch.State.ForeColor = if ($soundOn) { $script:bcUiColors.Jade } else { $script:bcUiColors.Muted }
+  $script:bcSoundSwitch.Toggle.Checked = $soundOn
 
   $savedItem = Get-BcMenuItem -Name "themes"
   $themeText = $L.NoSavedThemes
@@ -1725,6 +1869,41 @@ public static class BeautiCodeUiNative {
 '@
     Add-Type -TypeDefinition $nativeCode -ErrorAction Stop
   }
+
+  $assetPath = [System.IO.Path]::GetFullPath(
+    (Join-Path $PSScriptRoot "..\..\assets\beauticode-icon-borderless.png")
+  )
+  if (Test-Path -LiteralPath $assetPath -PathType Leaf) {
+    $source = $null
+    $assetBitmap = $null
+    $assetGraphics = $null
+    try {
+      $source = [System.Drawing.Image]::FromFile($assetPath)
+      $assetBitmap = New-Object System.Drawing.Bitmap(32, 32)
+      $assetGraphics = [System.Drawing.Graphics]::FromImage($assetBitmap)
+      $assetGraphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+      $assetGraphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+      $assetGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $assetGraphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+      $assetGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+      $assetGraphics.Clear([System.Drawing.Color]::Transparent)
+      $assetGraphics.DrawImage($source, 0, 0, 32, 32)
+
+      $handle = $assetBitmap.GetHicon()
+      try {
+        return ([System.Drawing.Icon]::FromHandle($handle).Clone())
+      } finally {
+        [void][BeautiCodeUiNative]::DestroyIcon($handle)
+      }
+    } catch {
+      # Keep the generated glyph below as a fail-soft fallback.
+    } finally {
+      if ($null -ne $assetGraphics) { $assetGraphics.Dispose() }
+      if ($null -ne $assetBitmap) { $assetBitmap.Dispose() }
+      if ($null -ne $source) { $source.Dispose() }
+    }
+  }
+
   $bitmap = New-Object System.Drawing.Bitmap(32, 32)
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   $brush = New-Object System.Drawing.SolidBrush($script:bcUiColors.Panel)
@@ -1757,6 +1936,41 @@ public static class BeautiCodeUiNative {
   }
 }
 
+function New-BcHeaderMark {
+  $assetPath = [System.IO.Path]::GetFullPath(
+    (Join-Path $PSScriptRoot "..\..\assets\beauticode-icon-borderless.png")
+  )
+  if (Test-Path -LiteralPath $assetPath -PathType Leaf) {
+    $source = $null
+    $iconImage = $null
+    try {
+      $source = [System.Drawing.Image]::FromFile($assetPath)
+      $iconImage = $source.Clone()
+      $mark = New-Object System.Windows.Forms.PictureBox
+      $mark.Location = New-Object System.Drawing.Point(18, 16)
+      $mark.Size = New-Object System.Drawing.Size(39, 39)
+      $mark.BackColor = [System.Drawing.Color]::Transparent
+      $mark.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom
+      $mark.Image = $iconImage
+      $script:bcHeaderIconImage = $iconImage
+      $iconImage = $null
+      return $mark
+    } catch {
+      # Keep the generated glyph below as a fail-soft fallback.
+    } finally {
+      if ($null -ne $iconImage) { $iconImage.Dispose() }
+      if ($null -ne $source) { $source.Dispose() }
+    }
+  }
+
+  $mark = New-BcUiLabel -Text (U "7F8E") -X 18 -Y 16 -Width 39 -Height 39 `
+    -Font $script:bcDisplayFont -Color $script:bcUiColors.Jade `
+    -Align ([System.Drawing.ContentAlignment]::MiddleCenter)
+  $mark.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+  Set-BcRoundedRegion -Control $mark -Radius 19
+  return $mark
+}
+
 function Initialize-BcTrayPanel {
   $systemDpi = [Math]::Max(96, [BeautiCodeDpiNative]::SystemDpi())
   $script:bcGeometryScale = 0.86 * ($systemDpi / 96.0)
@@ -1771,8 +1985,9 @@ function Initialize-BcTrayPanel {
     Jade = Get-BcUiColor "#86AA91"
     JadeDeep = Get-BcUiColor "#496854"
     Copper = Get-BcUiColor "#B98265"
-    ToggleOff = Get-BcUiColor "#555A53"
-    ToggleKnob = Get-BcUiColor "#D4D7D1"
+    ToggleOff = Get-BcUiColor "#4F554E"
+    ToggleOffBorder = Get-BcUiColor "#737A71"
+    ToggleKnob = Get-BcUiColor "#F1F3EE"
   }
 
   $displayFamily = "KaiTi"
@@ -1782,7 +1997,6 @@ function Initialize-BcTrayPanel {
   $script:bcBodyStrongFont = New-Object System.Drawing.Font("Microsoft YaHei UI", 10, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
   $script:bcMetaFont = New-Object System.Drawing.Font("Microsoft YaHei UI", 9, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
   $script:bcSectionFont = New-Object System.Drawing.Font("Microsoft YaHei UI", 8.5, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
-  $script:bcToggleFont = New-Object System.Drawing.Font("Segoe UI Symbol", 9, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
   $script:bcIconFont = New-Object System.Drawing.Font($displayFamily, 15, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
 
   $form = New-Object System.Windows.Forms.Form
@@ -1809,12 +2023,8 @@ function Initialize-BcTrayPanel {
   $header.BackColor = $script:bcUiColors.Panel
   [void]$root.Controls.Add($header)
 
-  $mark = New-BcUiLabel -Text (U "7F8E") -X 18 -Y 16 -Width 39 -Height 39 `
-    -Font $script:bcDisplayFont -Color $script:bcUiColors.Jade `
-    -Align ([System.Drawing.ContentAlignment]::MiddleCenter)
-  $mark.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+  $mark = New-BcHeaderMark
   [void]$header.Controls.Add($mark)
-  Set-BcRoundedRegion -Control $mark -Radius 19
 
   $brand = New-BcUiLabel -Text $L.AppName -X 69 -Y 12 -Width 205 -Height 31 `
     -Font $script:bcBrandFont -Color $script:bcUiColors.Text
@@ -1941,8 +2151,6 @@ function Initialize-BcTrayPanel {
     @{ Control = $reapply; Radius = 9 },
     @{ Control = $script:bcImageCard.Panel; Radius = 10 },
     @{ Control = $script:bcVideoCard.Panel; Radius = 10 },
-    @{ Control = $script:bcFishSwitch.Toggle; Radius = 10 },
-    @{ Control = $script:bcSoundSwitch.Toggle; Radius = 10 },
     @{ Control = $themeCard; Radius = 10 }
   )
   Set-BcIntegerLayoutTree -Control $form
@@ -2067,6 +2275,13 @@ try {
   } catch {
     # ignore
   }
+  try {
+    if ($null -ne $script:bcHeaderIconImage) {
+      $script:bcHeaderIconImage.Dispose()
+    }
+  } catch {
+    # ignore
+  }
   foreach ($fontName in @(
       "bcDisplayFont",
       "bcBrandFont",
@@ -2074,7 +2289,6 @@ try {
       "bcBodyStrongFont",
       "bcMetaFont",
       "bcSectionFont",
-      "bcToggleFont",
       "bcIconFont"
     )) {
     try {
@@ -2089,5 +2303,13 @@ try {
   }
   if ($errEvent) {
     Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+  }
+  if ($null -ne $script:trayInstanceMutex) {
+    if ($script:trayInstanceMutexOwned) {
+      try { $script:trayInstanceMutex.ReleaseMutex() } catch { }
+      $script:trayInstanceMutexOwned = $false
+    }
+    try { $script:trayInstanceMutex.Dispose() } catch { }
+    $script:trayInstanceMutex = $null
   }
 }
