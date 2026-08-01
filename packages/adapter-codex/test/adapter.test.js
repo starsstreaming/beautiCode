@@ -725,6 +725,13 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
   assert.match(runtime, /applyMutePreference/);
   assert.match(css, /data-bc-tone/);
   assert.match(css, /prefers-color-scheme: light/);
+  // Codex's main-surface class is CSS-module hashed and changes between builds.
+  assert.match(css, /body > #root main/);
+  assert.match(
+    css,
+    /body > #root main \{\s*position:\s*relative !important;\s*background-color:\s*transparent !important;/,
+  );
+  assert.doesNotMatch(css, /main\.main-surface/);
   assert.match(runtime, /setBackgroundTone/);
   assert.match(runtime, /data-bc-tone/);
   assert.match(runtime, /getPlaybackPosition/);

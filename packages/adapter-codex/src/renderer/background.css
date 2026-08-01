@@ -197,7 +197,7 @@ html[data-bc-active="true"][data-bc-media="video-pending"]
    - Video keeps playing under both columns.
    Implementation: do NOT retouch #beauticode-bg-stage::before or media
    filters on working — those are full-window and would shift the left.
-   Dim only via main.main-surface wash. */
+   Dim only via the primary main surface wash. */
 
 /* ---- Left sidebar: translucent so art shows ---- */
 html[data-bc-active="true"] aside.app-shell-left-panel {
@@ -221,8 +221,9 @@ html[data-bc-active="true"] aside.app-shell-left-panel nav {
 }
 
 /* ---- Main surface ---- */
-html[data-bc-active="true"] main.main-surface {
+html[data-bc-active="true"] body > #root main {
   position: relative !important;
+  background-color: transparent !important;
   background: linear-gradient(
     90deg,
     var(--bc-main-edge),
@@ -236,21 +237,21 @@ html[data-bc-active="true"] main.main-surface {
 
 /* Task page: ONLY the right column. Stage veil + left aside stay as home
    so home ↔ project transition is seamless on the sidebar. */
-html[data-bc-active="true"][data-bc-working="true"] main.main-surface {
+html[data-bc-active="true"][data-bc-working="true"] body > #root main {
   /* Tiny step darker — keep translucent so thread text stays readable. */
   background: var(--bc-working-main) !important;
   transition: background 240ms ease;
 }
 
 /* No secondary art painted on main — stage owns the picture. */
-html[data-bc-active="true"] main.main-surface::before,
-html[data-bc-active="true"] main.main-surface::after {
+html[data-bc-active="true"] body > #root main::before,
+html[data-bc-active="true"] body > #root main::after {
   content: none !important;
   background-image: none !important;
   background: transparent !important;
 }
 
-html[data-bc-active="true"] main.main-surface > header.app-header-tint {
+html[data-bc-active="true"] body > #root main > header.app-header-tint {
   background: transparent !important;
   border-bottom: 0 !important;
   box-shadow: none !important;
@@ -258,13 +259,13 @@ html[data-bc-active="true"] main.main-surface > header.app-header-tint {
 }
 
 /* Main content frame / scroll fades that paint opaque tokens. */
-html[data-bc-active="true"] main.main-surface .app-shell-main-content-frame,
-html[data-bc-active="true"] main.main-surface .app-shell-main-content-top-fade {
+html[data-bc-active="true"] body > #root main .app-shell-main-content-frame,
+html[data-bc-active="true"] body > #root main .app-shell-main-content-top-fade {
   background: transparent !important;
   background-image: none !important;
 }
 
-html[data-bc-active="true"] main.main-surface
+html[data-bc-active="true"] body > #root main
   .thread-scroll-container
   .bg-gradient-to-t.from-token-main-surface-primary {
   background-image: none !important;
@@ -272,7 +273,7 @@ html[data-bc-active="true"] main.main-surface
 }
 
 /* Home hero card chrome — keep interactive, drop solid fill. */
-html[data-bc-active="true"] main.main-surface
+html[data-bc-active="true"] body > #root main
   [role="main"]:has([data-testid="home-icon"])
   > div:first-child
   > div:first-child
@@ -284,7 +285,7 @@ html[data-bc-active="true"] main.main-surface
   box-shadow: none !important;
 }
 
-html[data-bc-active="true"] main.main-surface
+html[data-bc-active="true"] body > #root main
   [role="main"]:has([data-testid="home-icon"])
   > div:first-child
   > div:first-child
@@ -293,7 +294,7 @@ html[data-bc-active="true"] main.main-surface
 }
 
 /* role=main region itself */
-html[data-bc-active="true"] main.main-surface [role="main"] {
+html[data-bc-active="true"] body > #root main [role="main"] {
   background: transparent !important;
 }
 

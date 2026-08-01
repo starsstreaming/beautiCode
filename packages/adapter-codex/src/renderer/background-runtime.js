@@ -372,7 +372,7 @@
           '[data-testid*="conversation"]',
           '[data-testid*="thread"]',
           '[data-testid*="turn"]',
-          'main.main-surface [data-message-id]',
+          'body > #root main [data-message-id]',
         ].join(", "),
       );
       if (thread && isVisibleEl(thread)) return true;
@@ -380,7 +380,7 @@
       // Open task header: folder glyph + title in the main app header
       // (matches the project task chrome in Codex Desktop).
       const header = document.querySelector(
-        "main.main-surface header.app-header-tint, main.main-surface header",
+        "body > #root main header.app-header-tint, body > #root main header",
       );
       if (header && isVisibleEl(header)) {
         const headerText = (header.textContent || "").replace(/\s+/g, " ").trim();
@@ -388,7 +388,7 @@
         if (headerText.length >= 2 && !/^(codex|chatgpt|home|首页)?$/i.test(headerText)) {
           // Require composer or main role so empty shells do not false-dim.
           const workSurface = document.querySelector(
-            "main.main-surface .composer-surface-chrome, main.main-surface [role='main'], main.main-surface .thread-scroll-container",
+            "body > #root main .composer-surface-chrome, body > #root main [role='main'], body > #root main .thread-scroll-container",
           );
           if (workSurface && isVisibleEl(workSurface)) return true;
         }
