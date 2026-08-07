@@ -145,7 +145,7 @@ function Get-CodexMainExeFast {
   return Find-BcCodexExecutable
 }
 
-function Confirm-BcRestartCodex {
+function Confirm-BcCodexAction {
   param([string]$Text)
   try {
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
@@ -242,6 +242,7 @@ try {
     throw "Missing tray script: $TrayScript"
   }
 
+  $trayAlreadyRunning = $false
   if ($ForceRestart) {
     foreach ($procId in @(Get-BcTrayPids)) {
       try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {}
@@ -250,9 +251,10 @@ try {
   } else {
     # The tray owns this process-lifetime mutex. Checking it avoids the
     # 0.3-1.0s Win32_Process scan on every normal launch.
-    if (Test-BcTrayRunningFast) {
-      Write-BcLog "engine already running mutex=True"
-      # No modal dialog — tray icon is already the signal. Exit quietly.
+    $trayAlreadyRunning = Test-BcTrayRunningFast
+    if ($trayAlreadyRunning -and $NoLaunchCodex) {
+      Write-BcLog "engine already running mutex=True NoLaunchCodex=True"
+      # Windows logon startup stays silent and never opens/restarts Codex.
       exit 0
     }
   }
@@ -285,8 +287,12 @@ try {
   } else {
     0
   }
-  Start-BcTray -CdpPort $trayPort
-  Write-BcLog ("tray spawned in {0}ms" -f $sw.ElapsedMilliseconds)
+  if ($trayAlreadyRunning) {
+    Write-BcLog "engine already running mutex=True - checking Codex match"
+  } else {
+    Start-BcTray -CdpPort $trayPort
+    Write-BcLog ("tray spawned in {0}ms" -f $sw.ElapsedMilliseconds)
+  }
 
   # 3) If no CDP, kick Codex launch after the tray process is already running.
   #    The session-host watch loop attaches when CDP appears.
@@ -295,11 +301,13 @@ try {
       # A normal Codex launch may not expose CDP. Never kill it silently:
       # ask once, close gracefully, then relaunch with loopback CDP so the
       # session-host watcher can import the active background immediately.
-      $accepted = Confirm-BcRestartCodex -Text "Codex is already running without a reachable CDP endpoint.`n`nTo let beautiCode detect Codex and import the active background immediately, Codex must restart safely. Unsaved content may be lost. Continue?"
+      $accepted = Confirm-BcCodexAction -Text "ChatGPT/Codex is already running without a reachable CDP endpoint.`n`nTo let beautiCode match this window and restore the active background, ChatGPT/Codex must restart safely. Unsaved content may be lost. Restart now?"
       if ($accepted) {
         Write-BcLog "no CDP and Codex already running - user accepted graceful restart"
         if (Stop-BcCodexGracefully) {
-          [void](Start-CodexWithCdpFast -CdpPort $launchPort)
+          if (-not (Start-CodexWithCdpFast -CdpPort $launchPort)) {
+            Show-BcMessage -Icon "Error" -Text "ChatGPT/Codex could not be reopened with a local CDP endpoint. Check the beautiCode launcher log and try again."
+          }
         } else {
           Write-BcLog "Codex graceful restart stopped: process did not exit"
           Show-BcMessage -Icon "Warning" -Text "Codex did not exit safely within the timeout. beautiCode did not force-close it. Use the tray action Apply or reapply to try again."
@@ -308,8 +316,15 @@ try {
         Write-BcLog "no CDP and Codex already running - user declined restart"
       }
     } else {
-      Write-BcLog "no CDP yet - launching Codex after tray spawn"
-      [void](Start-CodexWithCdpFast -CdpPort $launchPort)
+      $accepted = Confirm-BcCodexAction -Text "ChatGPT/Codex is not running.`n`nOpen it with a local CDP endpoint so beautiCode can match the window and restore the active background?"
+      if ($accepted) {
+        Write-BcLog "no CDP and Codex not running - user accepted launch"
+        if (-not (Start-CodexWithCdpFast -CdpPort $launchPort)) {
+          Show-BcMessage -Icon "Error" -Text "ChatGPT/Codex could not be opened with a local CDP endpoint. Check the beautiCode launcher log and try again."
+        }
+      } else {
+        Write-BcLog "no CDP and Codex not running - user declined launch"
+      }
     }
   }
 

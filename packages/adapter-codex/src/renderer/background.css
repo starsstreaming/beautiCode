@@ -260,7 +260,9 @@ html[data-bc-active="true"] body > #root main > header.app-header-tint {
 
 /* Main content frame / scroll fades that paint opaque tokens. */
 html[data-bc-active="true"] body > #root main .app-shell-main-content-frame,
-html[data-bc-active="true"] body > #root main .app-shell-main-content-top-fade {
+html[data-bc-active="true"] body > #root main .app-shell-main-content-top-fade,
+html[data-bc-active="true"] body > #root main
+  [class*="_MainContentTopFade_"] {
   background: transparent !important;
   background-image: none !important;
 }

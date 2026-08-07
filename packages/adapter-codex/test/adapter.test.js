@@ -732,6 +732,9 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
     /body > #root main \{\s*position:\s*relative !important;\s*background-color:\s*transparent !important;/,
   );
   assert.doesNotMatch(css, /main\.main-surface/);
+  // Current Codex builds use a CSS-module hash for the main viewport's
+  // otherwise opaque top fade; keep the stable component-name fragment.
+  assert.match(css, /\[class\*="_MainContentTopFade_"\]/);
   assert.match(runtime, /setBackgroundTone/);
   assert.match(runtime, /data-bc-tone/);
   assert.match(runtime, /getPlaybackPosition/);
