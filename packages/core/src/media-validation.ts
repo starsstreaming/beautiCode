@@ -22,6 +22,34 @@ function isWebp(buf: Buffer): boolean {
   );
 }
 
+/** AVIF is an ISO-BMFF image. Some downloaders save it with a .png suffix. */
+export function isAvifContainer(
+  bytes: Uint8Array,
+  totalSize: number = bytes?.byteLength ?? 0,
+): boolean {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 16) return false;
+  const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const firstBoxSize = view.readUInt32BE(0);
+  if (
+    firstBoxSize < 16 ||
+    firstBoxSize > totalSize ||
+    view.subarray(4, 8).toString("ascii") !== "ftyp"
+  ) {
+    return false;
+  }
+  const brands = [view.subarray(8, 12)];
+  for (
+    let offset = 16;
+    offset + 4 <= Math.min(firstBoxSize, view.length);
+    offset += 4
+  ) {
+    brands.push(view.subarray(offset, offset + 4));
+  }
+  return brands.some(
+    (brand) => brand.toString("ascii") === "avif" || brand.toString("ascii") === "avis",
+  );
+}
+
 export class MediaValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -150,9 +178,10 @@ async function inspectAndHash(
   }
 }
 
-function detectImage(
+export function detectImageMime(
   buf: Buffer,
   extension: string,
+  totalSize: number = buf.byteLength,
 ): { mime: string } | null {
   if (buf.length >= 3 && buf.subarray(0, 3).equals(JPEG_MAGIC)) {
     if (extension === ".jpg" || extension === ".jpeg") {
@@ -167,6 +196,14 @@ function detectImage(
   }
   if (isWebp(buf)) {
     if (extension === ".webp") return { mime: "image/webp" };
+    return null;
+  }
+  // Keep compatibility with files such as the supplied "*.png" whose
+  // contents are AVIF. Do not make unrelated JPEG/PNG/WebP mismatches valid.
+  if (isAvifContainer(buf, totalSize)) {
+    if (extension === ".avif" || extension === ".png") {
+      return { mime: "image/avif" };
+    }
     return null;
   }
   return null;
@@ -190,10 +227,10 @@ export async function validateImageFile(
     );
   }
   const inspected = await inspectAndHash(resolved, size);
-  const detected = detectImage(inspected.head, ext);
+  const detected = detectImageMime(inspected.head, ext, size);
   if (!detected) {
     throw new MediaValidationError(
-      "Image content does not match a supported JPEG/PNG/WEBP signature.",
+      "Image content does not match a supported JPEG/PNG/WEBP/AVIF signature.",
     );
   }
   return {

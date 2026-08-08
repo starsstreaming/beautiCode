@@ -336,6 +336,16 @@ const server = http.createServer(
       send(res, result.ok ? 200 : 422, result);
       return;
     }
+    if (req.method === "POST" && url === "/mode/tone") {
+      const body = await readBody(req);
+      if (!["dark", "light", "auto"].includes(body.tone)) {
+        send(res, 400, { ok: false, error: "tone must be dark, light, or auto" });
+        return;
+      }
+      const result = await session.setBackgroundTone(body.tone);
+      send(res, result.ok ? 200 : 422, result);
+      return;
+    }
     if (req.method === "POST" && url === "/shutdown") {
       send(res, 200, { ok: true });
       setImmediate(() => void shutdown(0));

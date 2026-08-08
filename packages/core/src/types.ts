@@ -1,6 +1,7 @@
 import { SCHEMA_ID } from "./constants.js";
 
 export type BackgroundType = "image" | "video" | "clear";
+export type BackgroundTone = "dark" | "light" | "auto";
 
 export interface BackgroundMedia {
   type: "image" | "video";
@@ -68,6 +69,13 @@ export interface VerifyResult {
 
 export interface HostApplier {
   apply(payload: HostApplyPayload): Promise<void>;
+  /** Optional to keep custom/older host implementations source-compatible. */
+  setBackgroundTone?(tone: BackgroundTone): Promise<{
+    ok: boolean;
+    tone: BackgroundTone;
+    sessions: number;
+    error?: string;
+  }>;
   verify(
     expected: VerifyExpectation,
     opts: { deadlineMs: number },

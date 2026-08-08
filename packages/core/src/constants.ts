@@ -39,6 +39,7 @@ export const IMAGE_EXTENSIONS = Object.freeze([
   ".jpeg",
   ".png",
   ".webp",
+  ".avif",
 ] as const);
 
 export const VIDEO_EXTENSION = ".mp4";

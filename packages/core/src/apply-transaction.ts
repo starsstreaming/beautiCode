@@ -9,6 +9,7 @@ import {
   MediaServerController,
   type MediaAssetHandle,
 } from "./media-server.js";
+import { detectImageMime } from "./media-validation.js";
 import type {
   ApplyInput,
   ApplyResult,
@@ -338,6 +339,7 @@ const MIME_BY_EXT: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
+  ".avif": "image/avif",
   ".mp4": "video/mp4",
 };
 
@@ -353,7 +355,11 @@ export async function fileToDataUrl(
     );
   }
   const ext = path.extname(filePath).toLowerCase();
-  const mime = mimeOverride ?? MIME_BY_EXT[ext];
+  const detectedImage =
+    !mimeOverride && ext !== ".mp4"
+      ? detectImageMime(bytes.subarray(0, 64), ext, bytes.byteLength)
+      : null;
+  const mime = mimeOverride ?? detectedImage?.mime ?? MIME_BY_EXT[ext];
   if (!mime) {
     throw new Error(`Unsupported media extension for data URL: ${ext || "(none)"}`);
   }

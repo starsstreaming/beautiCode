@@ -14,6 +14,7 @@ export async function startMockCdp(opts = {}) {
     body: true,
     protocol: "app:",
     runtime: {},
+    tone: "dark",
     lastExpression: null,
   };
 
@@ -85,6 +86,11 @@ export async function startMockCdp(opts = {}) {
           return true;
         },
         isMuted: () => Boolean(s.mutedPref),
+        getBackgroundTone: () => s.tone,
+        setBackgroundTone: (tone) => {
+          s.tone = tone === "light" || tone === "auto" ? tone : "dark";
+          return true;
+        },
         setMuted: (muted) => {
           s.mutedPref = Boolean(muted);
           return {
@@ -184,6 +190,18 @@ export async function startMockCdp(opts = {}) {
       if (typeof api.setMuted !== "function") return null;
       const wantMuted = /\bsetMuted\(true\)/.test(expression);
       return api.setMuted(wantMuted);
+    }
+
+    // Background tone toggle (CSS attribute-only; no media rebuild).
+    if (
+      expression.includes("setBackgroundTone") &&
+      expression.includes("__BEAUTICODE_BG__") &&
+      expression.length < 1000
+    ) {
+      const api = s.runtime.__BEAUTICODE_BG__;
+      if (!api || typeof api.setBackgroundTone !== "function") return false;
+      const match = expression.match(/setBackgroundTone\("(dark|light|auto)"\)/);
+      return Boolean(api.setBackgroundTone(match ? match[1] : "dark"));
     }
 
     // Playback position / seek (short expressions).

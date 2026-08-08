@@ -38,6 +38,7 @@ jobs:
         run: |
           $scripts = @(
             "apps/tray/start-tray.ps1",
+            "scripts/codex-launch.ps1",
             "scripts/start-beauticode-engine.ps1",
             "scripts/install-desktop-shortcut.ps1",
             "scripts/build-windows-installer.ps1"

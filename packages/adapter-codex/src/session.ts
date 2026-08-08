@@ -8,6 +8,7 @@ import {
   type ApplyInput,
   type ApplyResult,
   type BackgroundManifest,
+  type BackgroundTone,
   type SavedThemeInfo,
 } from "@beauticode/core";
 import { CodexHostApplier } from "./host-applier.js";
@@ -83,6 +84,8 @@ export class BeautiSession {
    * Independent of fish mode. Re-asserted after publish / blob attach.
    */
   private videoMuted = true;
+  /** CSS overlay preference; process-local and dark by default for compatibility. */
+  private backgroundTone: BackgroundTone = "dark";
   /**
    * Saved theme currently bound for continuous video-progress writes.
    * Set on useSavedTheme; cleared when the user applies a different media path
@@ -300,6 +303,7 @@ export class BeautiSession {
         if (!this.videoMuted || input.type === "video") {
           await this.host.setMuted(this.videoMuted).catch(() => null);
         }
+        await this.reassertBackgroundTone();
       }
       return result;
     } finally {
@@ -314,6 +318,7 @@ export class BeautiSession {
     mediaServer: string | null;
     fish: boolean;
     muted: boolean;
+    tone: BackgroundTone;
   }> {
     await this.store.init();
     const manifest = await this.store.readActiveManifest();
@@ -325,6 +330,7 @@ export class BeautiSession {
         this.media.activeImage?.url ?? this.media.activeVideo?.url ?? null,
       fish: this.fishMode,
       muted: this.videoMuted,
+      tone: this.backgroundTone,
     };
   }
 
@@ -433,6 +439,42 @@ export class BeautiSession {
     }
     const result = await this.host.setMuted(this.videoMuted);
     if (result.ok) this.videoMuted = result.muted;
+    return result;
+  }
+
+  /** Change only the injected CSS overlay; media and generation are untouched. */
+  async setBackgroundTone(tone: BackgroundTone): Promise<{
+    ok: boolean;
+    tone: BackgroundTone;
+    sessions: number;
+    error?: string;
+  }> {
+    if (this.closed || !this.releaseLock) {
+      return {
+        ok: false,
+        tone: this.backgroundTone,
+        sessions: 0,
+        error: "Session is not started",
+      };
+    }
+    this.backgroundTone =
+      tone === "light" || tone === "auto" ? tone : "dark";
+    try {
+      await this.ensureHost({ allowDiscover: true });
+    } catch (err) {
+      // Keep the preference for the next Codex connection.
+      return {
+        ok: true,
+        tone: this.backgroundTone,
+        sessions: 0,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+    if (!this.host || !this.host.setBackgroundTone) {
+      return { ok: true, tone: this.backgroundTone, sessions: 0 };
+    }
+    const result = await this.host.setBackgroundTone(this.backgroundTone);
+    if (result.ok) this.backgroundTone = result.tone;
     return result;
   }
 
@@ -596,6 +638,7 @@ export class BeautiSession {
       if (!this.videoMuted || saved.input.type === "video") {
         await this.host.setMuted(this.videoMuted).catch(() => null);
       }
+      await this.reassertBackgroundTone();
       return result;
     } catch (err) {
       return {
@@ -803,6 +846,7 @@ export class BeautiSession {
       await this.host.apply(
         await buildHostApplyPayload(this.store, manifest, null, cssText),
       );
+      await this.reassertBackgroundTone();
       await this.media.commit(null);
       return;
     }
@@ -866,6 +910,12 @@ export class BeautiSession {
       await this.host.setFishMode(true).catch(() => null);
     }
     await this.host.setMuted(this.videoMuted).catch(() => null);
+    await this.reassertBackgroundTone();
+  }
+
+  private async reassertBackgroundTone(): Promise<void> {
+    if (!this.host?.setBackgroundTone) return;
+    await this.host.setBackgroundTone(this.backgroundTone).catch(() => null);
   }
 
   private assertOpenable(): void {

@@ -4,8 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { MAX_VIDEO_BYTES } from "../dist/constants.js";
+import { fileToDataUrl } from "../dist/apply-transaction.js";
 import {
   assertSafeBasename,
+  isAvifContainer,
   isMp4Container,
   MediaValidationError,
   validateImageFile,
@@ -31,11 +33,43 @@ function pngFixture() {
   );
 }
 
+function avifFixture() {
+  const fileTypeBox = Buffer.alloc(24);
+  fileTypeBox.writeUInt32BE(fileTypeBox.length, 0);
+  fileTypeBox.write("ftyp", 4, "ascii");
+  fileTypeBox.write("avif", 8, "ascii");
+  fileTypeBox.writeUInt32BE(0, 12);
+  fileTypeBox.write("avif", 16, "ascii");
+  fileTypeBox.write("mif1", 20, "ascii");
+  return Buffer.concat([fileTypeBox, Buffer.from("AV1PAYLOAD", "ascii")]);
+}
+
 test("isMp4Container accepts ftyp and rejects junk", () => {
   const ok = mp4Fixture();
   assert.equal(isMp4Container(ok, ok.length), true);
   assert.equal(isMp4Container(Buffer.from("not-an-mp4"), 10), false);
   assert.equal(isMp4Container(Buffer.alloc(8), 8), false);
+});
+
+test("AVIF detection accepts .avif and a mislabeled .png", async () => {
+  const bytes = avifFixture();
+  assert.equal(isAvifContainer(bytes, bytes.length), true);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-avif-"));
+  try {
+    for (const name of ["actual.avif", "downloaded.png"]) {
+      const file = path.join(root, name);
+      await fs.writeFile(file, bytes);
+      const image = await validateImageFile(file);
+      assert.equal(image.mime, "image/avif");
+      const dataUrl = await fileToDataUrl(file);
+      assert.match(dataUrl, /^data:image\/avif;base64,/);
+    }
+    const wrongExt = path.join(root, "wrong.jpg");
+    await fs.writeFile(wrongExt, bytes);
+    await assert.rejects(() => validateImageFile(wrongExt), /signature/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test("validateVideoFile enforces extension, size, ftyp, no symlink", async () => {

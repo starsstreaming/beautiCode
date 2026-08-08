@@ -90,6 +90,8 @@ export async function ensureDataLayout(paths: DataPaths): Promise<void> {
       entry === SNAPSHOTS_DIR_NAME ||
       entry === SAVED_DIR_NAME ||
       entry === RUNTIME_MEDIA_DIR_NAME ||
+      entry === "logs" ||
+      entry === "engine-launcher.log" ||
       entry === "injector.lock" ||
       entry === "store.lock" ||
       entry === ".beauticode-commit.json" ||

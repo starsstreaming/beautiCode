@@ -8,6 +8,40 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$script:TrayLogRoot = if ($env:LOCALAPPDATA) {
+  Join-Path $env:LOCALAPPDATA "beautiCode\logs"
+} else {
+  Join-Path ([System.IO.Path]::GetTempPath()) "beautiCode\logs"
+}
+$script:TrayLogPath = Join-Path $script:TrayLogRoot "tray.log"
+
+function Write-BcTrayLog([string]$Message) {
+  try {
+    if (-not (Test-Path -LiteralPath $script:TrayLogRoot)) {
+      New-Item -ItemType Directory -Path $script:TrayLogRoot -Force | Out-Null
+    }
+    Add-Content -LiteralPath $script:TrayLogPath `
+      -Value (("[{0:u}] {1}" -f (Get-Date).ToUniversalTime(), $Message)) `
+      -Encoding UTF8
+  } catch { }
+}
+
+trap {
+  $message = if ($_.Exception) { $_.Exception.Message } else { [string]$_ }
+  Write-BcTrayLog ("tray failed: {0}" -f $message)
+  try {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+    [System.Windows.Forms.MessageBox]::Show(
+      ("beautiCode 托盘启动失败：`n{0}`n`n日志：{1}" -f $message, $script:TrayLogPath),
+      "beautiCode",
+      [System.Windows.Forms.MessageBoxButtons]::OK,
+      [System.Windows.Forms.MessageBoxIcon]::Error
+    ) | Out-Null
+  } catch { }
+  exit 1
+}
+Write-BcTrayLog "tray starting"
+
 $script:trayInstanceMutex = $null
 $script:trayInstanceMutexOwned = $false
 $createdNew = $false
@@ -181,10 +215,16 @@ public sealed class BeautiCodeToggle : Control {
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $HostScript = Join-Path $PSScriptRoot "session-host.mjs"
+$CodexLaunchScript = Join-Path $RepoRoot "scripts\codex-launch.ps1"
 $ReleaseManifest = Join-Path $RepoRoot "release-manifest.json"
 $BundledNode = Join-Path $RepoRoot "runtime\node.exe"
 $coreDist = Join-Path $RepoRoot "packages\core\dist\index.js"
 $adapterDist = Join-Path $RepoRoot "packages\adapter-codex\dist\index.js"
+
+if (-not (Test-Path -LiteralPath $CodexLaunchScript -PathType Leaf)) {
+  throw "Missing Codex launch helper: $CodexLaunchScript"
+}
+. $CodexLaunchScript
 
 if ($NodePath) {
   if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
@@ -200,9 +240,6 @@ if ($NodePath) {
 if (Test-Path -LiteralPath $ReleaseManifest -PathType Leaf) {
   $SkipBuild = $true
 }
-
-# Known ChatGPT / Codex Desktop AppX application user model id (Windows).
-$script:CodexAppUserModelId = "OpenAI.Codex_2p2nqsd0c76g0!App"
 
 if (-not (Test-Path -LiteralPath $HostScript)) {
   throw ("Missing session-host.mjs at {0}" -f $HostScript)
@@ -270,32 +307,45 @@ try {
 }
 $Token = -join ($TokenBytes | ForEach-Object { $_.ToString("x2") })
 
-function Escape-Arg([string]$Value) {
-  if ($Value -match '[\s"]') {
-    return '"' + ($Value -replace '"', '\"') + '"'
-  }
-  return $Value
+function ConvertTo-PsLiteral([string]$Value) {
+  return "'" + ($Value -replace "'", "''") + "'"
 }
 
-$argParts = @(
-  (Escape-Arg $HostScript)
+$nodeInvocationParts = @(
+  (ConvertTo-PsLiteral $Node),
+  (ConvertTo-PsLiteral $HostScript)
 )
 if ($Port -gt 0) {
-  $argParts += @("--port", "$Port")
+  $nodeInvocationParts += @("--port", "$Port")
 }
 if ($DataRoot) {
-  $argParts += @("--data-root", (Escape-Arg $DataRoot))
+  $nodeInvocationParts += @("--data-root", (ConvertTo-PsLiteral $DataRoot))
 }
 
+# Windows PowerShell 5.1 can throw while reading ProcessStartInfo.EnvironmentVariables
+# when the inherited process has both Path and PATH. Start a tiny PowerShell bridge,
+# pass the token through stdin, and let that bridge set the child-only environment.
+$nodeInvocation = [string]::Join(" ", $nodeInvocationParts)
+$bridgeScript = @"
+`$token = [Console]::In.ReadToEnd()
+if ([string]::IsNullOrWhiteSpace(`$token)) { throw "Missing beautiCode control token" }
+`$env:BEAUTICODE_CONTROL_TOKEN = `$token.Trim()
+& $nodeInvocation
+exit `$LASTEXITCODE
+"@
+$bridgeBytes = [System.Text.Encoding]::Unicode.GetBytes($bridgeScript)
+$bridgeCommand = [Convert]::ToBase64String($bridgeBytes)
+$powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $Node
-$psi.Arguments = [string]::Join(" ", $argParts)
+$psi.FileName = $powershell
+$psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $bridgeCommand"
 $psi.WorkingDirectory = $RepoRoot
 $psi.UseShellExecute = $false
+$psi.RedirectStandardInput = $true
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
 $psi.CreateNoWindow = $true
-$psi.EnvironmentVariables["BEAUTICODE_CONTROL_TOKEN"] = $Token
 
 $proc = New-Object System.Diagnostics.Process
 $proc.StartInfo = $psi
@@ -319,6 +369,8 @@ $errEvent = Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived
 [void]$proc.Start()
 $proc.BeginOutputReadLine()
 $proc.BeginErrorReadLine()
+$proc.StandardInput.WriteLine($Token)
+$proc.StandardInput.Close()
 
 $ready = $null
 $deadline = [datetime]::UtcNow.AddSeconds(20)
@@ -352,6 +404,7 @@ $cdpPort = [int]$ready.cdpPort
 $script:cdpPort = $cdpPort
 $BaseUrl = "http://127.0.0.1:$controlPort"
 Write-Host ("Tray control plane {0} (CDP :{1})" -f $BaseUrl, $cdpPort)
+Write-BcTrayLog ("session-host ready controlPort={0} cdpPort={1}" -f $controlPort, $cdpPort)
 
 function Invoke-BcApi {
   param(
@@ -444,6 +497,7 @@ function Test-BcImageExt([string]$Path) {
     ".jpg" { return $true }
     ".jpeg" { return $true }
     ".webp" { return $true }
+    ".avif" { return $true }
     default { return $false }
   }
 }
@@ -512,67 +566,21 @@ function Find-ChatGptExe {
   if ($script:cachedChatGptExe -and (Test-Path -LiteralPath $script:cachedChatGptExe)) {
     return $script:cachedChatGptExe
   }
-  # AppX InstallLocation is readable; avoid recursive WindowsApps walks (slow + ACL).
-  try {
-    $pkg = Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue |
-      Sort-Object Version -Descending |
-      Select-Object -First 1
-    if ($pkg -and $pkg.InstallLocation) {
-      $candidate = Join-Path $pkg.InstallLocation "app\ChatGPT.exe"
-      if (Test-Path -LiteralPath $candidate) {
-        $script:cachedChatGptExe = $candidate
-        return $candidate
-      }
-    }
-  } catch { }
-  foreach ($p in @(
-      (Join-Path $env:LOCALAPPDATA "Programs\chatgpt\ChatGPT.exe"),
-      (Join-Path $env:LOCALAPPDATA "Programs\Codex\Codex.exe")
-    )) {
-    if ($p -and (Test-Path -LiteralPath $p)) {
-      $script:cachedChatGptExe = $p
-      return $p
-    }
-  }
-  return $null
+  $script:cachedChatGptExe = Find-BcCodexExecutable
+  return $script:cachedChatGptExe
 }
 
 function Start-ChatGptDesktop {
   param([int]$CdpPort = 9335)
-  if ($CdpPort -le 0 -or $CdpPort -gt 65535) { $CdpPort = 9335 }
   $errors = New-Object System.Collections.ArrayList
-  # Always prefer loopback CDP flags. AppX shell:AppsFolder launch ignores args.
-  $cdpArgs = @(
-    "--remote-debugging-address=127.0.0.1",
-    ("--remote-debugging-port={0}" -f $CdpPort)
-  )
-  $exe = Find-ChatGptExe
-  if ($exe) {
-    try {
-      $psi = New-Object System.Diagnostics.ProcessStartInfo
-      $psi.FileName = $exe
-      $psi.Arguments = ($cdpArgs -join " ")
-      $psi.UseShellExecute = $true
-      [void][System.Diagnostics.Process]::Start($psi)
-      return $true
-    } catch {
-      [void]$errors.Add(("exe: {0}" -f $_.Exception.Message))
-    }
-  }
   try {
-    Start-Process -FilePath "explorer.exe" -ArgumentList ("shell:AppsFolder\{0}" -f $script:CodexAppUserModelId) -ErrorAction Stop | Out-Null
-    [void]$errors.Add("AUMID launch has no CDP flags; use tray Restart after enabling debug build, or open with flags manually.")
+    $result = Start-BcCodexWithCdp -CdpPort $CdpPort
+    if ($result.Method -eq "appx") {
+      [void]$errors.Add("Store launch may ignore custom CDP arguments; beautiCode will keep discovering the host.")
+    }
     return $true
   } catch {
-    [void]$errors.Add(("AUMID: {0}" -f $_.Exception.Message))
-  }
-  foreach ($name in @("ChatGPT", "Codex")) {
-    try {
-      Start-Process $name -ErrorAction Stop
-      return $true
-    } catch {
-      [void]$errors.Add(("{0}: {1}" -f $name, $_.Exception.Message))
-    }
+    [void]$errors.Add(("Codex launch: {0}" -f $_.Exception.Message))
   }
   throw ("Cannot start ChatGPT/Codex. {0}" -f ([string]::Join(" | ", @($errors))))
 }
@@ -730,7 +738,7 @@ function Invoke-BcEnsureHostAndReapply {
     } else {
       Show-Tip -Title $L.AppName -Text $L.StartingChat -Icon Info
     }
-    $launchPort = if ($preferred -gt 0) { $preferred } else { 9335 }
+    $launchPort = Get-BcLoopbackCdpPort -Preferred $preferred
     [void](Start-ChatGptDesktop -CdpPort $launchPort)
     # Codex cold start is the real wall clock; poll aggressively so we attach
     # as soon as :9335 answers instead of sleeping 700ms between probes.
@@ -766,6 +774,8 @@ $script:notify = $null
 $script:fishMode = $false
 # Video mute preference (default muted). Process-local; independent of fish.
 $script:videoMuted = $true
+# CSS overlay tone. Process-local; dark preserves the previous appearance.
+$script:backgroundTone = "dark"
 $script:fishHotkeyRegistered = $false
 $script:fishNativeWindow = $null
 # WM_HOTKEY id — arbitrary non-zero; unique per this process.
@@ -796,6 +806,10 @@ $L = @{
   FishLabel      = (U "6478 9C7C")                                         # 摸鱼
   VideoSound     = (U "89C6 9891 58F0 97F3")                               # 视频声音
   VideoSoundOn   = (U "89C6 9891 58F0 97F3 0020 2713")                     # 视频声音 ✓
+  BackgroundTone = (U "80CC 666F 6837 5F0F")                               # 背景样式
+  ToneDark       = (U "6DF1 8272")                                         # 深色
+  ToneLight      = (U "6D45 8272")                                         # 浅色
+  ToneAuto       = (U "8DDF 968F 7CFB 7EDF")                               # 跟随系统
   SoundOnTip     = (U "5DF2 5F00 542F 89C6 9891 58F0 97F3 3002")           # 已开启视频声音。
   SoundOffTip    = (U "5DF2 9759 97F3 89C6 9891 3002")                     # 已静音视频。
   SoundBlocked   = (U "5DF2 5C1D 8BD5 5F00 58F0 FF0C 4F46 88AB 6D4F 89C8 5668 81EA 52A8 64AD 653E 7B56 7565 62E6 622A FF0C 4ECD 4FDD 6301 9759 97F3 64AD 653E 3002") # 已尝试开声，但被浏览器自动播放策略拦截，仍保持静音播放。
@@ -826,7 +840,7 @@ $L = @{
   PickMp4        = (U "9009 62E9 0020 0062 0065 0061 0075 0074 0069 0043 006F 0064 0065 0020 89C6 9891 80CC 666F") # 选择 beautiCode 视频背景
   ImagesLabel    = (U "56FE 7247 6587 4EF6")                               # 图片文件
   Mp4Label       = (U "004D 0050 0034 0020 89C6 9891")                     # MP4 视频
-  NeedImage      = (U "8BF7 9009 62E9 0020 002E 0070 006E 0067 002F 002E 006A 0070 0067 002F 002E 006A 0070 0065 0067 002F 002E 0077 0065 0062 0070 0020 56FE 7247 3002") # 请选择 .png/.jpg/.jpeg/.webp 图片。
+  NeedImage      = (U "8BF7 9009 62E9 0020 002E 0070 006E 0067 002F 002E 006A 0070 0067 002F 002E 006A 0070 0065 0067 002F 002E 0077 0065 0062 0070 002F 002E 0061 0076 0069 0066 0020 56FE 7247 3002") # 请选择 .png/.jpg/.jpeg/.webp/.avif 图片。
   NeedMp4        = (U "8BF7 9009 62E9 0020 002E 006D 0070 0034 0020 6587 4EF6 3002") # 请选择 .mp4 文件。
   ImgOk          = (U "80CC 666F 56FE 5DF2 66F4 65B0 3002")               # 背景图已更新。
   VidOk          = (U "89C6 9891 80CC 666F 5DF2 66F4 65B0 3002")         # 视频背景已更新。
@@ -933,6 +947,9 @@ function Get-BcStatusLine {
     if ($null -ne $st.muted) {
       $script:videoMuted = [bool]$st.muted
     }
+    if ($st.tone -in @("dark", "light", "auto")) {
+      $script:backgroundTone = [string]$st.tone
+    }
     $base = if ($script:busy) { $L.StatusBusy } else { $L.StatusRunning }
     # Deliberately omit CDP port and generation — keep tray UX simple.
     $parts = New-Object System.Collections.ArrayList
@@ -946,6 +963,54 @@ function Get-BcStatusLine {
   } catch {
     return $L.StatusOffline
   }
+}
+
+function Get-BcToneLabel([string]$Tone) {
+  switch ($Tone) {
+    "light" { return $L.ToneLight }
+    "auto" { return $L.ToneAuto }
+    default { return $L.ToneDark }
+  }
+}
+
+function Invoke-BcSetTone {
+  param([string]$Tone)
+  if ($Tone -notin @("dark", "light", "auto")) { return }
+  if ($script:busy) {
+    Show-Tip -Title $L.AppName -Text $L.BusyTip -Icon Warning
+    return
+  }
+  $script:busy = $true
+  try {
+    $res = Invoke-BcApi -Method Post -Path "/mode/tone" -Body @{ tone = $Tone }
+    if ($res.ok) {
+      $script:backgroundTone = if ($res.tone -in @("dark", "light", "auto")) {
+        [string]$res.tone
+      } else {
+        $Tone
+      }
+      if ($null -ne $script:bcToneButton) {
+        $script:bcToneButton.Text = "{0} · {1}" -f $L.BackgroundTone, (Get-BcToneLabel $script:backgroundTone)
+      }
+      Show-Tip -Title $L.AppName -Text ("{0} · {1}" -f $L.BackgroundTone, (Get-BcToneLabel $script:backgroundTone)) -Icon Info
+    } else {
+      $err = if ($res.error) { [string]$res.error } else { $L.ApplyFail }
+      Show-Tip -Title $L.AppName -Text $err -Icon Error
+    }
+  } catch {
+    Show-BcError -Message ("{0}" -f $_)
+  } finally {
+    $script:busy = $false
+  }
+}
+
+function Invoke-BcCycleTone {
+  $next = switch ($script:backgroundTone) {
+    "dark" { "light" }
+    "light" { "auto" }
+    default { "dark" }
+  }
+  Invoke-BcSetTone -Tone $next
 }
 
 # Toggle fish mode via control plane. Attribute-only on host — no media rebuild.
@@ -1151,7 +1216,7 @@ $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $script:fallbackMenu = $menu
 
 # Image: common formats. Video: MP4 only (Dream Skin style — no "all files").
-$imgFilter = ("{0}|*.png;*.jpg;*.jpeg;*.webp" -f $L.ImagesLabel)
+$imgFilter = ("{0}|*.png;*.jpg;*.jpeg;*.webp;*.avif" -f $L.ImagesLabel)
 $vidFilter = ("{0}|*.mp4" -f $L.Mp4Label)
 
 function Rebuild-BcTrayMenu {
@@ -1233,6 +1298,22 @@ function Rebuild-BcTrayMenu {
   $null = Add-BcTrayItem -Items $menu.Items -Text $soundText -Enabled:(-not $opActive) -Name "sound" -Action {
     Invoke-BcToggleMuted
   }
+
+  $toneMenu = New-Object System.Windows.Forms.ToolStripMenuItem
+  $toneMenu.Text = ("{0} · {1}" -f $L.BackgroundTone, (Get-BcToneLabel $script:backgroundTone))
+  $toneMenu.Name = "tone"
+  $toneMenu.Enabled = -not $opActive
+  $null = Add-BcTrayItem -Items $toneMenu.DropDownItems -Text $L.ToneDark -Enabled:(-not $opActive) -Name "tone-dark" -Action {
+    Invoke-BcSetTone -Tone "dark"
+  }
+  $null = Add-BcTrayItem -Items $toneMenu.DropDownItems -Text $L.ToneLight -Enabled:(-not $opActive) -Name "tone-light" -Action {
+    Invoke-BcSetTone -Tone "light"
+  }
+  $null = Add-BcTrayItem -Items $toneMenu.DropDownItems -Text $L.ToneAuto -Enabled:(-not $opActive) -Name "tone-auto" -Action {
+    Invoke-BcSetTone -Tone "auto"
+  }
+  $null = $toneMenu.add_Click({ Invoke-BcCycleTone })
+  $null = $menu.Items.Add($toneMenu)
 
   [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
@@ -1635,13 +1716,25 @@ function Set-BcFallbackMenuStyle {
   $menu.ShowImageMargin = $false
   $menu.Padding = New-Object System.Windows.Forms.Padding(5)
   foreach ($item in @($menu.Items)) {
-    $item.BackColor = $script:bcUiColors.Panel
-    $item.ForeColor = if ($item.Enabled) { $script:bcUiColors.Text } else { $script:bcUiColors.Muted }
+    $isClear = $item.Name -eq "clear"
+    $item.BackColor = if ($isClear -and $item.Enabled) { $script:bcUiColors.DangerSurface } else { $script:bcUiColors.Panel }
+    $item.ForeColor = if ($isClear -and $item.Enabled) {
+      $script:bcUiColors.Danger
+    } elseif ($item.Enabled) {
+      $script:bcUiColors.Text
+    } else {
+      $script:bcUiColors.Muted
+    }
     $item.Font = $script:bcBodyFont
     if ($item -is [System.Windows.Forms.ToolStripDropDownItem]) {
       $item.DropDown.BackColor = $script:bcUiColors.Panel
       $item.DropDown.ForeColor = $script:bcUiColors.Text
       $item.DropDown.Font = $script:bcBodyFont
+      foreach ($child in @($item.DropDownItems)) {
+        $child.BackColor = $script:bcUiColors.Panel
+        $child.ForeColor = if ($child.Enabled) { $script:bcUiColors.Text } else { $script:bcUiColors.Muted }
+        $child.Font = $script:bcBodyFont
+      }
     }
   }
 }
@@ -1761,9 +1854,9 @@ function Update-BcTrayPanel {
     $L.NoBackground
   }
   $script:bcImageCard.Meta.Text = if ($isImage) {
-    "PNG/JPG/WEBP · {0}" -f $L.CurrentMedia
+    "PNG/JPG/WEBP/AVIF · {0}" -f $L.CurrentMedia
   } else {
-    "PNG · JPG · WEBP"
+    "PNG · JPG · WEBP · AVIF"
   }
   $script:bcVideoCard.Meta.Text = if ($isVideo) {
     "MP4 · {0}" -f $L.CurrentMedia
@@ -1782,6 +1875,8 @@ function Update-BcTrayPanel {
   $script:bcSoundSwitch.State.Text = if ($soundOn) { $L.EnabledLabel } else { $L.DisabledLabel }
   $script:bcSoundSwitch.State.ForeColor = if ($soundOn) { $script:bcUiColors.Jade } else { $script:bcUiColors.Muted }
   $script:bcSoundSwitch.Toggle.Checked = $soundOn
+
+  $script:bcToneButton.Text = "{0} · {1}" -f $L.BackgroundTone, (Get-BcToneLabel $script:backgroundTone)
 
   $savedItem = Get-BcMenuItem -Name "themes"
   $themeText = $L.NoSavedThemes
@@ -1815,6 +1910,10 @@ function Invoke-BcPanelAction {
   if (-not $ActionName) { return }
   if ($ActionName -eq "themes") {
     Show-BcThemeOverlay
+    return
+  }
+  if ($ActionName -eq "tone") {
+    Invoke-BcCycleTone
     return
   }
   if ($null -ne $script:trayPanel) { $script:trayPanel.Hide() }
@@ -1985,6 +2084,10 @@ function Initialize-BcTrayPanel {
     Jade = Get-BcUiColor "#86AA91"
     JadeDeep = Get-BcUiColor "#496854"
     Copper = Get-BcUiColor "#B98265"
+    Danger = Get-BcUiColor "#FF6B6B"
+    DangerSurface = Get-BcUiColor "#542B2B"
+    DangerHover = Get-BcUiColor "#713333"
+    DangerDeep = Get-BcUiColor "#8F3E3E"
     ToggleOff = Get-BcUiColor "#4F554E"
     ToggleOffBorder = Get-BcUiColor "#737A71"
     ToggleKnob = Get-BcUiColor "#F1F3EE"
@@ -2059,10 +2162,12 @@ function Initialize-BcTrayPanel {
     -Meta "MP4" -ActionName "video" -X 212 -Y 29 -Width 190
 
   $clear = New-BcUiButton -Text $L.ClearCurrentBg -X 14 -Y 113 -Width 388 -Height 32 `
-    -Font $script:bcMetaFont -BackColor $script:bcUiColors.Window `
-    -ForeColor $script:bcUiColors.Muted -BorderColor $script:bcUiColors.Window `
+    -Font $script:bcMetaFont -BackColor $script:bcUiColors.DangerSurface `
+    -ForeColor $script:bcUiColors.Danger -BorderColor $script:bcUiColors.Danger `
     -Align ([System.Drawing.ContentAlignment]::MiddleLeft)
   $clear.Padding = New-Object System.Windows.Forms.Padding(8, 0, 0, 0)
+  $clear.FlatAppearance.MouseOverBackColor = $script:bcUiColors.DangerHover
+  $clear.FlatAppearance.MouseDownBackColor = $script:bcUiColors.DangerDeep
   Register-BcPanelAction -Control $clear -ActionName "clear"
   [void]$body.Controls.Add($clear)
 
@@ -2105,6 +2210,14 @@ function Initialize-BcTrayPanel {
   $saveTheme.Padding = New-Object System.Windows.Forms.Padding(8, 0, 0, 0)
   Register-BcPanelAction -Control $saveTheme -ActionName "save-theme"
   [void]$body.Controls.Add($saveTheme)
+
+  $script:bcToneButton = New-BcUiButton -Text ("{0} · {1}" -f $L.BackgroundTone, (Get-BcToneLabel $script:backgroundTone)) -X 14 -Y 405 -Width 388 -Height 38 `
+    -Font $script:bcBodyFont -BackColor $script:bcUiColors.Panel `
+    -ForeColor $script:bcUiColors.Jade -BorderColor $script:bcUiColors.Line `
+    -Align ([System.Drawing.ContentAlignment]::MiddleLeft)
+  $script:bcToneButton.Padding = New-Object System.Windows.Forms.Padding(8, 0, 0, 0)
+  Register-BcPanelAction -Control $script:bcToneButton -ActionName "tone"
+  [void]$body.Controls.Add($script:bcToneButton)
 
   $footer = New-Object System.Windows.Forms.Panel
   $footer.Location = New-Object System.Drawing.Point(0, 593)
@@ -2151,7 +2264,9 @@ function Initialize-BcTrayPanel {
     @{ Control = $reapply; Radius = 9 },
     @{ Control = $script:bcImageCard.Panel; Radius = 10 },
     @{ Control = $script:bcVideoCard.Panel; Radius = 10 },
-    @{ Control = $themeCard; Radius = 10 }
+    @{ Control = $themeCard; Radius = 10 },
+    @{ Control = $clear; Radius = 8 },
+    @{ Control = $script:bcToneButton; Radius = 8 }
   )
   Set-BcIntegerLayoutTree -Control $form
   Enable-BcDoubleBufferTree -Control $form

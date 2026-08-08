@@ -1,6 +1,7 @@
 import type {
   HostApplyPayload,
   HostApplier,
+  BackgroundTone,
   VerifyExpectation,
   VerifyResult,
 } from "@beauticode/core";
@@ -70,6 +71,8 @@ export class CodexHostApplier implements HostApplier {
    * Process-local; re-asserted after inject / blob attach so watch cannot drop it.
    */
   private videoMuted = true;
+  /** CSS overlay preference; dark preserves the pre-tone behavior. */
+  private backgroundTone: BackgroundTone = "dark";
 
   constructor(opts: CodexHostApplierOptions) {
     if (!Number.isInteger(opts.port) || opts.port < 1 || opts.port > 65535) {
@@ -300,6 +303,9 @@ export class CodexHostApplier implements HostApplier {
               await setSessionFishMode(session, true).catch(() => false);
             }
             await setSessionMuted(session, this.videoMuted).catch(() => null);
+            await setSessionBackgroundTone(session, this.backgroundTone).catch(
+              () => false,
+            );
             ok += 1;
             continue;
           }
@@ -314,6 +320,9 @@ export class CodexHostApplier implements HostApplier {
               await setSessionFishMode(session, true).catch(() => false);
             }
             await setSessionMuted(session, this.videoMuted).catch(() => null);
+            await setSessionBackgroundTone(session, this.backgroundTone).catch(
+              () => false,
+            );
             ok += 1;
             continue;
           }
@@ -329,6 +338,9 @@ export class CodexHostApplier implements HostApplier {
             await setSessionFishMode(session, true).catch(() => false);
           }
           await setSessionMuted(session, this.videoMuted).catch(() => null);
+          await setSessionBackgroundTone(session, this.backgroundTone).catch(
+            () => false,
+          );
           ok += 1;
         } catch (err) {
           errors.push(
@@ -425,6 +437,63 @@ export class CodexHostApplier implements HostApplier {
       };
     }
     return { ok: true, fish: this.fishMode, sessions: okCount };
+  }
+
+  /** Change only the CSS overlay tone; media and generation stay untouched. */
+  async setBackgroundTone(tone: BackgroundTone): Promise<{
+    ok: boolean;
+    tone: BackgroundTone;
+    sessions: number;
+    error?: string;
+  }> {
+    this.assertOpen();
+    const want: BackgroundTone =
+      tone === "light" || tone === "auto" ? tone : "dark";
+    this.backgroundTone = want;
+    // There may be no injected runtime yet (fresh tray / cleared background).
+    // Remember the preference and apply it on the next background publish.
+    if (!this.lastPayload || this.lastPayload.media === "clear") {
+      return { ok: true, tone: this.backgroundTone, sessions: 0 };
+    }
+    try {
+      if (this.sessions.size === 0) {
+        await this.connect();
+      } else {
+        await this.reconcileSessions();
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        tone: this.backgroundTone,
+        sessions: 0,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+    let okCount = 0;
+    const errors: string[] = [];
+    for (const [id, session] of this.sessions) {
+      if (session.closed) {
+        this.sessions.delete(id);
+        continue;
+      }
+      try {
+        if (await setSessionBackgroundTone(session, want)) okCount += 1;
+        else errors.push(`${id}: renderer does not support background tone`);
+      } catch (err) {
+        errors.push(
+          `${id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (okCount === 0) {
+      return {
+        ok: false,
+        tone: this.backgroundTone,
+        sessions: 0,
+        error: errors[0] ?? "Could not set background tone on any session",
+      };
+    }
+    return { ok: true, tone: this.backgroundTone, sessions: okCount };
   }
 
   /**
@@ -807,6 +876,23 @@ async function setSessionMuted(
     hasVideo: boolean;
   } | null>(expr, { userGesture: true });
   return result ?? null;
+}
+
+async function setSessionBackgroundTone(
+  session: CdpSession,
+  tone: BackgroundTone,
+): Promise<boolean> {
+  const toneLiteral = JSON.stringify(tone);
+  const expr = `(() => {
+    const api = window.__BEAUTICODE_BG__;
+    if (!api || typeof api.setBackgroundTone !== "function") return false;
+    try {
+      return Boolean(api.setBackgroundTone(${toneLiteral}));
+    } catch (_) {
+      return false;
+    }
+  })()`;
+  return Boolean(await session.evaluate<boolean>(expr));
 }
 
 async function readSessionPlaybackPosition(
