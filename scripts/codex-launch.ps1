@@ -1,4 +1,4 @@
-# Shared Windows Codex discovery and loopback launch helpers.
+﻿# Shared Windows Codex discovery and loopback launch helpers.
 # This file is dot-sourced by both the one-click launcher and the tray process.
 
 $script:BeautiCodeKnownCodexAppUserModelId = "OpenAI.Codex_2p2nqsd0c76g0!App"
@@ -170,5 +170,5 @@ function Start-BcCodexWithCdp([int]$CdpPort = 9335) {
     }
   }
 
-  throw "Cannot find an installed Codex/ChatGPT Desktop application. Install Codex Desktop first."
+  throw "找不到已安装的 Codex/ChatGPT Desktop 应用，请先安装 Codex Desktop。"
 }

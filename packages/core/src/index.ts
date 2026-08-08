@@ -9,5 +9,6 @@ export {
   type DataPaths,
 } from "./paths.js";
 export * from "./file-lock.js";
+export * from "./error-message.js";
 export * from "./background-store.js";
 export * from "./apply-transaction.js";
