@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   One-click launcher for the beautiCode engine (system tray).
@@ -18,7 +18,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 if ($Port -lt 0 -or $Port -gt 65535) {
-  throw "Port must be 0 (auto) or an integer from 1 to 65535."
+  throw "端口必须为 0（自动）或 1 到 65535 之间的整数。"
 }
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $TrayScript = Join-Path $RepoRoot "apps\tray\start-tray.ps1"
@@ -31,9 +31,13 @@ $LogRoot = if ($env:LOCALAPPDATA) {
 }
 $LogPath = Join-Path $LogRoot "engine-launcher.log"
 $TrayMutexName = "Local\beautiCode.Engine.Tray.v1"
+$TrayPanelEventName = "Local\beautiCode.Engine.ShowPanel.v1"
+$LauncherMutexName = "Local\beautiCode.Engine.Launcher.v1"
+$script:launcherMutex = $null
+$script:launcherMutexOwned = $false
 
 if (-not (Test-Path -LiteralPath $CodexLaunchScript -PathType Leaf)) {
-  throw "Missing Codex launch helper: $CodexLaunchScript"
+  throw "缺少 Codex 启动脚本：$CodexLaunchScript"
 }
 . $CodexLaunchScript
 
@@ -108,6 +112,43 @@ function Find-BcCdpPortFast([int]$Preferred = 9335) {
   return 0
 }
 
+function Wait-BcCdpReady {
+  param(
+    [int]$Preferred = 0,
+    [int]$WaitSeconds = 15
+  )
+  $deadline = [datetime]::UtcNow.AddSeconds([Math]::Max(1, $WaitSeconds))
+  do {
+    $hit = Find-BcCdpPortFast -Preferred $Preferred
+    if ($hit -gt 0) { return [int]$hit }
+    Start-Sleep -Milliseconds 250
+  } while ([datetime]::UtcNow -lt $deadline)
+  return 0
+}
+
+function Request-BcTrayPanel([int]$WaitMilliseconds = 0) {
+  $deadline = [datetime]::UtcNow.AddMilliseconds([Math]::Max(0, $WaitMilliseconds))
+  do {
+    $showEvent = $null
+    try {
+      $showEvent = [System.Threading.EventWaitHandle]::OpenExisting($TrayPanelEventName)
+      [void]$showEvent.Set()
+      Write-BcLog "tray panel requested"
+      return $true
+    } catch [System.Threading.WaitHandleCannotBeOpenedException] {
+      # The tray creates this event immediately after taking its instance mutex.
+    } finally {
+      if ($null -ne $showEvent) {
+        try { $showEvent.Dispose() } catch {}
+      }
+    }
+    if ([datetime]::UtcNow -ge $deadline) { break }
+    Start-Sleep -Milliseconds 100
+  } while ($true)
+  Write-BcLog "tray panel request timed out"
+  return $false
+}
+
 function Test-BcTrayRunningFast {
   $mutex = $null
   try {
@@ -147,9 +188,19 @@ function Get-CodexMainExeFast {
 
 function Confirm-BcCodexAction {
   param([string]$Text)
+  $owner = $null
   try {
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+    $owner = New-Object System.Windows.Forms.Form
+    $owner.ShowInTaskbar = $false
+    $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $owner.Size = New-Object System.Drawing.Size(1, 1)
+    $owner.Opacity = 0
+    $owner.TopMost = $true
+    $owner.Show()
+    $owner.Activate()
     $result = [System.Windows.Forms.MessageBox]::Show(
+      $owner,
       $Text,
       "beautiCode",
       [System.Windows.Forms.MessageBoxButtons]::YesNo,
@@ -159,6 +210,11 @@ function Confirm-BcCodexAction {
     return $result -eq [System.Windows.Forms.DialogResult]::Yes
   } catch {
     return $false
+  } finally {
+    if ($null -ne $owner) {
+      try { $owner.Close() } catch {}
+      try { $owner.Dispose() } catch {}
+    }
   }
 }
 
@@ -170,7 +226,7 @@ function Stop-BcCodexGracefully([int]$WaitSeconds = 8) {
         [void]$target.Process.CloseMainWindow()
       }
     } catch {
-      Write-BcLog ("could not request graceful Codex close: {0}" -f $_.Exception.Message)
+      Write-BcLog ("无法请求 Codex 平稳关闭：{0}" -f $_.Exception.Message)
     }
   }
   $deadline = [datetime]::UtcNow.AddSeconds([Math]::Max(1, $WaitSeconds))
@@ -194,7 +250,7 @@ function Start-CodexWithCdpFast([int]$CdpPort) {
     }
     return $true
   } catch {
-    Write-BcLog ("Codex launch failed: {0}" -f $_.Exception.Message)
+    Write-BcLog ("Codex 启动失败：{0}" -f $_.Exception.Message)
     return $false
   }
 }
@@ -238,8 +294,23 @@ try {
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
   Write-BcLog ("launcher start Port={0} ForceRestart={1}" -f $Port, [bool]$ForceRestart)
 
+  $launcherCreated = $false
+  $script:launcherMutex = [System.Threading.Mutex]::new(
+    $true,
+    $LauncherMutexName,
+    [ref]$launcherCreated
+  )
+  if (-not $launcherCreated) {
+    Write-BcLog "launcher already active mutex=True"
+    if (-not $NoLaunchCodex) {
+      [void](Request-BcTrayPanel -WaitMilliseconds 5000)
+    }
+    exit 0
+  }
+  $script:launcherMutexOwned = $true
+
   if (-not (Test-Path -LiteralPath $TrayScript)) {
-    throw "Missing tray script: $TrayScript"
+    throw "缺少托盘脚本：$TrayScript"
   }
 
   $trayAlreadyRunning = $false
@@ -268,7 +339,7 @@ try {
     $cdpPort
   } elseif ($Port -gt 0) {
     $Port
-  } elseif ($codexExecutable -and -not $codexAlreadyRunning) {
+  } elseif ($codexExecutable) {
     Get-BcLoopbackCdpPort
   } else {
     0
@@ -293,6 +364,9 @@ try {
     Start-BcTray -CdpPort $trayPort
     Write-BcLog ("tray spawned in {0}ms" -f $sw.ElapsedMilliseconds)
   }
+  if (-not $NoLaunchCodex) {
+    [void](Request-BcTrayPanel -WaitMilliseconds 5000)
+  }
 
   # 3) If no CDP, kick Codex launch after the tray process is already running.
   #    The session-host watch loop attaches when CDP appears.
@@ -301,26 +375,46 @@ try {
       # A normal Codex launch may not expose CDP. Never kill it silently:
       # ask once, close gracefully, then relaunch with loopback CDP so the
       # session-host watcher can import the active background immediately.
-      $accepted = Confirm-BcCodexAction -Text "ChatGPT/Codex is already running without a reachable CDP endpoint.`n`nTo let beautiCode match this window and restore the active background, ChatGPT/Codex must restart safely. Unsaved content may be lost. Restart now?"
+      $accepted = Confirm-BcCodexAction -Text "ChatGPT/Codex 已在运行，但未发现可用的 CDP 端点。`n`n若要让 beautiCode 连接此窗口并恢复当前背景，必须安全重启 ChatGPT/Codex。未保存的内容可能会丢失。现在重启吗？"
       if ($accepted) {
         Write-BcLog "no CDP and Codex already running - user accepted graceful restart"
         if (Stop-BcCodexGracefully) {
-          if (-not (Start-CodexWithCdpFast -CdpPort $launchPort)) {
-            Show-BcMessage -Icon "Error" -Text "ChatGPT/Codex could not be reopened with a local CDP endpoint. Check the beautiCode launcher log and try again."
+          if (Start-CodexWithCdpFast -CdpPort $launchPort) {
+            $readyPort = Wait-BcCdpReady -Preferred $launchPort -WaitSeconds 15
+            if ($readyPort -gt 0) {
+              $cdpPort = $readyPort
+              Write-BcLog ("Codex CDP ready port={0}" -f $readyPort)
+              [void](Request-BcTrayPanel)
+            } else {
+              Write-BcLog ("Codex CDP readiness timed out preferredPort={0}" -f $launchPort)
+              Show-BcMessage -Icon "Warning" -Text "ChatGPT/Codex 已重新打开，但 CDP 尚未就绪。beautiCode 会继续在后台连接；若稍后仍未恢复，请从托盘重试。"
+            }
+          } else {
+            Show-BcMessage -Icon "Error" -Text "无法通过本机 CDP 端点重新打开 ChatGPT/Codex。请查看 beautiCode 启动日志后重试。"
           }
         } else {
           Write-BcLog "Codex graceful restart stopped: process did not exit"
-          Show-BcMessage -Icon "Warning" -Text "Codex did not exit safely within the timeout. beautiCode did not force-close it. Use the tray action Apply or reapply to try again."
+          Show-BcMessage -Icon "Warning" -Text "Codex 未能在超时时间内安全退出。beautiCode 未强制关闭它。请使用托盘中的“应用”或“重新应用”重试。"
         }
       } else {
         Write-BcLog "no CDP and Codex already running - user declined restart"
       }
     } else {
-      $accepted = Confirm-BcCodexAction -Text "ChatGPT/Codex is not running.`n`nOpen it with a local CDP endpoint so beautiCode can match the window and restore the active background?"
+      $accepted = Confirm-BcCodexAction -Text "ChatGPT/Codex 当前未运行。`n`n是否通过本机 CDP 端点打开它，以便 beautiCode 连接窗口并恢复当前背景？"
       if ($accepted) {
         Write-BcLog "no CDP and Codex not running - user accepted launch"
-        if (-not (Start-CodexWithCdpFast -CdpPort $launchPort)) {
-          Show-BcMessage -Icon "Error" -Text "ChatGPT/Codex could not be opened with a local CDP endpoint. Check the beautiCode launcher log and try again."
+        if (Start-CodexWithCdpFast -CdpPort $launchPort) {
+          $readyPort = Wait-BcCdpReady -Preferred $launchPort -WaitSeconds 15
+          if ($readyPort -gt 0) {
+            $cdpPort = $readyPort
+            Write-BcLog ("Codex CDP ready port={0}" -f $readyPort)
+            [void](Request-BcTrayPanel)
+          } else {
+            Write-BcLog ("Codex CDP readiness timed out preferredPort={0}" -f $launchPort)
+            Show-BcMessage -Icon "Warning" -Text "ChatGPT/Codex 已打开，但 CDP 尚未就绪。beautiCode 会继续在后台连接；若稍后仍未恢复，请从托盘重试。"
+          }
+        } else {
+          Show-BcMessage -Icon "Error" -Text "无法通过本机 CDP 端点打开 ChatGPT/Codex。请查看 beautiCode 启动日志后重试。"
         }
       } else {
         Write-BcLog "no CDP and Codex not running - user declined launch"
@@ -333,7 +427,17 @@ try {
   exit 0
 }
 catch {
-  Write-BcLog ("launcher failed: {0}" -f $_.Exception.Message)
-  Show-BcMessage -Icon "Error" -Text ("beautiCode engine failed to start:`n{0}`n`nLog: {1}" -f $_.Exception.Message, $LogPath)
+  Write-BcLog ("启动器失败：{0}" -f $_.Exception.Message)
+  Show-BcMessage -Icon "Error" -Text ("beautiCode 引擎启动失败：`n{0}`n`n日志：{1}" -f $_.Exception.Message, $LogPath)
   exit 1
+}
+finally {
+  if ($null -ne $script:launcherMutex) {
+    if ($script:launcherMutexOwned) {
+      try { $script:launcherMutex.ReleaseMutex() } catch {}
+      $script:launcherMutexOwned = $false
+    }
+    try { $script:launcherMutex.Dispose() } catch {}
+    $script:launcherMutex = $null
+  }
 }

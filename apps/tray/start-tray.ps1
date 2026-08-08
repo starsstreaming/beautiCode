@@ -44,6 +44,8 @@ Write-BcTrayLog "tray starting"
 
 $script:trayInstanceMutex = $null
 $script:trayInstanceMutexOwned = $false
+$script:showPanelEvent = $null
+$script:showPanelTimer = $null
 $createdNew = $false
 $script:trayInstanceMutex = [System.Threading.Mutex]::new(
   $true,
@@ -55,6 +57,13 @@ if (-not $createdNew) {
   exit 0
 }
 $script:trayInstanceMutexOwned = $true
+$showPanelEventCreated = $false
+$script:showPanelEvent = [System.Threading.EventWaitHandle]::new(
+  $false,
+  [System.Threading.EventResetMode]::AutoReset,
+  "Local\beautiCode.Engine.ShowPanel.v1",
+  [ref]$showPanelEventCreated
+)
 
 $dpiNativeCode = @'
 using System;
@@ -222,13 +231,13 @@ $coreDist = Join-Path $RepoRoot "packages\core\dist\index.js"
 $adapterDist = Join-Path $RepoRoot "packages\adapter-codex\dist\index.js"
 
 if (-not (Test-Path -LiteralPath $CodexLaunchScript -PathType Leaf)) {
-  throw "Missing Codex launch helper: $CodexLaunchScript"
+  throw "缺少 Codex 启动脚本：$CodexLaunchScript"
 }
 . $CodexLaunchScript
 
 if ($NodePath) {
   if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
-    throw ("Node executable not found: {0}" -f $NodePath)
+    throw ("未找到 Node.js 可执行文件：{0}" -f $NodePath)
   }
   $Node = (Resolve-Path -LiteralPath $NodePath).Path
 } elseif (Test-Path -LiteralPath $BundledNode -PathType Leaf) {
@@ -242,7 +251,7 @@ if (Test-Path -LiteralPath $ReleaseManifest -PathType Leaf) {
 }
 
 if (-not (Test-Path -LiteralPath $HostScript)) {
-  throw ("Missing session-host.mjs at {0}" -f $HostScript)
+  throw ("未找到 session-host.mjs：{0}" -f $HostScript)
 }
 
 if (-not $SkipBuild) {
@@ -283,7 +292,7 @@ if (-not $SkipBuild) {
     try {
       & npm.cmd run build
       if ($LASTEXITCODE -ne 0) {
-        throw ("npm run build failed ({0})" -f $LASTEXITCODE)
+        throw ("npm run build 失败（退出码 {0}）。" -f $LASTEXITCODE)
       }
     } finally {
       Pop-Location
@@ -293,7 +302,7 @@ if (-not $SkipBuild) {
 
 foreach ($requiredRuntimeFile in @($HostScript, $coreDist, $adapterDist)) {
   if (-not (Test-Path -LiteralPath $requiredRuntimeFile -PathType Leaf)) {
-    throw ("Missing beautiCode runtime file: {0}" -f $requiredRuntimeFile)
+    throw ("未找到 beautiCode 运行时文件：{0}" -f $requiredRuntimeFile)
   }
 }
 
@@ -328,7 +337,7 @@ if ($DataRoot) {
 $nodeInvocation = [string]::Join(" ", $nodeInvocationParts)
 $bridgeScript = @"
 `$token = [Console]::In.ReadToEnd()
-if ([string]::IsNullOrWhiteSpace(`$token)) { throw "Missing beautiCode control token" }
+if ([string]::IsNullOrWhiteSpace(`$token)) { throw "缺少 beautiCode 控制令牌。" }
 `$env:BEAUTICODE_CONTROL_TOKEN = `$token.Trim()
 & $nodeInvocation
 exit `$LASTEXITCODE
@@ -396,7 +405,7 @@ while ([datetime]::UtcNow -lt $deadline) {
 
 if (-not $ready -or -not $ready.ready) {
   try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
-  throw "Timed out waiting for session-host ready line."
+  throw "等待 session-host 就绪超时。"
 }
 
 $controlPort = [int]$ready.controlPort
@@ -435,8 +444,32 @@ function Invoke-BcApi {
         $msg = $_.ErrorDetails.Message
       }
     }
-    throw $msg
+    throw (ConvertTo-BcChineseError -Message $msg)
   }
+}
+
+function ConvertTo-BcChineseError {
+  param([AllowNull()][string]$Message)
+  $text = if ($null -eq $Message) { "" } else { [string]$Message }
+  if ($text -match '(?i)failed to fetch|fetch failed|fail fetch|No healthy loopback Codex CDP|CDP is missing or unreachable') {
+    return "未发现注入CDP的Codex进程"
+  }
+  if ($text -match '(?i)No active background|no background|Apply an image or video') {
+    return "当前没有背景，请先应用图片或视频。"
+  }
+  if ($text -match '(?i)Another background apply is already in progress|already in progress|\bbusy\b') {
+    return "已有背景应用正在进行中，请等待当前操作完成。"
+  }
+  if ($text -match '(?i)Session is not started') { return "会话尚未启动。" }
+  if ($text -match '(?i)Host is not connected') { return "尚未连接到 Codex 主机。" }
+  if ($text -match '(?i)Saved theme not found') { return "未找到已保存的主题。" }
+  if ($text -match '(?i)Invalid saved theme id') { return "已保存主题 ID 无效。" }
+  if ($text -match '(?i)No live CDP sessions') { return "未发现活动的 CDP 会话。" }
+  if ($text -match '(?i)Timed out waiting') { return "等待目标就绪超时。" }
+  if ($text -match '(?i)Could not stop ChatGPT/Codex') { return "无法停止 ChatGPT/Codex 进程：$text" }
+  if ($text -match '(?i)Cannot start ChatGPT/Codex') { return "无法启动 ChatGPT/Codex：$text" }
+  if ($text -match '(?i)not found') { return "未找到所需文件或资源：$text" }
+  return $text
 }
 
 function Show-Tip {
@@ -446,6 +479,7 @@ function Show-Tip {
     [ValidateSet("Info", "Warning", "Error", "None")]
     [string]$Icon = "Info"
   )
+  $Text = ConvertTo-BcChineseError -Message $Text
   switch ($Icon) {
     "Warning" { $toolIcon = [System.Windows.Forms.ToolTipIcon]::Warning }
     "Error" { $toolIcon = [System.Windows.Forms.ToolTipIcon]::Error }
@@ -582,7 +616,7 @@ function Start-ChatGptDesktop {
   } catch {
     [void]$errors.Add(("Codex launch: {0}" -f $_.Exception.Message))
   }
-  throw ("Cannot start ChatGPT/Codex. {0}" -f ([string]::Join(" | ", @($errors))))
+  throw ("无法启动 ChatGPT/Codex：{0}" -f ([string]::Join(" | ", @($errors))))
 }
 
 function Stop-ChatGptDesktop {
@@ -637,7 +671,7 @@ function Stop-ChatGptDesktop {
     Start-Sleep -Milliseconds 100
   }
   $remaining = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
-  throw ("Could not stop ChatGPT/Codex processes: {0}" -f (
+  throw ("无法停止 ChatGPT/Codex 进程：{0}" -f (
     [string]::Join(", ", @($remaining | ForEach-Object { $_.Id }))
   ))
 }
@@ -868,7 +902,8 @@ $L = @{
 
 function Show-BcError {
   param([string]$Message)
-  if ($Message -match 'already in progress|Busy|busy') {
+  $Message = ConvertTo-BcChineseError -Message $Message
+  if ($Message -match '已有背景应用正在进行中|already in progress|Busy|busy') {
     Show-Tip -Title $L.AppName -Text $L.BusyTip -Icon Warning
     return
   }
@@ -1057,7 +1092,7 @@ function Invoke-BcToggleFish {
     } else {
       $err = if ($res.error) { [string]$res.error } else { $L.ApplyFail }
       # Common case: no background — show the friendly tip.
-      if ($err -match 'No active background|no background|Apply an image') {
+      if ($err -match '当前没有背景|No active background|no background|Apply an image') {
         $script:fishMode = $false
         if (-not $Silent) {
           Show-Tip -Title $L.AppName -Text $L.FishNeedBg -Icon Warning
@@ -1070,7 +1105,7 @@ function Invoke-BcToggleFish {
     }
   } catch {
     $msg = "{0}" -f $_
-    if ($msg -match 'No active background|no background|Apply an image') {
+    if ($msg -match '当前没有背景|No active background|no background|Apply an image') {
       $script:fishMode = $false
       if (-not $Silent) {
         Show-Tip -Title $L.AppName -Text $L.FishNeedBg -Icon Warning
@@ -1926,11 +1961,17 @@ function Invoke-BcPanelAction {
 }
 
 function Show-BcTrayPanel {
+  param([switch]$EnsureVisible)
   if ($null -eq $script:trayPanel) {
     Show-BcFallbackMenu
     return
   }
   if ($script:trayPanel.Visible) {
+    if ($EnsureVisible) {
+      $script:trayPanel.Activate()
+      $script:trayPanel.BringToFront()
+      return
+    }
     $script:trayPanel.Hide()
     return
   }
@@ -2315,6 +2356,23 @@ try {
   Write-Warning ("Custom tray panel unavailable; native fallback enabled: {0}" -f $_.Exception.Message)
 }
 
+$script:showPanelTimer = New-Object System.Windows.Forms.Timer
+$script:showPanelTimer.Interval = 100
+$null = $script:showPanelTimer.add_Tick({
+    try {
+      if (
+        $null -ne $script:showPanelEvent -and
+        $script:showPanelEvent.WaitOne(0)
+      ) {
+        Write-BcTrayLog "show-panel event received"
+        Show-BcTrayPanel -EnsureVisible
+      }
+    } catch {
+      Write-BcTrayLog ("show-panel event failed: {0}" -f $_.Exception.Message)
+    }
+  })
+$script:showPanelTimer.Start()
+
 Rebuild-BcTrayMenu
 if ($null -ne $script:bcUiColors) { Set-BcFallbackMenuStyle }
 
@@ -2365,6 +2423,15 @@ try {
   try {
     $notify.Visible = $false
     $notify.Dispose()
+  } catch {
+    # ignore
+  }
+  try {
+    if ($null -ne $script:showPanelTimer) {
+      $script:showPanelTimer.Stop()
+      $script:showPanelTimer.Dispose()
+      $script:showPanelTimer = $null
+    }
   } catch {
     # ignore
   }
@@ -2426,5 +2493,9 @@ try {
     }
     try { $script:trayInstanceMutex.Dispose() } catch { }
     $script:trayInstanceMutex = $null
+  }
+  if ($null -ne $script:showPanelEvent) {
+    try { $script:showPanelEvent.Dispose() } catch { }
+    $script:showPanelEvent = $null
   }
 }
