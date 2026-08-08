@@ -72,3 +72,5 @@ export {
   BeautiSession,
   type BeautiSessionOptions,
 } from "./session.js";
+
+export { toChineseErrorMessage } from "@beauticode/core";

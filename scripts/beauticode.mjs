@@ -12,7 +12,7 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 if (Number(process.versions.node.split(".", 1)[0]) < 22) {
-  console.error("beautiCode requires Node.js 22 or newer");
+  console.error("beautiCode 需要 Node.js 22 或更高版本。");
   process.exit(1);
 }
 
@@ -30,6 +30,7 @@ const {
   BackgroundStore,
   MediaServerController,
   defaultDataRoot,
+  toChineseErrorMessage,
 } = await import(coreEntry);
 
 function finish(code) {
@@ -88,28 +89,28 @@ function parseArgs(argv) {
     if (a === "--port") {
       const v = Number(argv[++i]);
       if (!Number.isInteger(v) || v < 1 || v > 65535) {
-        throw new Error("--port must be an integer 1–65535");
+        throw new Error("--port 必须是 1–65535 之间的整数。");
       }
       flags.port = v;
       continue;
     }
     if (a === "--data-root") {
       const value = argv[++i];
-      if (!value) throw new Error("--data-root requires a path");
+      if (!value) throw new Error("--data-root 需要一个路径。");
       flags.dataRoot = path.resolve(value);
       continue;
     }
     if (a === "--verify-ms") {
       const v = Number(argv[++i]);
       if (!Number.isFinite(v) || v < 0 || v > 300_000) {
-        throw new Error("--verify-ms must be between 0 and 300000");
+        throw new Error("--verify-ms 必须在 0 到 300000 之间。");
       }
       flags.verifyMs = v;
       continue;
     }
     if (a === "--url-prefix") {
       const value = argv[++i];
-      if (!value) throw new Error("--url-prefix requires a value");
+      if (!value) throw new Error("--url-prefix 需要一个值。");
       flags.urlPrefix = value;
       continue;
     }
@@ -122,7 +123,7 @@ function parseArgs(argv) {
       continue;
     }
     if (a.startsWith("-")) {
-      throw new Error(`Unknown flag: ${a}`);
+      throw new Error(`未知参数：${a}`);
     }
     positionals.push(a);
   }
@@ -130,37 +131,43 @@ function parseArgs(argv) {
 }
 
 function friendlyError(err) {
-  const msg = err instanceof Error ? err.message : String(err);
+  const raw = err instanceof Error ? err.message : String(err);
+  const msg = toChineseErrorMessage(raw);
   if (
     /fetch failed|ECONNREFUSED|aborted|CDP HTTP|Timed out waiting for a CDP|No healthy loopback/i.test(
-      msg,
+      raw,
     )
   ) {
     return [
       msg,
       "",
-      "CDP is missing or unreachable (fail closed).",
-      "Run: npm run bc -- discover",
-      "Or:  npm run bc -- how-to-cdp",
+      "未发现可用的 CDP 连接。",
+      "请运行：npm run bc -- discover",
+      "或运行：npm run bc -- how-to-cdp",
     ].join("\n");
   }
-  if (/Another beautiCode injector is running/i.test(msg)) {
+  if (/Another beautiCode injector is running/i.test(raw)) {
     return [
       msg,
       "",
-      "Only one injector may own a host at a time.",
-      "Stop the other process and retry. Dead-pid locks are reclaimed automatically.",
+      "同一时间只能有一个 beautiCode 注入器占用主机。",
+      "请停止另一个进程后重试；失效进程锁会自动回收。",
     ].join("\n");
   }
-  if (/identity changed|CdpIdentityMismatch/i.test(msg)) {
+  if (/identity changed|CdpIdentityMismatch/i.test(raw)) {
     return [
       msg,
       "",
-      "The Chromium browser identity behind the CDP port changed (host relaunch).",
-      "Re-run probe/apply; watch/tray reconnects automatically.",
+      "CDP 端口背后的 Chromium 浏览器身份已变化，主机可能刚刚重启。",
+      "请重新运行 probe/apply；watch/托盘会自动重连。",
     ].join("\n");
   }
   return msg;
+}
+
+function localizeResult(result) {
+  if (!result || typeof result.error !== "string") return result;
+  return { ...result, error: toChineseErrorMessage(result.error) };
 }
 
 async function resolvePort(flags, adapter) {
@@ -169,7 +176,7 @@ async function resolvePort(flags, adapter) {
   const best = await adapter.findBestCdpPort({ requirePages: true });
   if (!best) {
     throw new Error(
-      "No healthy loopback Codex CDP endpoint found (discover failed closed).",
+      "未发现健康的本机 Codex CDP 端点，请先打开 Codex Desktop。",
     );
   }
   console.error(
@@ -260,7 +267,7 @@ async function main() {
       port = await resolvePort(flags, adapter);
     }
     if (port == null) {
-      console.error("probe requires --port <cdpPort> or --discover");
+      console.error("probe 需要 --port <cdpPort> 或 --discover。");
       finish(1);
       return;
     }
@@ -294,7 +301,7 @@ async function main() {
     let port = flags.port;
     if (port == null) port = await resolvePort({ ...flags, discover: flags.discover || flags.port == null }, adapter);
     if (port == null) {
-      console.error("watch requires --port <cdpPort> or --discover");
+      console.error("watch 需要 --port <cdpPort> 或 --discover。");
       finish(1);
       return;
     }
@@ -315,7 +322,7 @@ async function main() {
         }
       },
       onError: (err) => {
-        console.error(`[watch] ${err.message}`);
+        console.error(`[watch] ${toChineseErrorMessage(err)}`);
       },
     });
     finish(0);
@@ -358,7 +365,7 @@ async function main() {
       input = { type: "video", videoPath: aPath };
     } else {
       console.error(
-        "apply-video expects <video.mp4> [poster] (or legacy <poster> <video.mp4>)",
+        "apply-video 需要 <video.mp4> [poster]（或旧格式 <poster> <video.mp4>）。",
       );
       finish(1);
       return;
@@ -385,7 +392,7 @@ async function main() {
       requireAppProtocol: !flags.allowHttp,
       ...(flags.urlPrefix !== undefined ? { urlPrefix: flags.urlPrefix } : {}),
     });
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(localizeResult(result), null, 2));
     finish(result.ok ? 0 : 2);
     return;
   }
@@ -395,7 +402,7 @@ async function main() {
   const tx = new ApplyTransaction({ store, media, offline: true });
   try {
     const result = await tx.run(input);
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(localizeResult(result), null, 2));
     if (media.active) {
       console.log("mediaServer:", media.active.url);
       console.log(
