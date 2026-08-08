@@ -253,7 +253,8 @@ beautiCode 只读取你主动选择的本地图片和视频。
 beautiCode 的部分媒体处理思路与实现经验参考并改编自：
 
 * Codex Dream Skin
-
+L站的支持：
+https://linux.do/
 相关开源许可、代码来源和修改说明见：
 
 ```text
