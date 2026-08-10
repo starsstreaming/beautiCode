@@ -18,6 +18,66 @@ function Get-BcCodexMainProcesses {
   }
 }
 
+function Wait-BcCodexMainProcessesExit([int]$WaitSeconds = 8) {
+  $deadline = [datetime]::UtcNow.AddSeconds([Math]::Max(1, $WaitSeconds))
+  do {
+    if (@(Get-BcCodexMainProcesses).Count -eq 0) { return $true }
+    Start-Sleep -Milliseconds 250
+  } while ([datetime]::UtcNow -lt $deadline)
+  return (@(Get-BcCodexMainProcesses).Count -eq 0)
+}
+
+# Ask main windows to close first. Electron/Codex often ignores a single
+# CloseMainWindow, so also fall back to Stop-Process (non-force) which still
+# prefers a graceful close on Windows GUI apps.
+function Stop-BcCodexGracefully([int]$WaitSeconds = 8) {
+  $targets = @(Get-BcCodexMainProcesses)
+  if ($targets.Count -eq 0) { return $true }
+
+  foreach ($target in $targets) {
+    try {
+      $target.Process.Refresh()
+      if ($target.Process.MainWindowHandle -ne [IntPtr]::Zero) {
+        [void]$target.Process.CloseMainWindow()
+      }
+    } catch { }
+  }
+
+  if (Wait-BcCodexMainProcessesExit -WaitSeconds ([Math]::Min(3, [Math]::Max(1, $WaitSeconds)))) {
+    return $true
+  }
+
+  foreach ($target in @(Get-BcCodexMainProcesses)) {
+    try {
+      Stop-Process -Id $target.Process.Id -ErrorAction Stop
+    } catch { }
+  }
+
+  return (Wait-BcCodexMainProcessesExit -WaitSeconds $WaitSeconds)
+}
+
+# Last resort after the user already agreed to restart / force-close.
+# Kills main ChatGPT/Codex.exe only (not helper processes under \resources\).
+function Stop-BcCodexForcefully([int]$WaitSeconds = 3) {
+  foreach ($target in @(Get-BcCodexMainProcesses)) {
+    try {
+      Stop-Process -Id $target.Process.Id -Force -ErrorAction Stop
+    } catch { }
+  }
+  if (Wait-BcCodexMainProcessesExit -WaitSeconds $WaitSeconds) {
+    return $true
+  }
+
+  # AppX / stubborn Electron trees sometimes leave the main image alive until
+  # the process tree is torn down. taskkill /T is Windows-only and scoped by PID.
+  foreach ($target in @(Get-BcCodexMainProcesses)) {
+    try {
+      $null = & taskkill.exe /PID $target.Process.Id /T /F 2>$null
+    } catch { }
+  }
+  return (Wait-BcCodexMainProcessesExit -WaitSeconds $WaitSeconds)
+}
+
 function Get-BcCodexPackageLocations {
   $packages = @()
   try {

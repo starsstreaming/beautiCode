@@ -620,8 +620,7 @@ function Start-ChatGptDesktop {
 }
 
 function Stop-ChatGptDesktop {
-  $names = @("ChatGPT", "Codex")
-  $targets = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
+  $targets = @(Get-BcCodexMainProcesses)
   if ($targets.Count -eq 0) { return $true }
 
   $answer = [System.Windows.Forms.MessageBox]::Show(
@@ -636,18 +635,8 @@ function Stop-ChatGptDesktop {
     return $false
   }
 
-  # Ask the main windows to close first so the app can flush unsaved state.
-  foreach ($p in $targets) {
-    try {
-      if ($p.MainWindowHandle -ne 0) { [void]$p.CloseMainWindow() }
-    } catch { }
-  }
-  $deadline = [datetime]::UtcNow.AddSeconds(5)
-  while ([datetime]::UtcNow -lt $deadline) {
-    $left = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
-    if ($left.Count -eq 0) { return $true }
-    Start-Sleep -Milliseconds 100
-  }
+  # Shared helper: CloseMainWindow first, then a non-force Stop-Process.
+  if (Stop-BcCodexGracefully -WaitSeconds 5) { return $true }
 
   $answer = [System.Windows.Forms.MessageBox]::Show(
     $L.ForceCloseConfirm,
@@ -660,19 +649,12 @@ function Stop-ChatGptDesktop {
     Show-Tip -Title $L.AppName -Text $L.RestartCancelled -Icon Info
     return $false
   }
-  $left = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
-  foreach ($p in $left) {
-    try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
-  }
-  $deadline = [datetime]::UtcNow.AddSeconds(2)
-  while ([datetime]::UtcNow -lt $deadline) {
-    $left = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
-    if ($left.Count -eq 0) { return $true }
-    Start-Sleep -Milliseconds 100
-  }
-  $remaining = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
+
+  if (Stop-BcCodexForcefully -WaitSeconds 3) { return $true }
+
+  $remaining = @(Get-BcCodexMainProcesses)
   throw ("无法停止 ChatGPT/Codex 进程：{0}" -f (
-    [string]::Join(", ", @($remaining | ForEach-Object { $_.Id }))
+    [string]::Join(", ", @($remaining | ForEach-Object { $_.Process.Id }))
   ))
 }
 
@@ -1983,10 +1965,8 @@ function Show-BcTrayPanel {
     $cursor = [System.Windows.Forms.Cursor]::Position
     $screen = [System.Windows.Forms.Screen]::FromPoint($cursor)
     $work = $screen.WorkingArea
-    $x = $cursor.X - $script:trayPanel.Width + 20
-    $y = $cursor.Y - $script:trayPanel.Height - 10
-    $x = [Math]::Max($work.Left + 8, [Math]::Min($x, $work.Right - $script:trayPanel.Width - 8))
-    $y = [Math]::Max($work.Top + 8, [Math]::Min($y, $work.Bottom - $script:trayPanel.Height - 8))
+    $x = [Math]::Max($work.Left + 8, $work.Right - $script:trayPanel.Width - 8)
+    $y = [Math]::Max($work.Top + 8, $work.Bottom - $script:trayPanel.Height - 8)
     $script:trayPanel.Location = New-Object System.Drawing.Point($x, $y)
     $script:trayPanel.Show()
     $script:trayPanel.Activate()
