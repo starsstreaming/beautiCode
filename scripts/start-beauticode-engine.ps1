@@ -218,25 +218,6 @@ function Confirm-BcCodexAction {
   }
 }
 
-function Stop-BcCodexGracefully([int]$WaitSeconds = 8) {
-  $targets = @(Get-BcCodexMainProcesses)
-  foreach ($target in $targets) {
-    try {
-      if ($target.Process.MainWindowHandle -ne [IntPtr]::Zero) {
-        [void]$target.Process.CloseMainWindow()
-      }
-    } catch {
-      Write-BcLog ("无法请求 Codex 平稳关闭：{0}" -f $_.Exception.Message)
-    }
-  }
-  $deadline = [datetime]::UtcNow.AddSeconds([Math]::Max(1, $WaitSeconds))
-  do {
-    if (@(Get-BcCodexMainProcesses).Count -eq 0) { return $true }
-    Start-Sleep -Milliseconds 250
-  } while ([datetime]::UtcNow -lt $deadline)
-  return (@(Get-BcCodexMainProcesses).Count -eq 0)
-}
-
 function Start-CodexWithCdpFast([int]$CdpPort) {
   if ($CdpPort -le 0 -or $CdpPort -gt 65535) {
     $CdpPort = Get-BcLoopbackCdpPort
@@ -377,8 +358,30 @@ try {
       # session-host watcher can import the active background immediately.
       $accepted = Confirm-BcCodexAction -Text "ChatGPT/Codex 已在运行，但未发现可用的 CDP 端点。`n`n若要让 beautiCode 连接此窗口并恢复当前背景，必须安全重启 ChatGPT/Codex。未保存的内容可能会丢失。现在重启吗？"
       if ($accepted) {
-        Write-BcLog "no CDP and Codex already running - user accepted graceful restart"
-        if (Stop-BcCodexGracefully) {
+        Write-BcLog "no CDP and Codex already running - user accepted restart"
+        $stopped = $false
+        try {
+          $stopped = Stop-BcCodexGracefully
+        } catch {
+          Write-BcLog ("Codex graceful stop failed: {0}" -f $_.Exception.Message)
+          $stopped = $false
+        }
+        if (-not $stopped) {
+          Write-BcLog "Codex did not exit gracefully - asking to force close"
+          $forceAccepted = Confirm-BcCodexAction -Text "ChatGPT/Codex 未能在超时时间内安全退出。`n`n是否强制结束剩余进程并重新打开？未保存的内容可能会丢失。"
+          if ($forceAccepted) {
+            Write-BcLog "user accepted force close"
+            try {
+              $stopped = Stop-BcCodexForcefully
+            } catch {
+              Write-BcLog ("Codex force stop failed: {0}" -f $_.Exception.Message)
+              $stopped = $false
+            }
+          } else {
+            Write-BcLog "user declined force close"
+          }
+        }
+        if ($stopped) {
           if (Start-CodexWithCdpFast -CdpPort $launchPort) {
             $readyPort = Wait-BcCdpReady -Preferred $launchPort -WaitSeconds 15
             if ($readyPort -gt 0) {
@@ -393,8 +396,8 @@ try {
             Show-BcMessage -Icon "Error" -Text "无法通过本机 CDP 端点重新打开 ChatGPT/Codex。请查看 beautiCode 启动日志后重试。"
           }
         } else {
-          Write-BcLog "Codex graceful restart stopped: process did not exit"
-          Show-BcMessage -Icon "Warning" -Text "Codex 未能在超时时间内安全退出。beautiCode 未强制关闭它。请使用托盘中的“应用”或“重新应用”重试。"
+          Write-BcLog "Codex restart aborted: process still running"
+          Show-BcMessage -Icon "Warning" -Text "Codex 仍在运行，重启已取消。请手动关闭 ChatGPT/Codex 后，使用托盘中的“应用或重新应用”重试。"
         }
       } else {
         Write-BcLog "no CDP and Codex already running - user declined restart"

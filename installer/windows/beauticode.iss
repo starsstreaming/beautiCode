@@ -4,7 +4,7 @@
 #define MyAppPublisher "beautiCode"
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.3"
+  #define MyAppVersion "0.1.4"
 #endif
 
 #ifndef StageDir
