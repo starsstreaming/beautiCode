@@ -7,8 +7,9 @@ import {
   buildHostApplyPayload,
   type ApplyInput,
   type ApplyResult,
-  type BackgroundManifest,
   type BackgroundTone,
+  type HostSession,
+  type HostSessionStatus,
   type SavedThemeInfo,
 } from "@beauticode/core";
 import { CodexHostApplier } from "./host-applier.js";
@@ -17,6 +18,7 @@ import { probeCdp } from "./discovery.js";
 import { findBestCdpPort } from "./host-discover.js";
 import { acquireInjectorLock } from "./injector-lock.js";
 import { loadRendererSource } from "./payload.js";
+import { CODEX_HOST_DESCRIPTOR } from "./host-descriptor.js";
 
 export interface BeautiSessionOptions {
   /** Fixed CDP port. If omitted, discover() is used on start. */
@@ -44,7 +46,8 @@ export interface BeautiSessionOptions {
  * Video applies use CDP file input → blob inside the renderer. The Codex path
  * keeps its HTTP media controller disabled because app:// CSP blocks loopback.
  */
-export class BeautiSession {
+export class BeautiSession implements HostSession {
+  readonly descriptor = CODEX_HOST_DESCRIPTOR;
   readonly dataRoot: string;
   readonly verifyDeadlineMs: number;
   readonly requireAppProtocol: boolean;
@@ -311,18 +314,11 @@ export class BeautiSession {
     }
   }
 
-  async status(): Promise<{
-    port: number | null;
-    sessions: number;
-    manifest: BackgroundManifest;
-    mediaServer: string | null;
-    fish: boolean;
-    muted: boolean;
-    tone: BackgroundTone;
-  }> {
+  async status(): Promise<HostSessionStatus> {
     await this.store.init();
     const manifest = await this.store.readActiveManifest();
     return {
+      host: this.descriptor,
       port: this.port,
       sessions: this.host?.activeSessionCount ?? 0,
       manifest,

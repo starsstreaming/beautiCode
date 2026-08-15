@@ -73,4 +73,6 @@ export {
   type BeautiSessionOptions,
 } from "./session.js";
 
+export { CODEX_HOST_DESCRIPTOR } from "./host-descriptor.js";
+
 export { toChineseErrorMessage } from "@beauticode/core";

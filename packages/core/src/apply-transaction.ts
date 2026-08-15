@@ -192,11 +192,14 @@ export class ApplyTransaction {
     const image = await this.media.stage(imagePath);
     let video: MediaAssetHandle | null = null;
     if (manifest.background.type === "video" && manifest.background.video) {
-      const videoPath = path.join(
-        this.store.paths.activeDir,
-        manifest.background.video,
-      );
-      video = await this.media.stage(videoPath);
+      // DSH streams this handle for the lifetime of the active <video>. On
+      // Windows, serving active/background.mp4 directly keeps the active
+      // directory open and the next atomic directory swap fails with EPERM.
+      const runtimeVideoPath = await this.store.prepareRuntimeVideo(manifest);
+      if (!runtimeVideoPath) {
+        throw new Error("Video media staging requires a detached runtime copy.");
+      }
+      video = await this.media.stage(runtimeVideoPath);
     }
     return { image, video };
   }

@@ -18,3 +18,16 @@ test("user-facing CDP errors are localized", () => {
     "实时校验未通过（失败）：未找到视频节点。",
   );
 });
+
+test("user-facing DeepSeek Harness errors are localized", () => {
+  assert.match(
+    toChineseErrorMessage(
+      "DeepSeek Harness phase one supports image backgrounds only.",
+    ),
+    /DeepSeek Harness 第一阶段仅支持图片背景/,
+  );
+  assert.match(
+    toChineseErrorMessage("No DeepSeek Harness browser client is connected."),
+    /页面尚未连接/,
+  );
+});

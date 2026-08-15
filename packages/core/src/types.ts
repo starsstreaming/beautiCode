@@ -2,6 +2,25 @@ import { SCHEMA_ID } from "./constants.js";
 
 export type BackgroundType = "image" | "video" | "clear";
 export type BackgroundTone = "dark" | "light" | "auto";
+export type HostKind = "codex" | "dsh";
+
+export interface HostCapabilities {
+  image: boolean;
+  clear: boolean;
+  reapply: boolean;
+  savedThemes: boolean;
+  video: boolean;
+  fish: boolean;
+  muted: boolean;
+  tone: boolean;
+}
+
+/** Stable metadata used by the control plane instead of host-specific guesses. */
+export interface HostDescriptor {
+  kind: HostKind;
+  displayName: string;
+  capabilities: HostCapabilities;
+}
 
 export interface BackgroundMedia {
   type: "image" | "video";
