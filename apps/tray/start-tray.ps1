@@ -3,10 +3,14 @@ param(
   [int]$Port = 0,
   [string]$DataRoot = "",
   [string]$NodePath = "",
+  [ValidateSet("codex", "dsh")]
+  [string]$TargetHost = "codex",
+  [string]$DshUrl = "http://127.0.0.1:3080",
   [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
+$script:targetHost = $TargetHost
 
 $script:TrayLogRoot = if ($env:LOCALAPPDATA) {
   Join-Path $env:LOCALAPPDATA "beautiCode\logs"
@@ -44,7 +48,10 @@ Write-BcTrayLog "tray starting"
 
 $script:trayInstanceMutex = $null
 $script:trayInstanceMutexOwned = $false
+$script:hostInstanceMutex = $null
+$script:hostInstanceMutexOwned = $false
 $script:showPanelEvent = $null
+$script:shutdownEvent = $null
 $script:showPanelTimer = $null
 $createdNew = $false
 $script:trayInstanceMutex = [System.Threading.Mutex]::new(
@@ -57,12 +64,26 @@ if (-not $createdNew) {
   exit 0
 }
 $script:trayInstanceMutexOwned = $true
+$hostMutexCreated = $false
+$script:hostInstanceMutex = [System.Threading.Mutex]::new(
+  $true,
+  ("Local\beautiCode.Engine.Host.{0}.v1" -f $TargetHost),
+  [ref]$hostMutexCreated
+)
+$script:hostInstanceMutexOwned = $hostMutexCreated
 $showPanelEventCreated = $false
 $script:showPanelEvent = [System.Threading.EventWaitHandle]::new(
   $false,
   [System.Threading.EventResetMode]::AutoReset,
   "Local\beautiCode.Engine.ShowPanel.v1",
   [ref]$showPanelEventCreated
+)
+$shutdownEventCreated = $false
+$script:shutdownEvent = [System.Threading.EventWaitHandle]::new(
+  $false,
+  [System.Threading.EventResetMode]::AutoReset,
+  "Local\beautiCode.Engine.Shutdown.v1",
+  [ref]$shutdownEventCreated
 )
 
 $dpiNativeCode = @'
@@ -109,7 +130,11 @@ Add-Type -TypeDefinition $dpiNativeCode -ErrorAction Stop
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
-[System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
+try {
+  [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
+} catch [System.InvalidOperationException] {
+  Write-BcTrayLog "compatible text rendering was already initialized by the launcher"
+}
 
 if (-not ("BeautiCodeToggle" -as [type])) {
   $toggleCode = @'
@@ -228,12 +253,15 @@ $CodexLaunchScript = Join-Path $RepoRoot "scripts\codex-launch.ps1"
 $ReleaseManifest = Join-Path $RepoRoot "release-manifest.json"
 $BundledNode = Join-Path $RepoRoot "runtime\node.exe"
 $coreDist = Join-Path $RepoRoot "packages\core\dist\index.js"
-$adapterDist = Join-Path $RepoRoot "packages\adapter-codex\dist\index.js"
+$adapterFolder = if ($TargetHost -eq "dsh") { "adapter-dsh" } else { "adapter-codex" }
+$adapterDist = Join-Path $RepoRoot ("packages\{0}\dist\index.js" -f $adapterFolder)
 
-if (-not (Test-Path -LiteralPath $CodexLaunchScript -PathType Leaf)) {
-  throw "缺少 Codex 启动脚本：$CodexLaunchScript"
+if ($TargetHost -eq "codex") {
+  if (-not (Test-Path -LiteralPath $CodexLaunchScript -PathType Leaf)) {
+    throw "缺少 Codex 启动脚本：$CodexLaunchScript"
+  }
+  . $CodexLaunchScript
 }
-. $CodexLaunchScript
 
 if ($NodePath) {
   if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
@@ -266,7 +294,7 @@ if (-not $SkipBuild) {
     $inputFiles = @()
     foreach ($inputPath in @(
         (Join-Path $RepoRoot "packages\core\src"),
-        (Join-Path $RepoRoot "packages\adapter-codex\src")
+        (Join-Path $RepoRoot ("packages\{0}\src" -f $adapterFolder))
       )) {
       $inputFiles += @(Get-ChildItem -LiteralPath $inputPath -Recurse -File)
     }
@@ -274,7 +302,7 @@ if (-not $SkipBuild) {
         (Join-Path $RepoRoot "package.json"),
         (Join-Path $RepoRoot "package-lock.json"),
         (Join-Path $RepoRoot "packages\core\package.json"),
-        (Join-Path $RepoRoot "packages\adapter-codex\package.json"),
+        (Join-Path $RepoRoot ("packages\{0}\package.json" -f $adapterFolder)),
         (Join-Path $RepoRoot "scripts\copy-renderer-assets.mjs")
       )) {
       if (Test-Path -LiteralPath $inputPath) {
@@ -322,8 +350,13 @@ function ConvertTo-PsLiteral([string]$Value) {
 
 $nodeInvocationParts = @(
   (ConvertTo-PsLiteral $Node),
-  (ConvertTo-PsLiteral $HostScript)
+  (ConvertTo-PsLiteral $HostScript),
+  "--host",
+  $TargetHost
 )
+if ($TargetHost -eq "dsh") {
+  $nodeInvocationParts += @("--dsh-url", (ConvertTo-PsLiteral $DshUrl))
+}
 if ($Port -gt 0) {
   $nodeInvocationParts += @("--port", "$Port")
 }
@@ -409,11 +442,11 @@ if (-not $ready -or -not $ready.ready) {
 }
 
 $controlPort = [int]$ready.controlPort
-$cdpPort = [int]$ready.cdpPort
+$cdpPort = if ($null -ne $ready.cdpPort) { [int]$ready.cdpPort } else { 0 }
 $script:cdpPort = $cdpPort
 $BaseUrl = "http://127.0.0.1:$controlPort"
-Write-Host ("Tray control plane {0} (CDP :{1})" -f $BaseUrl, $cdpPort)
-Write-BcTrayLog ("session-host ready controlPort={0} cdpPort={1}" -f $controlPort, $cdpPort)
+Write-Host ("Tray control plane {0} (host: {1})" -f $BaseUrl, $TargetHost)
+Write-BcTrayLog ("session-host ready host={0} controlPort={1} cdpPort={2}" -f $TargetHost, $controlPort, $cdpPort)
 
 function Invoke-BcApi {
   param(
@@ -729,6 +762,17 @@ function Wait-BcCdpReady {
 # - process up, CDP missing   → restart with CDP flags, wait, reapply
 # - process down              → start with CDP flags, wait, reapply
 function Invoke-BcEnsureHostAndReapply {
+  if ($script:targetHost -eq "dsh") {
+    $res = Invoke-BcApi -Method Post -Path "/reapply" -Body @{}
+    if ($res.ok) {
+      Show-Tip -Title $L.AppName -Text $L.ReapplyOk -Icon Info
+      return $true
+    }
+    $err = if ($res.error) { [string]$res.error } else { $L.ApplyFail }
+    Show-Tip -Title $L.AppName -Text $err -Icon Error
+    return $false
+  }
+
   $preferred = 0
   try {
     if ($script:cdpPort -gt 0) { $preferred = [int]$script:cdpPort }
@@ -873,6 +917,10 @@ $L = @{
   ForceCloseConfirm = (U "5E94 7528 672A 5728 0020 0035 0020 79D2 5185 9000 51FA 3002 662F 5426 5F3A 5236 7ED3 675F 5269 4F59 8FDB 7A0B FF1F")
   RestartCancelled = (U "5DF2 53D6 6D88 91CD 542F 3002")
   RunningTip     = (U "6258 76D8 5DF2 542F 52A8 3002 0043 0074 0072 006C 002B 0053 0068 0069 0066 0074 002B 0053 0070 0061 0063 0065 0020 6478 9C7C 3002") # 托盘已启动。Ctrl+Shift+Space 摸鱼。
+  RunningTipDsh  = (U "6258 76D8 5DF2 542F 52A8 3002 8BF7 5148 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 3002") # 托盘已启动。请先打开 DeepSeek Harness 网页。
+  HostCodex      = "Codex Desktop"
+  HostDsh        = "DeepSeek Harness"
+  DshPhaseOne    = (U "0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7B2C 4E00 9636 6BB5 4EC5 652F 6301 56FE 7247 80CC 666F 3001 6E05 9664 548C 91CD 65B0 5E94 7528 3002") # DeepSeek Harness 第一阶段仅支持图片背景、清除和重新应用。
   FailedSuffix   = (U "5931 8D25")                                         # 失败
   MediaImage     = (U "56FE 7247")                                         # 图片
   MediaVideo     = (U "89C6 9891")                                         # 视频
@@ -971,6 +1019,7 @@ function Get-BcStatusLine {
     # Deliberately omit CDP port and generation — keep tray UX simple.
     $parts = New-Object System.Collections.ArrayList
     [void]$parts.Add($base)
+    [void]$parts.Add($(if ($script:targetHost -eq "dsh") { $L.HostDsh } else { $L.HostCodex }))
     [void]$parts.Add($mediaLabel)
     if ($script:fishMode) { [void]$parts.Add($L.FishLabel) }
     if (-not $script:videoMuted -and $mediaKey -eq "video") {
@@ -2341,6 +2390,14 @@ $script:showPanelTimer.Interval = 100
 $null = $script:showPanelTimer.add_Tick({
     try {
       if (
+        $null -ne $script:shutdownEvent -and
+        $script:shutdownEvent.WaitOne(0)
+      ) {
+        Write-BcTrayLog "shutdown event received"
+        [System.Windows.Forms.Application]::Exit()
+        return
+      }
+      if (
         $null -ne $script:showPanelEvent -and
         $script:showPanelEvent.WaitOne(0)
       ) {
@@ -2370,7 +2427,8 @@ if (-not (Register-BcFishHotkey)) {
   Show-Tip -Title $L.AppName -Text $L.HotkeyFail -Icon Warning
 }
 
-Show-Tip -Title $L.AppName -Text $L.RunningTip -Icon Info
+$runningText = if ($script:targetHost -eq "dsh") { $L.RunningTipDsh } else { $L.RunningTip }
+Show-Tip -Title $L.AppName -Text $runningText -Icon Info
 
 try {
   [System.Windows.Forms.Application]::Run()
@@ -2474,8 +2532,20 @@ try {
     try { $script:trayInstanceMutex.Dispose() } catch { }
     $script:trayInstanceMutex = $null
   }
+  if ($null -ne $script:hostInstanceMutex) {
+    if ($script:hostInstanceMutexOwned) {
+      try { $script:hostInstanceMutex.ReleaseMutex() } catch { }
+      $script:hostInstanceMutexOwned = $false
+    }
+    try { $script:hostInstanceMutex.Dispose() } catch { }
+    $script:hostInstanceMutex = $null
+  }
   if ($null -ne $script:showPanelEvent) {
     try { $script:showPanelEvent.Dispose() } catch { }
     $script:showPanelEvent = $null
+  }
+  if ($null -ne $script:shutdownEvent) {
+    try { $script:shutdownEvent.Dispose() } catch { }
+    $script:shutdownEvent = $null
   }
 }

@@ -35,9 +35,6 @@ if (Number(process.versions.node.split(".", 1)[0]) < 22) {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
-const adapterEntry = pathToFileURL(
-  path.resolve(repoRoot, "packages/adapter-codex/dist/index.js"),
-).href;
 
 function argValue(name) {
   const idx = process.argv.indexOf(name);
@@ -46,9 +43,20 @@ function argValue(name) {
   return value && !value.startsWith("--") ? value : null;
 }
 
+const hostKind = argValue("--host") ?? "codex";
+if (hostKind !== "codex" && hostKind !== "dsh") {
+  console.error("--host 必须是 codex 或 dsh。");
+  process.exit(1);
+}
+const adapterFolder = hostKind === "dsh" ? "adapter-dsh" : "adapter-codex";
+const adapterEntry = pathToFileURL(
+  path.resolve(repoRoot, `packages/${adapterFolder}/dist/index.js`),
+).href;
+
 const token = process.env.BEAUTICODE_CONTROL_TOKEN;
 delete process.env.BEAUTICODE_CONTROL_TOKEN;
 const portArg = argValue("--port");
+const dshUrl = argValue("--dsh-url") ?? "http://127.0.0.1:3080";
 const dataRoot = argValue("--data-root");
 const verifyMs = Number(argValue("--verify-ms") ?? "30000");
 if (!Number.isFinite(verifyMs) || verifyMs < 0 || verifyMs > 300_000) {
@@ -76,6 +84,7 @@ const sessionOpts = {
     console.error(`[session] ${msg}`);
   },
 };
+if (hostKind === "dsh") sessionOpts.baseUrl = dshUrl;
 if (portArg) {
   const p = Number(portArg);
   if (!Number.isInteger(p) || p < 1 || p > 65535) {
@@ -87,7 +96,8 @@ if (portArg) {
 }
 if (dataRoot) sessionOpts.dataRoot = path.resolve(dataRoot);
 
-const session = new adapter.BeautiSession(sessionOpts);
+const SessionClass = hostKind === "dsh" ? adapter.DshSession : adapter.BeautiSession;
+const session = new SessionClass(sessionOpts);
 let shuttingDown = false;
 
 function readBody(req, maxBytes = 64 * 1024) {
@@ -191,6 +201,7 @@ const server = http.createServer(
     if (req.method === "GET" && url === "/health") {
       send(res, 200, {
         ok: true,
+        host: session.descriptor,
         port: session.cdpPort,
         open: session.isOpen,
         busy: session.isBusy,
@@ -208,10 +219,33 @@ const server = http.createServer(
       return;
     }
     if (req.method === "GET" && url === "/guidance") {
-      send(res, 200, { ok: true, guidance: adapter.getCodexLaunchGuidance() });
+      send(res, 200, {
+        ok: true,
+        guidance:
+          hostKind === "dsh"
+            ? {
+                title: "连接 DeepSeek Harness",
+                steps: [
+                  "使用 integrations/deepseek-harness/cordis.patch.example.yml 启动 dsh web。",
+                  "在浏览器中打开 DSH Web 页面。",
+                  "回到 beautiCode 托盘选择图片。",
+                ],
+              }
+            : adapter.getCodexLaunchGuidance(),
+      });
       return;
     }
     if (req.method === "POST" && url === "/discover") {
+      if (hostKind === "dsh") {
+        const status = await session.status();
+        send(res, 200, {
+          ok: status.sessions > 0,
+          endpoints: status.sessions > 0
+            ? [{ port: status.port, browser: "DeepSeek Harness", primaryPages: status.sessions, source: "bridge" }]
+            : [],
+        });
+        return;
+      }
       const endpoints = await adapter.discoverCdpEndpoints({ requirePages: true });
       send(res, 200, {
         ok: endpoints.length > 0,
@@ -411,6 +445,7 @@ const listenPort = typeof addr === "object" && addr ? addr.port : 0;
 console.log(
   JSON.stringify({
     ready: true,
+    host: hostKind,
     controlPort: listenPort,
     cdpPort: session.cdpPort,
   }),
