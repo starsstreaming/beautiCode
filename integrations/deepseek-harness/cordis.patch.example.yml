@@ -1,0 +1,5 @@
+# Manual-use example. The launcher generates this patch for the actual install path.
+- insert:
+    - id: beauticode-bridge
+      name: 'file:///C:/WoRk/beautiCode/integrations/deepseek-harness/index.mjs'
+      inject: [webServer]
