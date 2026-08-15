@@ -18,24 +18,43 @@
   style.textContent = `
 html[data-bc-active="true"],html[data-bc-active="true"] body{background:transparent!important}
 html[data-bc-active="true"] body{
-  --dsw-alias-bg-base:rgba(17,20,27,.26);
-  --dsw-alias-bg-layer-1:rgba(26,30,39,.58);
-  --dsw-alias-bg-layer-2:rgba(35,40,51,.68);
-  --dsw-alias-bg-overlay:rgba(17,20,27,.74);
-  --dsw-specific-sidebar-fill:rgba(23,27,35,.64);
+  --dsw-alias-bg-base:rgba(17,20,27,.10);
+  --dsw-alias-bg-layer-1:rgba(26,30,39,.28);
+  --dsw-alias-bg-layer-2:rgba(35,40,51,.32);
+  --dsw-alias-bg-overlay:rgba(17,20,27,.12);
+  --dsw-specific-sidebar-fill:rgba(23,27,35,.28);
 }
 html[data-bc-resolved-tone="light"][data-bc-active="true"] body{
-  --dsw-alias-bg-base:rgba(248,250,252,.34);
-  --dsw-alias-bg-layer-1:rgba(255,255,255,.64);
-  --dsw-alias-bg-layer-2:rgba(248,250,252,.72);
-  --dsw-alias-bg-overlay:rgba(255,255,255,.76);
-  --dsw-specific-sidebar-fill:rgba(255,255,255,.68);
+  --dsw-alias-bg-base:rgba(248,250,252,.12);
+  --dsw-alias-bg-layer-1:rgba(255,255,255,.28);
+  --dsw-alias-bg-layer-2:rgba(248,250,252,.32);
+  --dsw-alias-bg-overlay:rgba(255,255,255,.14);
+  --dsw-specific-sidebar-fill:rgba(255,255,255,.28);
+}
+html[data-bc-active="true"]:has(#root [data-phase="active"]) body,
+html[data-bc-active="true"]:has(#root [data-phase="settling"]) body{
+  --dsw-alias-bg-base:rgba(17,20,27,.42);
+  --dsw-alias-bg-layer-1:rgba(26,30,39,.72);
+  --dsw-alias-bg-layer-2:rgba(35,40,51,.80);
+  --dsw-alias-bg-overlay:rgba(17,20,27,.86);
+  --dsw-specific-sidebar-fill:rgba(23,27,35,.78);
+}
+html[data-bc-resolved-tone="light"][data-bc-active="true"]:has(#root [data-phase="active"]) body,
+html[data-bc-resolved-tone="light"][data-bc-active="true"]:has(#root [data-phase="settling"]) body{
+  --dsw-alias-bg-base:rgba(248,250,252,.48);
+  --dsw-alias-bg-layer-1:rgba(255,255,255,.74);
+  --dsw-alias-bg-layer-2:rgba(248,250,252,.82);
+  --dsw-alias-bg-overlay:rgba(255,255,255,.86);
+  --dsw-specific-sidebar-fill:rgba(255,255,255,.78);
 }
 #beauticode-bg-stage{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:#11141b}
-#beauticode-bg-stage::after{content:"";position:absolute;inset:0;z-index:2;background:rgba(0,0,0,.24);pointer-events:none}
+#beauticode-bg-stage::after{content:"";position:absolute;inset:0;z-index:2;background:transparent;pointer-events:none}
 html[data-bc-resolved-tone="light"] #beauticode-bg-stage{background:#f8fafc}
-html[data-bc-resolved-tone="light"] #beauticode-bg-stage::after{background:rgba(255,255,255,.10)}
-html[data-bc-active="true"]:has(#root [data-phase="hero"]) #beauticode-bg-stage::after{background:transparent}
+html[data-bc-active="true"]:has(#root [data-phase="active"]) #beauticode-bg-stage::after,
+html[data-bc-active="true"]:has(#root [data-phase="settling"]) #beauticode-bg-stage::after{background:rgba(0,0,0,.42)}
+html[data-bc-resolved-tone="light"][data-bc-active="true"]:has(#root [data-phase="active"]) #beauticode-bg-stage::after,
+html[data-bc-resolved-tone="light"][data-bc-active="true"]:has(#root [data-phase="settling"]) #beauticode-bg-stage::after{background:rgba(255,255,255,.22)}
+html[data-bc-fish="true"] #beauticode-bg-stage::after{background:transparent!important}
 #beauticode-bg-stage img,#beauticode-bg-stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
 #beauticode-bg-stage img{z-index:0}
 #beauticode-bg-stage video{z-index:1}

@@ -263,13 +263,12 @@
     pendingStartAt = null;
   }
 
-  // Focus dim: when the user is in a project/task thread (or the agent is
-  // generating), set data-bc-working so CSS can slightly darken the RIGHT
-  // main column only. LEFT sidebar + stage veil stay identical to home so
-  // entering a project does not jump left-column brightness. Do NOT filter
-  // the whole stage (that would shift art under the sidebar).
-  // Media stays mounted and keeps playing — never pause/remove/hide the
-  // <video>. Home/new-task stays bright. Fail open on detector errors.
+  // Focus dim: only when a project/task thread is confirmed open, set
+  // data-bc-working so CSS can slightly darken the RIGHT main column.
+  // Home / new-task (including just-imported media) stays bright. Agent
+  // generation on the landing must not dim. LEFT sidebar stays identical
+  // to home. Do NOT filter the whole stage (that would shift art under
+  // the sidebar). Media stays mounted and keeps playing. Fail open.
   let working = false;
   let workObserver = null;
   let workPollTimer = null;
@@ -278,10 +277,6 @@
   let workRouteHooked = false;
   const WORK_POLL_MS = 2000;
   const WORK_DEBOUNCE_MS = 200;
-  const WORK_LABEL_RE =
-    /^(stop|stop generating|stop response|cancel|abort|halt|停止|停止生成|取消|中止)$/i;
-  const WORK_LABEL_LOOSE_RE =
-    /\b(stop generating|stop response|stop run|stop task)\b|停止生成|停止响应/;
 
   const isCurrent = () =>
     !disposed &&
@@ -321,27 +316,6 @@
     else root.removeAttribute("data-bc-working");
   };
 
-  const textLooksLikeStop = (raw) => {
-    if (!raw) return false;
-    const t = String(raw).replace(/\s+/g, " ").trim();
-    if (!t || t.length > 48) return false;
-    if (WORK_LABEL_RE.test(t)) return true;
-    if (WORK_LABEL_LOOSE_RE.test(t)) return true;
-    return false;
-  };
-
-  const elLooksInteractive = (el) => {
-    if (!el || el.nodeType !== 1) return false;
-    const tag = (el.tagName || "").toLowerCase();
-    if (tag === "button" || tag === "summary") return true;
-    const role = (el.getAttribute && el.getAttribute("role")) || "";
-    if (role === "button" || role === "menuitem") return true;
-    if (typeof el.closest === "function") {
-      if (el.closest("button, [role='button'], [role='menuitem']")) return true;
-    }
-    return false;
-  };
-
   const isVisibleEl = (el) => {
     if (!el || !el.isConnected) return false;
     try {
@@ -379,9 +353,9 @@
   };
 
   /**
-   * True when a project task / conversation thread is open — the case the
-   * user wants dimmed ("进入项目开始工作"). Prefer structural signals over
-   * brittle chrome class names (#244).
+   * True when a project task / conversation thread is confirmed open —
+   * the only case that should dim. Prefer structural thread / selected-task
+   * signals over header+composer (home and new-task also have those).
    */
   const isTaskOrProjectView = () => {
     try {
@@ -395,27 +369,10 @@
           '[data-testid*="conversation"]',
           '[data-testid*="thread"]',
           '[data-testid*="turn"]',
-          'body > #root main [data-message-id]',
+          "body > #root main [data-message-id]",
         ].join(", "),
       );
       if (thread && isVisibleEl(thread)) return true;
-
-      // Open task header: folder glyph + title in the main app header
-      // (matches the project task chrome in Codex Desktop).
-      const header = document.querySelector(
-        "body > #root main header.app-header-tint, body > #root main header",
-      );
-      if (header && isVisibleEl(header)) {
-        const headerText = (header.textContent || "").replace(/\s+/g, " ").trim();
-        // Home header is short / generic; task headers carry the task title.
-        if (headerText.length >= 2 && !/^(codex|chatgpt|home|首页)?$/i.test(headerText)) {
-          // Require composer or main role so empty shells do not false-dim.
-          const workSurface = document.querySelector(
-            "body > #root main .composer-surface-chrome, body > #root main [role='main'], body > #root main .thread-scroll-container",
-          );
-          if (workSurface && isVisibleEl(workSurface)) return true;
-        }
-      }
 
       // Sidebar: a selected project task row (not the "无任务" empty label).
       const selectedTask = document.querySelector(
@@ -429,74 +386,10 @@
       if (selectedTask && isVisibleEl(selectedTask)) {
         const t = (selectedTask.textContent || "").replace(/\s+/g, " ").trim();
         if (t && !/^(无任务|no tasks?|new task|新建任务)$/i.test(t)) {
-          // Only count as task view when main is not the home hero.
-          if (!isHomeView()) return true;
-        }
-      }
-
-      return false;
-    } catch (_) {
-      return false;
-    }
-  };
-
-  /** Agent actively generating — keep as an extra dim trigger on any page. */
-  const isAgentBusy = () => {
-    try {
-      const marked = document.querySelector(
-        '[data-is-streaming="true"], [data-streaming="true"], [data-agent-running="true"], [data-bc-host-working="true"]',
-      );
-      if (marked) return true;
-
-      const busyMain = document.querySelector(
-        '[role="main"][aria-busy="true"], main[aria-busy="true"], [aria-busy="true"][data-message-author-role]',
-      );
-      if (busyMain) return true;
-
-      const candidates = document.querySelectorAll(
-        'button, [role="button"], [aria-label], [title]',
-      );
-      const limit = Math.min(candidates.length, 400);
-      for (let i = 0; i < limit; i += 1) {
-        const el = candidates[i];
-        if (!el || !el.isConnected) continue;
-        if (el.id === STAGE_ID || el.id === VIDEO_INPUT_ID) continue;
-        if (stageEl && stageEl.contains(el)) continue;
-
-        const aria = el.getAttribute?.("aria-label") || "";
-        const title = el.getAttribute?.("title") || "";
-        const text = (el.textContent || "").slice(0, 64);
-        const hit =
-          textLooksLikeStop(aria) ||
-          textLooksLikeStop(title) ||
-          textLooksLikeStop(text);
-        if (!hit) continue;
-        if (!elLooksInteractive(el) && !aria && !title) continue;
-        // Layout/computed-style reads are expensive. Only do them after the
-        // cheap text/attribute checks found a likely stop control.
-        if (!isVisibleEl(el)) continue;
-        return true;
-      }
-
-      const progress = document.querySelector(
-        '[role="progressbar"][aria-valuenow], [role="status"]',
-      );
-      if (progress && progress.isConnected) {
-        const label = (
-          progress.getAttribute("aria-label") ||
-          progress.textContent ||
-          ""
-        )
-          .toLowerCase()
-          .slice(0, 80);
-        if (
-          /generat|running|working|thinking|executing|in progress|生成|运行|思考|执行/.test(
-            label,
-          )
-        ) {
           return true;
         }
       }
+
       return false;
     } catch (_) {
       return false;
@@ -504,15 +397,14 @@
   };
 
   /**
-   * Dim when inside a project/task thread, or while the agent is generating.
-   * Home / new-task landing stays bright. Attribute on <html> only.
+   * Dim only inside a confirmed project/task thread.
+   * Home / new-task landing stays bright even if the agent is generating.
+   * Attribute on <html> only.
    */
   const detectWorking = () => {
     try {
       if (typeof document === "undefined" || !document.body) return false;
-      if (isTaskOrProjectView()) return true;
-      if (isAgentBusy()) return true;
-      return false;
+      return isTaskOrProjectView();
     } catch (_) {
       // Fail open: never dim on detector errors.
       return false;

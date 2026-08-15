@@ -5,8 +5,8 @@
 
 .DESCRIPTION
   The normal beautiCode shortcut opens a small host picker, then delegates to
-  the existing Codex or DeepSeek Harness launcher. Direct launchers remain
-  available for automation and Windows logon startup.
+  the DeepSeek Harness launcher (default path) or the Codex launcher. Direct
+  launchers remain available for automation and Windows logon startup.
 #>
 [CmdletBinding()]
 param(
@@ -286,12 +286,12 @@ public static class BeautiCodeHostPickerNative {
     [void]$root.Controls.Add($outer)
   }
 
+  Add-BcHostCard -CardHost "dsh" -Title "DeepSeek Harness" `
+    -Description "内置运行时。打开网页，套上图片或视频背景。" -Action "打开 →" `
+    -X 20 -Current ($currentHost -eq "dsh")
   Add-BcHostCard -CardHost "codex" -Title "Codex Desktop" `
     -Description "连接 Codex 桌面端，应用背景与显示控制。" -Action "启动 →" `
-    -X 20 -Current ($currentHost -eq "codex")
-  Add-BcHostCard -CardHost "dsh" -Title "DeepSeek Harness" `
-    -Description "启动 DSH Web，并将托盘切换到 DSH。" -Action "打开 →" `
-    -X 266 -Current ($currentHost -eq "dsh")
+    -X 266 -Current ($currentHost -eq "codex")
 
   $footerHint = New-BcPickerLabel -Text "选择会替换当前托盘目标" -X 20 -Y 275 -Width 250 -Height 25 `
     -Font $sectionFont -Color $colors.Muted

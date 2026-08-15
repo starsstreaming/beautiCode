@@ -11,6 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:targetHost = $TargetHost
+$script:DshUrl = if ($DshUrl) { $DshUrl } else { "http://127.0.0.1:3080" }
 
 $script:TrayLogRoot = if ($env:LOCALAPPDATA) {
   Join-Path $env:LOCALAPPDATA "beautiCode\logs"
@@ -490,6 +491,9 @@ function ConvertTo-BcChineseError {
   if ($text -match '(?i)No active background|no background|Apply an image or video') {
     return "当前没有背景，请先应用图片或视频。"
   }
+  if ($text -match '(?i)No DeepSeek Harness browser client is connected') {
+    return "未连接到 DeepSeek Harness 网页，请先打开页面。"
+  }
   if ($text -match '(?i)Another background apply is already in progress|already in progress|\bbusy\b') {
     return "已有背景应用正在进行中，请等待当前操作完成。"
   }
@@ -756,16 +760,128 @@ function Wait-BcCdpReady {
   return 0
 }
 
+function Get-BcDshPageUrl {
+  $raw = [string]$script:DshUrl
+  if (-not $raw) { $raw = "http://127.0.0.1:3080" }
+  return $raw.TrimEnd("/")
+}
+
+function Test-BcDshBridgeUp {
+  try {
+    $ver = Invoke-RestMethod -UseBasicParsing `
+      -Uri ("{0}/__beauticode/version" -f (Get-BcDshPageUrl)) `
+      -TimeoutSec 1
+    return ($ver.ok -eq $true)
+  } catch {
+    return $false
+  }
+}
+
+function Start-BcDshBridgeIfNeeded {
+  if (Test-BcDshBridgeUp) { return $true }
+  $launcher = Join-Path $RepoRoot "scripts\start-beauticode-dsh.ps1"
+  if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
+    throw ("缺少 DSH 启动脚本：{0}" -f $launcher)
+  }
+  Show-Tip -Title $L.AppName -Text $L.StartingDsh -Icon Info
+  Write-BcTrayLog "starting DSH via EnsureBridgeOnly"
+  $argList = New-Object System.Collections.ArrayList
+  foreach ($part in @(
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+      "-File", $launcher, "-EnsureBridgeOnly", "-NoBrowser", "-SkipBuild",
+      "-DshUrl", (Get-BcDshPageUrl)
+    )) {
+    [void]$argList.Add($part)
+  }
+  if ($DataRoot) {
+    [void]$argList.Add("-DataRoot")
+    [void]$argList.Add($DataRoot)
+  }
+  $quoted = @()
+  foreach ($a in $argList) {
+    if ($a -match '[\s"]') {
+      $quoted += ('"{0}"' -f ($a -replace '"', '\"'))
+    } else {
+      $quoted += $a
+    }
+  }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "powershell.exe"
+  $psi.Arguments = ($quoted -join " ")
+  $psi.WorkingDirectory = $RepoRoot
+  $psi.UseShellExecute = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  $deadline = [datetime]::UtcNow.AddSeconds(90)
+  while ([datetime]::UtcNow -lt $deadline) {
+    if (Test-BcDshBridgeUp) { return $true }
+    if ($null -ne $proc -and $proc.HasExited -and $proc.ExitCode -ne 0) {
+      Write-BcTrayLog ("DSH launcher exited {0}" -f $proc.ExitCode)
+      return $false
+    }
+    Start-Sleep -Milliseconds 200
+  }
+  return (Test-BcDshBridgeUp)
+}
+
+function Open-BcDshPage {
+  Start-Process -FilePath (Get-BcDshPageUrl) | Out-Null
+}
+
+function Wait-BcDshBrowserClient {
+  param([int]$TimeoutSec = 30)
+  $deadline = [datetime]::UtcNow.AddSeconds([Math]::Max(5, $TimeoutSec))
+  while ([datetime]::UtcNow -lt $deadline) {
+    try {
+      $st = Invoke-BcApi -Method Get -Path "/status"
+      if ($st -and ([int]$st.sessions) -gt 0) { return $true }
+    } catch { }
+    Start-Sleep -Milliseconds 200
+  }
+  return $false
+}
+
+# DSH apply needs a live browser EventSource. If the page is closed or DSH is
+# down, start the bridge and open the page before publishing.
+function Ensure-BcDshReady {
+  if ($script:targetHost -ne "dsh") { return $true }
+  if (-not (Start-BcDshBridgeIfNeeded)) {
+    throw $L.DshStartFail
+  }
+  $sessions = 0
+  try {
+    $st = Invoke-BcApi -Method Get -Path "/status"
+    if ($st) { $sessions = [int]$st.sessions }
+  } catch { }
+  if ($sessions -gt 0) { return $true }
+  Show-Tip -Title $L.AppName -Text $L.OpeningDsh -Icon Info
+  Open-BcDshPage
+  if (-not (Wait-BcDshBrowserClient)) {
+    throw $L.DshPageWaitFail
+  }
+  return $true
+}
+
 # Ensure ChatGPT/Codex is up with loopback CDP, then re-publish the active
 # (default) background. Used by tray "应用或重新应用".
 # - CDP healthy + process up  → reapply only
 # - process up, CDP missing   → restart with CDP flags, wait, reapply
 # - process down              → start with CDP flags, wait, reapply
+# DSH: start dsh web if needed, open the page if no browser client, then reapply.
 function Invoke-BcEnsureHostAndReapply {
   if ($script:targetHost -eq "dsh") {
+    Ensure-BcDshReady
+    $st = $null
+    try { $st = Invoke-BcApi -Method Get -Path "/status" } catch { }
+    $hasBg = $false
+    if ($st -and $st.manifest -and $st.manifest.background) { $hasBg = $true }
     $res = Invoke-BcApi -Method Post -Path "/reapply" -Body @{}
     if ($res.ok) {
-      Show-Tip -Title $L.AppName -Text $L.ReapplyOk -Icon Info
+      if ($hasBg) {
+        Show-Tip -Title $L.AppName -Text $L.ReapplyOk -Icon Info
+      } else {
+        Show-Tip -Title $L.AppName -Text $L.ReapplyNoBgDsh -Icon Info
+      }
       return $true
     }
     $err = if ($res.error) { [string]$res.error } else { $L.ApplyFail }
@@ -912,6 +1028,11 @@ $L = @{
   BusyTip        = (U "6B63 5728 5E94 7528 6216 6821 9A8C FF0C 8BF7 7B49 5F85 5F53 524D 64CD 4F5C 5B8C 6210 3002") # 正在应用或校验，请等待当前操作完成。
   NoCdp          = (U "672A 627E 5230 5065 5EB7 7684 672C 673A 0020 0043 006F 0064 0065 0078 0020 0043 0044 0050 3002 8BF7 7A0D 5019 518D 8BD5 3002") # 未找到健康的本机 Codex CDP。请稍后再试。
   StartingChat   = (U "6B63 5728 6253 5F00 0020 0043 0068 0061 0074 0047 0050 0054 002F 0043 006F 0064 0065 0078 2026") # 正在打开 ChatGPT/Codex…
+  StartingDsh    = (U "6B63 5728 542F 52A8 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 2026") # 正在启动 DeepSeek Harness…
+  OpeningDsh     = (U "6B63 5728 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 2026") # 正在打开 DeepSeek Harness 网页…
+  DshStartFail   = (U "672A 80FD 542F 52A8 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 3002 8BF7 67E5 770B 6258 76D8 65E5 5FD7 540E 91CD 8BD5 3002") # 未能启动 DeepSeek Harness。请查看托盘日志后重试。
+  DshPageWaitFail = (U "5DF2 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 FF0C 4F46 9875 9762 5C1A 672A 8FDE 4E0A 3002 8BF7 5237 65B0 540E 518D 8BD5 3002") # 已打开 DeepSeek Harness 网页，但页面尚未连上。请刷新后再试。
+  ReapplyNoBgDsh = (U "5DF2 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 3002 5F53 524D 65E0 9ED8 8BA4 80CC 666F 53EF 5BFC 5165 3002") # 已打开 DeepSeek Harness。当前无默认背景可导入。
   RestartingChat = (U "6B63 5728 91CD 542F 0020 0043 0068 0061 0074 0047 0050 0054 002F 0043 006F 0064 0065 0078 2026") # 正在重启 ChatGPT/Codex…
   RestartConfirm = (U "0043 0068 0061 0074 0047 0050 0054 002F 0043 006F 0064 0065 0078 0020 6B63 5728 8FD0 884C 3002 91CD 542F 53EF 80FD 4E22 5931 672A 4FDD 5B58 5185 5BB9 3002 662F 5426 7EE7 7EED FF1F")
   ForceCloseConfirm = (U "5E94 7528 672A 5728 0020 0035 0020 79D2 5185 9000 51FA 3002 662F 5426 5F3A 5236 7ED3 675F 5269 4F59 8FDB 7A0B FF1F")
@@ -1307,6 +1428,7 @@ function Rebuild-BcTrayMenu {
         Show-Tip -Title $L.AppName -Text $L.NeedImage -Icon Warning
         return
       }
+      Ensure-BcDshReady
       $res = Invoke-BcApi -Method Post -Path "/apply/image" -Body @{ imagePath = $img }
       if ($res.ok) {
         Show-Tip -Title $L.AppName -Text $L.ImgOk -Icon Info
@@ -1327,6 +1449,7 @@ function Rebuild-BcTrayMenu {
         Show-Tip -Title $L.AppName -Text $L.NeedMp4 -Icon Warning
         return
       }
+      Ensure-BcDshReady
       $res = Invoke-BcApi -Method Post -Path "/apply/video" -Body @{ videoPath = $vid }
       if ($res.ok) {
         Show-Tip -Title $L.AppName -Text $L.VidOk -Icon Info
@@ -1442,6 +1565,7 @@ function Rebuild-BcTrayMenu {
             $useName = [string]$sender.ToolTipText
             if (-not $useId) { return }
             Invoke-GuardedZh -Label $L.SavedThemes -Action {
+              Ensure-BcDshReady
               $res = Invoke-BcApi -Method Post -Path "/theme/use" -Body @{ id = $useId }
               if ($res.ok) {
                 $shown = if ($useName) { $useName } else { $useId }

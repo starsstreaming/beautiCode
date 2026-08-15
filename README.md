@@ -4,11 +4,11 @@
 </div>
 
 <p align="center">
-  <strong>把你喜欢的画面，放进vibeCoding的每一分钟。</strong>
+  <strong>把你喜欢的画面，放进 vibe coding 的每一分钟。</strong>
 </p>
 
 <p align="center">
-  为 Codex Desktop 添加图片与视频背景。<br>
+  为 DeepSeek Harness 添加图片与视频背景，也支持 Codex Desktop。<br>
   可以是一张壁纸，也可以是一部番剧、一场电影，或者一段陪你度过漫长工作的风景。
 </p>
 
@@ -25,9 +25,9 @@
 
 ## 它是什么？
 
-beautiCode 是一个 Codex Desktop 背景工具。
+beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness**。
 
-你可以把电脑里的：
+安装包已内置兼容的 DeepSeek Harness 运行时。启动 beautiCode，选中 DeepSeek Harness，就可以把电脑里的：
 
 * 图片
 * 动态壁纸
@@ -37,13 +37,13 @@ beautiCode 是一个 Codex Desktop 背景工具。
 * MV
 * 风景延时摄影
 
-直接设置成 Codex 的背景。
+直接设成 DeepSeek Harness 网页背后的背景。
 
-它不会把 Codex 变成一个播放器窗口，而是让视频自然地出现在工作界面背后。
+它不会把工作窗口变成一个播放器，而是让画面安静地待在对话和工作区后面。
 
-代码、对话框和按钮仍然可以正常使用。
+代码、输入框和按钮仍然可以正常使用。
 
-你可以继续写代码，也可以让喜欢的画面安静地陪着你。
+你也可以继续把它用在 Codex Desktop 上；同一套托盘，启动时选一下目标即可。
 
 
 <img width="1280" height="794" alt="download" src="https://github.com/user-attachments/assets/186162ec-b42a-4846-b2d8-08ab4ad81313" />
@@ -59,12 +59,12 @@ beautiCode 是一个 Codex Desktop 背景工具。
 
 beautiCode 可以让你：
 
-* 把番剧放在 Codex 背景中循环播放
+* 把番剧放在 DeepSeek Harness 背景中循环播放
 * 导入本地电影，边工作边慢慢看
-* 使用动漫场景作为动态桌面
+* 使用动漫场景作为动态背景
 * 播放演唱会、MV 或直播录像
 * 放一段雨夜、海边、城市航拍作为工作氛围
-* 在等待 Codex 执行任务时随手摸一会儿鱼
+* 在等待模型执行任务时随手摸一会儿鱼
 
 视频默认静音，不会突然打断工作。
 
@@ -73,11 +73,12 @@ beautiCode 可以让你：
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
 <img width="1920" height="1240" alt="QQ20260729-212506-HD" src="https://github.com/user-attachments/assets/ca0ef07f-2aec-46b0-b996-1db9913efa6d" />
 
-### v0.1.5 安装包
+### v1.0.0 安装包
 
-想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v0.1.5)。
-安装包自带运行时，不需要另外安装 Node.js 或 npm；使用前请先安装 Codex Desktop。
-安装包同时内置 DeepSeek Harness 运行时；启动时可选 Codex 或 DeepSeek Harness。
+想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v1.0.0)。
+安装包自带 Node.js 和 DeepSeek Harness 运行时，不需要另外安装 Node.js、npm 或 DSH。
+启动后选择 **DeepSeek Harness** 即可；也可以从开始菜单打开「beautiCode · DeepSeek Harness」直接进入。
+同一安装包仍可选 Codex Desktop。
 
 
 
@@ -95,20 +96,20 @@ Ctrl + Shift + Space
 
 进入后：
 
-* Codex 的主要内容暂时隐藏
+* DeepSeek Harness 的主要内容暂时隐藏
 * 图片或视频完整显示
 * 视频保持正常播放
 * 再按一次快捷键即可回到工作界面
 
 适合这些时刻：
 
-* Codex 正在执行一个较长的任务
+* 模型正在执行一个较长的任务
 * 项目正在编译
 * 下载或测试还没结束
 * 想暂停几分钟看看番
-* 想把 Codex 临时变成一个小播放器
+* 想把工作页临时变成一个小播放器
 
-不用退出 Codex，也不用在多个窗口之间来回切换。
+不用退出 DeepSeek Harness，也不用在多个窗口之间来回切换。
 
 工作和摸鱼，只差一次快捷键。
 
@@ -144,13 +145,13 @@ Ctrl + Shift + Space
 
 首页可以完整展示背景，让画面更有氛围。
 
-进入项目或对话后，工作区域会自动变暗一些，避免视频影响文字阅读。
+进入项目或会话后，工作区域会自动变暗一些，避免视频影响文字阅读。
 
-左侧栏、输入框和主要按钮仍然可以正常操作。
+侧栏、输入框和主要按钮仍然可以正常操作。
 
 背景不会抢走鼠标，也不会挡住点击。
 
-它更像一层安静的环境，而不是盖在 Codex 上面的播放器。
+它更像一层安静的环境，而不是盖在 DeepSeek Harness 上面的播放器。
 
 
 
@@ -164,12 +165,20 @@ Ctrl + Shift + Space
 运行：
 
 ```text
-beautiCode-Setup-0.1.5-win-x64.exe
+beautiCode-Setup-1.0.0-win-x64.exe
 ```
 
-安装包自带 Node.js 运行时。使用者不需要安装 Node.js、npm，也不需要保留
-项目源码。安装完成后启动 beautiCode，Windows 右下角会出现托盘图标；
-如果 Codex Desktop 尚未启动，引擎会尝试启动并连接它。
+安装包自带 Node.js 和 DeepSeek Harness 运行时。使用者不需要安装 Node.js、npm、DSH，也不需要保留项目源码。
+
+安装完成后启动 beautiCode，在选择框里点 **DeepSeek Harness**。Windows 右下角会出现托盘图标，浏览器会打开本机 DSH 页面。
+
+之后在托盘里：
+
+* 点「应用或重新应用」：如果 DSH 还没启动，会先拉起它并打开网页；如果网页已经关掉，会重新打开
+* 更换图片或视频
+* 清除背景、开关声音、摸鱼、保存和切换主题
+
+退出托盘不会结束 DeepSeek Harness，避免打断正在进行的工作。
 
 当前安装包尚未进行商业代码签名，Windows 可能显示 SmartScreen 提示。
 用户导入的图片、视频和已保存主题位于
@@ -181,7 +190,13 @@ beautiCode-Setup-0.1.5-win-x64.exe
 
 ```bash
 npm install
-npm run tray
+npm run tray:dsh
+```
+
+只启动 DeepSeek Harness：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-beauticode-dsh.ps1
 ```
 
 构建 Windows 安装包：
@@ -213,6 +228,7 @@ artifacts\windows\installer\
 目前主要支持：
 
 * Windows
+* DeepSeek Harness（推荐）
 * Codex Desktop
 * JPG、JPEG、PNG、WebP 图片
 * MP4 视频
@@ -262,7 +278,9 @@ https://linux.do/
 THIRD_PARTY_NOTICES.md
 ```
 
-beautiCode 是非官方项目，与 OpenAI、Codex、Anthropic 或其他应用厂商没有隶属或合作关系。
+beautiCode 是非官方项目，与 DeepSeek、OpenAI、Codex 或其他应用厂商没有隶属或合作关系。
+
+DeepSeek Harness 的接入说明见 [`docs/deepseek-harness.md`](docs/deepseek-harness.md)。
 
 ---
 

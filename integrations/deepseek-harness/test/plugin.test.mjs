@@ -92,7 +92,10 @@ test("plugin injects its client script exactly once", async (t) => {
   assert.equal(response.status, 200);
   const source = await response.text();
   assert.doesNotThrow(() => new Function(source));
-  assert.match(source, /:has\(#root \[data-phase="hero"\]\)/);
+  assert.match(source, /:has\(#root \[data-phase="active"\]\)/);
+  assert.match(source, /:has\(#root \[data-phase="settling"\]\)/);
+  assert.doesNotMatch(source, /:has\(#root \[data-phase="hero"\]\)/);
+  assert.match(source, /#beauticode-bg-stage::after\{background:rgba\(0,0,0,\.42\)\}/);
   assert.match(source, /data-bc-resolved-tone/);
   assert.match(source, /toggleAttribute\("data-ds-dark-theme"/);
   assert.match(source, /prefers-color-scheme: dark/);
