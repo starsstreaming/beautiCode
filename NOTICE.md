@@ -1,8 +1,8 @@
 # Notices
 
 beautiCode is an **unofficial** local customization tool and is **not affiliated
-with, endorsed by, or sponsored by OpenAI, Anthropic, or any host application
-vendor**.
+with, endorsed by, or sponsored by DeepSeek, OpenAI, Anthropic, or any host
+application vendor**.
 
 ## Software license
 
@@ -22,9 +22,9 @@ It does **not** grant rights to:
 ## Scope of this project
 
 beautiCode v1 focuses on applying a **local image or MP4 video as a background
-layer** inside a supported host (initially Codex Desktop via loopback CDP). It
-does not modify official install trees, does not ship host binaries, and does
-not provide a theme marketplace.
+layer** inside a supported host. The primary target is DeepSeek Harness (bundled
+runtime + page bridge). Codex Desktop remains available via loopback CDP. It
+does not modify official install trees and does not provide a theme marketplace.
 
 ## Third-party software
 

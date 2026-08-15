@@ -1,9 +1,9 @@
 {
   "name": "beauticode",
-  "version": "0.1.5",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Local image/video backgrounds for supported coding hosts. Unofficial.",
+  "description": "Local image/video backgrounds for DeepSeek Harness (also Codex Desktop). Unofficial.",
   "workspaces": [
     "packages/*",
     "apps/*"

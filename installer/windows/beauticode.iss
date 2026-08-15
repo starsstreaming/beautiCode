@@ -4,7 +4,7 @@
 #define MyAppPublisher "beautiCode"
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.4"
+  #define MyAppVersion "1.0.0"
 #endif
 
 #ifndef StageDir
@@ -39,7 +39,7 @@ RestartApplications=no
 AppMutex=Local\beautiCode.Engine.Tray.v1
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoProductName={#MyAppName}
-VersionInfoDescription=beautiCode Windows installer
+VersionInfoDescription=Local backgrounds for DeepSeek Harness
 VersionInfoCompany={#MyAppPublisher}
 
 [Languages]

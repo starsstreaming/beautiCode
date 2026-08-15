@@ -37,7 +37,7 @@ $sc.TargetPath = "powershell.exe"
 $sc.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`""
 $sc.WorkingDirectory = $RepoRoot
 $sc.WindowStyle = 7
-$sc.Description = "Start beautiCode engine (system tray background for Codex)"
+$sc.Description = "Start beautiCode (system tray background for DeepSeek Harness)"
 if ($iconCandidate) {
   $sc.IconLocation = "$iconCandidate,0"
 }

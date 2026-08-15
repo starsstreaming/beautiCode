@@ -33,7 +33,7 @@ Attributes on `html`:
 | `data-bc-media` | `image` \| `video` \| `video-pending` |
 | `data-bc-video-ready` | `true` \| `false` |
 | `data-bc-generation` | decimal generation string |
-| `data-bc-working` | `true` while the host appears to be generating / agent-running (background dim only) |
+| `data-bc-working` | `true` while a project/task thread is confirmed open (background dim only) |
 | `data-bc-fish` | `true` while fish mode (摸鱼) is on — content chrome hidden; media at native brightness |
 
 ## CSS contract
@@ -42,7 +42,8 @@ Allowed:
 
 - positioning/stacking for `#beauticode-bg-stage` and its descendants
 - visibility rules gated on `data-bc-media` / `data-bc-video-ready`
-- optional dimming scrim **inside the stage** for text contrast
+- optional dimming scrim **inside the stage** for text contrast — only while
+  `data-bc-working="true"`. Home / just-imported media stays at source brightness
 - exact `main.main-surface` / `aside.app-shell-left-panel` transparency needed
   to reveal the stage (gated on `data-bc-active`)
 - a main-surface readability wash when `data-bc-working="true"`
@@ -51,10 +52,10 @@ Allowed:
 
 Focus/working dim detection (renderer-local, fail open):
 
-- Primary: open project/task thread (thread scroll, message roles, task header,
-  selected sidebar task) — **not** the home landing (`[data-testid="home-icon"]`)
-- Secondary: host busy hooks (`data-is-streaming`, `aria-busy`) or visible
-  Stop / 停止生成 controls while generating
+- Only when a project/task thread is confirmed open (thread scroll, message
+  roles, selected sidebar task) — **not** the home / new-task landing
+  (`[data-testid="home-icon"]`)
+- Agent generation on the landing does **not** dim
 - Never captures pointer; detector errors leave the background bright
 
 Forbidden:

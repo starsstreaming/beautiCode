@@ -741,6 +741,18 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
   assert.match(runtime, /seekTo/);
   assert.match(runtime, /startAt/);
   assert.match(runtime, /pendingStartAt/);
+  assert.match(runtime, /isTaskOrProjectView/);
+  assert.match(runtime, /detectWorking/);
+  assert.doesNotMatch(runtime, /isAgentBusy/);
+  assert.match(css, /#beauticode-bg-stage::before/);
+  assert.match(
+    css,
+    /#beauticode-bg-stage::before \{[\s\S]*?background:\s*none;[\s\S]*?opacity:\s*0;/,
+  );
+  assert.doesNotMatch(
+    css,
+    /html\[data-bc-active="true"\]\[data-bc-media="video"\]\s+#beauticode-bg-stage::before/,
+  );
 });
 
 test("BeautiSession video mute defaults on and toggles without rebuild", async () => {

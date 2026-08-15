@@ -7,20 +7,6 @@
   --bc-main-edge: rgba(17, 19, 24, 0.40);
   --bc-main-mid: rgba(17, 19, 24, 0.26);
   --bc-main-far: rgba(17, 19, 24, 0.12);
-  /* Keep the original dark treatment as the compatibility default. */
-  --bc-stage-veil:
-    linear-gradient(
-      180deg,
-      rgba(17, 19, 24, 0.10) 0%,
-      rgba(17, 19, 24, 0.18) 36%,
-      rgba(17, 19, 24, 0.42) 100%
-    ),
-    linear-gradient(
-      90deg,
-      rgba(17, 19, 24, 0.34) 0%,
-      rgba(17, 19, 24, 0.14) 52%,
-      rgba(17, 19, 24, 0.06) 100%
-    );
   --bc-video-filter: brightness(1.08) saturate(1.03);
   --bc-working-main:
     linear-gradient(
@@ -39,19 +25,6 @@ html[data-bc-tone="light"] {
   --bc-main-edge: rgba(255, 255, 255, 0.44);
   --bc-main-mid: rgba(255, 255, 255, 0.30);
   --bc-main-far: rgba(255, 255, 255, 0.16);
-  --bc-stage-veil:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.06) 0%,
-      rgba(255, 255, 255, 0.12) 36%,
-      rgba(255, 255, 255, 0.24) 100%
-    ),
-    linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0.18) 0%,
-      rgba(255, 255, 255, 0.10) 52%,
-      rgba(255, 255, 255, 0.04) 100%
-    );
   --bc-video-filter: brightness(0.98) saturate(0.96);
   --bc-working-main:
     linear-gradient(
@@ -68,19 +41,6 @@ html[data-bc-tone="light"] {
     --bc-main-edge: rgba(255, 255, 255, 0.44);
     --bc-main-mid: rgba(255, 255, 255, 0.30);
     --bc-main-far: rgba(255, 255, 255, 0.16);
-    --bc-stage-veil:
-      linear-gradient(
-        180deg,
-        rgba(255, 255, 255, 0.06) 0%,
-        rgba(255, 255, 255, 0.12) 36%,
-        rgba(255, 255, 255, 0.24) 100%
-      ),
-      linear-gradient(
-        90deg,
-        rgba(255, 255, 255, 0.18) 0%,
-        rgba(255, 255, 255, 0.10) 52%,
-        rgba(255, 255, 255, 0.04) 100%
-      );
     --bc-video-filter: brightness(0.98) saturate(0.96);
     --bc-working-main:
       linear-gradient(
@@ -130,8 +90,12 @@ html[data-bc-active="true"] body >
   inset: 0;
   z-index: 3;
   pointer-events: none;
-  /* Soft readability veil over art (Dream-Skin task shade/fade simplified). */
-  background: var(--bc-stage-veil);
+  /* Home (including just-imported media) stays at source brightness.
+     Do not paint a full-window veil here — it would darken art before
+     the user enters a project, and would also shift the left sidebar
+     when toggling working. Project dim is the right-column wash only. */
+  background: none;
+  opacity: 0;
 }
 
 #beauticode-bg-stage img,
@@ -183,21 +147,15 @@ html[data-bc-active="true"][data-bc-media="video-pending"]
   display: block;
 }
 
-html[data-bc-active="true"][data-bc-media="video"]
-  #beauticode-bg-stage::before,
-html[data-bc-active="true"][data-bc-media="video-pending"]
-  #beauticode-bg-stage::before {
-  opacity: 0.46;
-}
-
-/* Project/task focus dim — USER INTENT:
-   - LEFT sidebar: pixel-identical to home (same stage veil, same aside
-     chrome). Entering a project must not jump the left column's brightness.
-   - RIGHT main only: slightly darker for readability. Keep color (不变灰).
+/* Project/session focus dim — USER INTENT:
+   - Home / new-task (including just-imported art): wallpaper stays bright.
+   - Confirmed project/task thread only: slightly darken the RIGHT main
+     column for readability. Keep color (不变灰).
+   - LEFT sidebar stays pixel-identical to home (no full-window veil).
    - Video keeps playing under both columns.
-   Implementation: do NOT retouch #beauticode-bg-stage::before or media
-   filters on working — those are full-window and would shift the left.
-   Dim only via the primary main surface wash. */
+   Implementation: never retouch #beauticode-bg-stage::before or media
+   filters on working — those are full-window and would shift the left
+   and would also dim the home landing. Dim only via the main wash. */
 
 /* ---- Left sidebar: translucent so art shows ---- */
 html[data-bc-active="true"] aside.app-shell-left-panel {
@@ -235,8 +193,8 @@ html[data-bc-active="true"] body > #root main {
   box-shadow: none !important;
 }
 
-/* Task page: ONLY the right column. Stage veil + left aside stay as home
-   so home ↔ project transition is seamless on the sidebar. */
+/* Confirmed project/session: ONLY the right column. Left aside stays as
+   home so home ↔ project does not jump sidebar brightness. */
 html[data-bc-active="true"][data-bc-working="true"] body > #root main {
   /* Tiny step darker — keep translucent so thread text stays readable. */
   background: var(--bc-working-main) !important;

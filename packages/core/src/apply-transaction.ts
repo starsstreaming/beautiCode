@@ -39,7 +39,7 @@ const DEFAULT_CSS = `/* beautiCode background stage baseline */
   position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:transparent!important;
 }
 #beauticode-bg-stage::before{
-  content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:rgba(0,0,0,.22);
+  content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:transparent;
 }
 #beauticode-bg-stage img,#beauticode-bg-stage video{
   position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;

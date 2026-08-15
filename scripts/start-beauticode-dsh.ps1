@@ -82,7 +82,14 @@ function Install-BcBridgeRevision {
   $targetRoot = Join-Path $versionsRoot $revision
   $targetIndex = Join-Path $targetRoot "index.mjs"
   if (Test-Path -LiteralPath $targetRoot -PathType Container) {
-    if ((Get-BcBridgeRevision -SourceRoot $targetRoot) -ne $revision) {
+    $manifestPath = Join-Path $targetRoot "bridge-manifest.json"
+    $publishedRevision = $null
+    try {
+      if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        $publishedRevision = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).revision
+      }
+    } catch {}
+    if ($publishedRevision -ne $revision) {
       throw "已发布的 DSH 桥接版本内容已损坏：$targetRoot"
     }
     return [pscustomobject]@{ Revision = $revision; Index = $targetIndex; Root = $targetRoot }
@@ -120,8 +127,11 @@ function Install-BcBridgeRevision {
 
 function Get-BcDshBridgeInfo {
   param([Uri]$BaseUri)
+  if (-not (Test-BcDshServer -BaseUri $BaseUri -WaitMilliseconds 80)) {
+    return $null
+  }
   try {
-    $probe = Invoke-RestMethod -UseBasicParsing -Uri ([Uri]::new($BaseUri, "/__beauticode/version")) -TimeoutSec 2
+    $probe = Invoke-RestMethod -UseBasicParsing -Uri ([Uri]::new($BaseUri, "/__beauticode/version")) -TimeoutSec 1
     if ($probe.ok -eq $true -and $probe.protocol -is [int] -and $probe.revision -is [string]) {
       return $probe
     }
@@ -130,11 +140,14 @@ function Get-BcDshBridgeInfo {
 }
 
 function Test-BcDshServer {
-  param([Uri]$BaseUri)
+  param(
+    [Uri]$BaseUri,
+    [int]$WaitMilliseconds = 80
+  )
   $client = New-Object Net.Sockets.TcpClient
   try {
     $connect = $client.BeginConnect($BaseUri.Host, $BaseUri.Port, $null, $null)
-    if (-not $connect.AsyncWaitHandle.WaitOne(750)) { return $false }
+    if (-not $connect.AsyncWaitHandle.WaitOne([Math]::Max(20, $WaitMilliseconds))) { return $false }
     $client.EndConnect($connect)
     return $client.Connected
   } catch {
@@ -167,13 +180,12 @@ function Get-BcRuntimeFromRoot {
     $cli = [string]$manifest.cli
     if (-not [IO.Path]::IsPathRooted($cli)) { $cli = Join-Path $RuntimeRoot $cli }
     if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) { return $null }
-    $output = @(& $NodePath $cli --version 2>&1)
-    $version = ([string]($output | Select-Object -First 1)).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -ne $supportedVersion) { return $null }
+    # Trust the pinned current.json + CLI path. Spawning `dsh --version` on
+    # every click only re-checks what the installer already verified.
     return [pscustomobject]@{
       FilePath = $NodePath
       Arguments = @('"{0}"' -f $cli.Replace('"', '\"'))
-      Version = $version
+      Version = [string]$manifest.version
       Source = $Source
       Root = $RuntimeRoot
     }
@@ -266,13 +278,14 @@ function New-BcDshPatch {
   return $patchPath
 }
 
-function Start-BcDshBridge {
+function Start-BcDshProcess {
   param(
     [Uri]$BaseUri,
     [pscustomobject]$Bridge,
     [pscustomobject]$Runtime,
     [string]$EffectiveDataRoot,
-    [string]$EffectiveDshHome
+    [string]$EffectiveDshHome,
+    [string]$WorkspaceRoot
   )
   $port = if ($BaseUri.IsDefaultPort) { 80 } else { $BaseUri.Port }
   $patchPath = New-BcDshPatch -BridgePluginPath $Bridge.Index -Revision $Bridge.Revision
@@ -297,7 +310,7 @@ function Start-BcDshBridge {
     $process = Start-Process `
       -FilePath $Runtime.FilePath `
       -ArgumentList $arguments `
-      -WorkingDirectory $repoRoot `
+      -WorkingDirectory $WorkspaceRoot `
       -WindowStyle Hidden `
       -RedirectStandardOutput $stdout `
       -RedirectStandardError $stderr `
@@ -309,21 +322,71 @@ function Start-BcDshBridge {
   }
 
   Write-Host ("正在启动 DeepSeek Harness {0}（PID {1}）……" -f $Runtime.Version, $process.Id)
-  $deadline = (Get-Date).AddSeconds(300)
+  return [pscustomobject]@{ Process = $process; Stdout = $stdout; Stderr = $stderr }
+}
+
+function Wait-BcDshBridge {
+  param(
+    [Uri]$BaseUri,
+    [pscustomobject]$Bridge,
+    [System.Diagnostics.Process]$Process,
+    [string]$Stdout,
+    [string]$Stderr,
+    [int]$TimeoutSeconds = 300
+  )
+  $deadline = (Get-Date).AddSeconds([Math]::Max(5, $TimeoutSeconds))
   while ((Get-Date) -lt $deadline) {
     $identity = Get-BcDshBridgeInfo -BaseUri $BaseUri
     if ($identity -and $identity.protocol -eq $bridgeProtocol -and $identity.revision -eq $Bridge.Revision) {
-      return [pscustomobject]@{ Process = $process; Stdout = $stdout; Stderr = $stderr }
+      return $identity
     }
-    if ($process.HasExited) {
-      $process.Refresh()
-      $rawDetail = if (Test-Path -LiteralPath $stderr) { Get-Content -Raw -LiteralPath $stderr } else { "" }
+    if ($Process -and $Process.HasExited) {
+      $Process.Refresh()
+      $rawDetail = if ($Stderr -and (Test-Path -LiteralPath $Stderr)) { Get-Content -Raw -LiteralPath $Stderr } else { "" }
       $detail = if ($rawDetail) { $rawDetail.Trim() } else { "" }
-      throw ("DeepSeek Harness 启动失败（退出码 {0}）。{1}`n日志：{2}" -f $process.ExitCode, $detail, $stderr)
+      throw ("DeepSeek Harness 启动失败（退出码 {0}）。{1}`n日志：{2}" -f $Process.ExitCode, $detail, $Stderr)
     }
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 100
   }
-  throw ("等待 DeepSeek Harness 桥接超时。日志：{0} / {1}" -f $stdout, $stderr)
+  throw ("等待 DeepSeek Harness 桥接超时。日志：{0} / {1}" -f $Stdout, $Stderr)
+}
+
+function Start-BcDshTray {
+  param(
+    [Uri]$BaseUri,
+    [string]$EffectiveDataRoot
+  )
+  $argList = New-Object System.Collections.ArrayList
+  [void]$argList.Add("-NoProfile")
+  [void]$argList.Add("-ExecutionPolicy")
+  [void]$argList.Add("Bypass")
+  [void]$argList.Add("-WindowStyle")
+  [void]$argList.Add("Hidden")
+  [void]$argList.Add("-File")
+  [void]$argList.Add($trayScript)
+  [void]$argList.Add("-TargetHost")
+  [void]$argList.Add("dsh")
+  [void]$argList.Add("-DshUrl")
+  [void]$argList.Add($BaseUri.AbsoluteUri)
+  [void]$argList.Add("-DataRoot")
+  [void]$argList.Add($EffectiveDataRoot)
+  if ($SkipBuild) { [void]$argList.Add("-SkipBuild") }
+
+  $quoted = @()
+  foreach ($a in $argList) {
+    if ($a -match '[\s"]') {
+      $quoted += ('"{0}"' -f ($a -replace '"', '\"'))
+    } else {
+      $quoted += $a
+    }
+  }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "powershell.exe"
+  $psi.Arguments = ($quoted -join " ")
+  $psi.WorkingDirectory = $repoRoot
+  $psi.UseShellExecute = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  [void][System.Diagnostics.Process]::Start($psi)
 }
 
 $baseUri = ConvertTo-BcDshUrl -Value $DshUrl
@@ -336,10 +399,15 @@ $effectiveDataRoot = if ($DataRoot) {
 }
 $effectiveDshHome = "{0}-dsh-home" -f $effectiveDataRoot.TrimEnd("\", "/")
 $privateRuntimeRoot = Join-Path $effectiveDataRoot "dsh-runtime"
+# DSH treats cwd as the default workspace. Do not launch from the install /
+# repo root — that tree includes the bundled runtime (tens of thousands of
+# files) and makes the first web boot crawl.
+$dshWorkspace = Join-Path $effectiveDataRoot "dsh-workspace"
+[IO.Directory]::CreateDirectory($dshWorkspace) | Out-Null
 $runtime = Get-BcDshRuntime -PrivateRuntimeRoot $privateRuntimeRoot -AllowInstall:(-not $VersionOnly)
-$latestVersion = Get-BcLatestDshVersion -EffectiveDataRoot $effectiveDataRoot
 
 if ($VersionOnly) {
+  $latestVersion = Get-BcLatestDshVersion -EffectiveDataRoot $effectiveDataRoot
   $runningBridge = Get-BcDshBridgeInfo -BaseUri $baseUri
   [pscustomobject]@{
     schema = "beauticode.dsh-version/v1"
@@ -359,11 +427,9 @@ $bridge = Install-BcBridgeRevision -SourceRoot $pluginSourceRoot -EffectiveDshHo
 
 Write-Host "beautiCode · DeepSeek Harness"
 Write-Host ("DSH {0}（{1}）；桥接协议 {2}，版本 {3}。" -f $runtime.Version, $runtime.Source, $bridgeProtocol, $bridge.Revision.Substring(0, 12))
-if ($latestVersion -and $latestVersion -ne $supportedVersion) {
-  Write-Warning ("检测到 npm 最新 DSH {0}；当前兼容版本仍为 {1}，不会自动升级未经验证的 DSH。" -f $latestVersion, $supportedVersion)
-}
 
 $runningBridge = Get-BcDshBridgeInfo -BaseUri $baseUri
+$started = $null
 if ($runningBridge) {
   if ($runningBridge.protocol -eq $bridgeProtocol -and $runningBridge.revision -eq $bridge.Revision) {
     Write-Host ("复用已加载当前 beautiCode 桥接的 DSH：{0}" -f $baseUri.AbsoluteUri)
@@ -373,22 +439,34 @@ if ($runningBridge) {
 } elseif (Test-BcDshServer -BaseUri $baseUri) {
   throw "目标地址已有 DeepSeek Harness，但未加载 beautiCode 桥接。为避免中断现有会话，脚本不会自动重启；请关闭该 DSH 后重新运行此启动器。"
 } else {
-  $started = Start-BcDshBridge `
+  $started = Start-BcDshProcess `
     -BaseUri $baseUri `
     -Bridge $bridge `
     -Runtime $runtime `
     -EffectiveDataRoot $effectiveDataRoot `
-    -EffectiveDshHome $effectiveDshHome
+    -EffectiveDshHome $effectiveDshHome `
+    -WorkspaceRoot $dshWorkspace
+}
+
+if ($EnsureBridgeOnly) {
+  if ($started) {
+    [void](Wait-BcDshBridge -BaseUri $baseUri -Bridge $bridge -Process $started.Process -Stdout $started.Stdout -Stderr $started.Stderr)
+    Write-Host ("DeepSeek Harness 桥接已就绪；退出托盘时不会自动结束该进程。日志：{0}" -f $started.Stdout)
+  }
+  return
+}
+
+# Show the tray immediately (Codex already does this). DSH keeps booting in
+# the background; the browser opens once the bridge answers.
+Start-BcDshTray -BaseUri $baseUri -EffectiveDataRoot $effectiveDataRoot
+
+if ($started) {
+  [void](Wait-BcDshBridge -BaseUri $baseUri -Bridge $bridge -Process $started.Process -Stdout $started.Stdout -Stderr $started.Stderr)
   Write-Host ("DeepSeek Harness 桥接已就绪；退出托盘时不会自动结束该进程。日志：{0}" -f $started.Stdout)
 }
-
-if ($EnsureBridgeOnly) { return }
 if (-not $NoBrowser) { Start-Process -FilePath $baseUri.AbsoluteUri | Out-Null }
 
-$arguments = @{
-  TargetHost = "dsh"
-  DshUrl = $baseUri.AbsoluteUri
-  SkipBuild = $SkipBuild
-  DataRoot = $effectiveDataRoot
+$latestVersion = Get-BcLatestDshVersion -EffectiveDataRoot $effectiveDataRoot
+if ($latestVersion -and $latestVersion -ne $supportedVersion) {
+  Write-Warning ("检测到 npm 最新 DSH {0}；当前兼容版本仍为 {1}，不会自动升级未经验证的 DSH。" -f $latestVersion, $supportedVersion)
 }
-& $trayScript @arguments

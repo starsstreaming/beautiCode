@@ -8,9 +8,10 @@
 %LOCALAPPDATA%\Programs\beautiCode
 ```
 
-The package includes the compiled beautiCode runtime and a pinned Node.js x64
-runtime. The target machine does not need Node.js, npm, TypeScript, or a source
-checkout. Codex Desktop remains a separate prerequisite.
+The package includes the compiled beautiCode runtime, a pinned Node.js x64
+runtime, and a compatible DeepSeek Harness. The target machine does not need
+Node.js, npm, TypeScript, DSH, or a source checkout. Codex Desktop is optional
+and remains a separate prerequisite if you choose that host.
 
 The installer creates a Start menu shortcut. Desktop and login-start shortcuts
 are optional installer tasks. Uninstall removes program files and shortcuts but
@@ -55,14 +56,14 @@ The locally installed Inno Setup 6.7.3 compiler identifies itself as
 non-commercial-use-only. Review or replace that build-tool license before using
 this pipeline for a commercial distribution.
 
-The installer targets x64-compatible Windows. It does not bundle, patch, or
-modify Codex Desktop. Runtime integration still depends on Codex exposing a
-healthy loopback CDP endpoint.
+The installer targets x64-compatible Windows. DeepSeek Harness is bundled and
+is the recommended host. The installer does not patch Codex Desktop; that path
+still depends on Codex exposing a healthy loopback CDP endpoint.
 
 The current bundled Node.js runtime requires 64-bit Windows 10 version 1809
-(build 17763) or newer. Codex Desktop must be installed separately. If Codex
-was already running without loopback CDP, use the tray's “Apply or re-apply”
-action; it will restart Codex only after the normal confirmation prompt.
+(build 17763) or newer. If you use Codex and it was already running without
+loopback CDP, use the tray's “Apply or re-apply” action; it will restart Codex
+only after the normal confirmation prompt.
 
 Startup diagnostics are written to:
 
