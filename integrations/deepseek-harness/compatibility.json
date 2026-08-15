@@ -1,0 +1,8 @@
+{
+  "schema": "beauticode.dsh-compatibility/v1",
+  "package": "@deepseek-ai/dsh",
+  "supportedVersion": "0.1.0-rc.6",
+  "integrity": "sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==",
+  "bridgeProtocol": 4,
+  "updatePolicy": "report-newer-only"
+}

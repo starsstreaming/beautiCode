@@ -1,5 +1,16 @@
 # Third-party notices
 
+## DeepSeek Harness bundled runtime
+
+- Package: `@deepseek-ai/dsh@0.1.0-rc.6`
+- License: MIT, Copyright (c) 2026 DeepSeek
+- Upstream project: https://github.com/deepseek-ai/deepseek-harness
+- Distribution: the Windows installer includes the npm runtime and its
+  dependency tree in a private, versioned directory. beautiCode does not install
+  DSH globally or modify the upstream package.
+- The upstream DSH license is copied to `licenses/dsh/LICENSE`; dependency
+  package licenses remain alongside their packages in the bundled runtime.
+
 ## Fei-Away/Codex-Dream-Skin (media server lineage)
 
 - License: MIT

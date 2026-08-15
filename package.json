@@ -9,13 +9,14 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @beauticode/core && npm run build -w @beauticode/adapter-codex",
-    "test": "npm run test -w @beauticode/core && npm run test -w @beauticode/adapter-codex",
-    "typecheck": "npm run build -w @beauticode/core && npm run typecheck -w @beauticode/adapter-codex",
+    "build": "npm run build -w @beauticode/core && npm run build -w @beauticode/adapter-codex && npm run build -w @beauticode/adapter-dsh",
+    "test": "npm run test -w @beauticode/core && npm run test -w @beauticode/adapter-codex && npm run test -w @beauticode/adapter-dsh",
+    "typecheck": "npm run build -w @beauticode/core && npm run typecheck -w @beauticode/adapter-codex && npm run typecheck -w @beauticode/adapter-dsh",
     "discover": "node scripts/beauticode.mjs discover",
     "bc": "node scripts/beauticode.mjs",
     "smoke:live": "npm run build && node scripts/live-smoke.mjs",
     "tray": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File apps/tray/start-tray.ps1 -SkipBuild",
+    "tray:dsh": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-beauticode-dsh.ps1 -SkipBuild",
     "installer:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-installer.ps1"
   },
   "engines": {
