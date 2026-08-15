@@ -1,5 +1,6 @@
 export * from "./constants.js";
 export * from "./types.js";
+export * from "./host-session.js";
 export * from "./media-validation.js";
 export * from "./media-server.js";
 export {

@@ -15,6 +15,34 @@ export function toChineseErrorMessage(value: unknown): string {
 
   const rules: Array<[RegExp, string | ((match: RegExpExecArray) => string)]> = [
     [
+      /DeepSeek Harness URL must be loopback HTTP\.?/i,
+      "DeepSeek Harness 地址必须使用本机回环 HTTP（127.0.0.1、localhost 或 ::1）。",
+    ],
+    [
+      /DeepSeek Harness phase one supports image backgrounds only\.?/i,
+      "DeepSeek Harness 第一阶段仅支持图片背景、清除和重新应用；视频、摸鱼模式、声音与色调暂不支持。",
+    ],
+    [
+      /DeepSeek Harness bridge token file is invalid\.?/i,
+      "DeepSeek Harness 桥接令牌文件无效，请删除该令牌文件后重新启动 beautiCode。",
+    ],
+    [
+      /DeepSeek Harness bridge (?:is unavailable|request failed.*|request timed out)\.?/i,
+      "未连接到 DeepSeek Harness。请先用 beautiCode 补丁启动 dsh web，并打开浏览器页面。",
+    ],
+    [
+      /No DeepSeek Harness browser client is connected\.?/i,
+      "DeepSeek Harness 页面尚未连接，请先在浏览器中打开 DSH Web。",
+    ],
+    [
+      /DeepSeek Harness client (?:has not acknowledged this generation|failed to render the background)\.?/i,
+      "DeepSeek Harness 页面未确认背景已成功显示。",
+    ],
+    [
+      /DeepSeek Harness image apply requires a loopback media URL\.?/i,
+      "无法为 DeepSeek Harness 创建安全的本机图片地址。",
+    ],
+    [
       /No healthy loopback Codex CDP endpoint found.*$/i,
       "未发现健康的本机 Codex CDP 端点，请先打开 Codex Desktop。",
     ],

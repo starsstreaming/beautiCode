@@ -232,6 +232,16 @@ test("apply transaction offline success path", async () => {
   if (r2.ok) assert.equal(r2.mode, "video");
   assert.ok(media.activeVideo?.url.startsWith("http://127.0.0.1:"));
   assert.ok(media.activeImage?.srcUrl.includes("?t="));
+  assert.ok(
+    path.resolve(media.activeVideo.filePath).startsWith(
+      `${path.resolve(store.paths.runtimeMediaDir)}${path.sep}`,
+    ),
+  );
+  assert.ok(
+    !path.resolve(media.activeVideo.filePath).startsWith(
+      `${path.resolve(store.paths.activeDir)}${path.sep}`,
+    ),
+  );
 
   const r3 = await tx.run({ type: "clear" });
   assert.equal(r3.ok, true);
