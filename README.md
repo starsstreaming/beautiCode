@@ -73,9 +73,9 @@ beautiCode 可以让你：
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
 <img width="1920" height="1240" alt="QQ20260729-212506-HD" src="https://github.com/user-attachments/assets/ca0ef07f-2aec-46b0-b996-1db9913efa6d" />
 
-### v0.1.2 安装包
+### v0.1.4 安装包
 
-想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v0.1.2)。
+想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v0.1.4)。
 安装包自带运行时，不需要另外安装 Node.js 或 npm；使用前请先安装 Codex Desktop。
 
 
@@ -163,7 +163,7 @@ Ctrl + Shift + Space
 运行：
 
 ```text
-beautiCode-Setup-0.1.2-win-x64.exe
+beautiCode-Setup-0.1.4-win-x64.exe
 ```
 
 安装包自带 Node.js 运行时。使用者不需要安装 Node.js、npm，也不需要保留

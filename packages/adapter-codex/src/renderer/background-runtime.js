@@ -25,6 +25,29 @@
   const VIDEO_INPUT_ID = "beauticode-video-input";
   const gen = Number(generation) || 0;
 
+  const toChineseMediaError = (error) => {
+    const message = String(error?.message || error || "").trim();
+    if (/^(?:failed to fetch|fetch failed|fail fetch)$/i.test(message)) {
+      return "未发现注入CDP的Codex进程";
+    }
+    if (/media fetch failed/i.test(message)) {
+      return "背景媒体加载失败。";
+    }
+    if (/data url fetch failed/i.test(message)) {
+      return "背景数据加载失败。";
+    }
+    if (/missing (?:media )?url|no video source/i.test(message)) {
+      return "背景媒体地址缺失。";
+    }
+    if (/malformed data url/i.test(message)) {
+      return "背景数据地址格式错误。";
+    }
+    if (/stale generation/i.test(message)) {
+      return "背景版本已过期，正在重新加载。";
+    }
+    return message || "背景媒体加载失败。";
+  };
+
   const root = document.documentElement;
   const previous = window.__BEAUTICODE_BG__;
 
@@ -1105,7 +1128,7 @@
     videoReady = false;
     videoError = {
       name: error?.name || null,
-      message: error?.message || null,
+      message: toChineseMediaError(error),
       mediaCode: videoEl?.error?.code ?? null,
       readyState: videoEl?.readyState ?? null,
     };

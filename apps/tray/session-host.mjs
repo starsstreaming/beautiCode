@@ -29,7 +29,7 @@ import crypto from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 if (Number(process.versions.node.split(".", 1)[0]) < 22) {
-  console.error("session-host requires Node.js 22 or newer");
+  console.error("session-host 需要 Node.js 22 或更高版本。");
   process.exit(1);
 }
 
@@ -52,16 +52,17 @@ const portArg = argValue("--port");
 const dataRoot = argValue("--data-root");
 const verifyMs = Number(argValue("--verify-ms") ?? "30000");
 if (!Number.isFinite(verifyMs) || verifyMs < 0 || verifyMs > 300_000) {
-  console.error("--verify-ms must be between 0 and 300000");
+  console.error("--verify-ms 必须在 0 到 300000 之间。");
   process.exit(1);
 }
 
 if (!token || token.length < 24) {
-  console.error("session-host requires a random control token (>=24 chars)");
+  console.error("session-host 需要长度至少为 24 个字符的随机控制令牌。");
   process.exit(1);
 }
 
 const adapter = await import(adapterEntry);
+const toChineseErrorMessage = adapter.toChineseErrorMessage;
 
 const sessionOpts = {
   verifyDeadlineMs: verifyMs,
@@ -69,7 +70,7 @@ const sessionOpts = {
   // Tray must show immediately; CDP connect + first publish happen in background.
   deferHostConnect: true,
   onError: (err) => {
-    console.error(`[session] ${err.message}`);
+    console.error(`[session] ${toChineseErrorMessage(err)}`);
   },
   onStatus: (msg) => {
     console.error(`[session] ${msg}`);
@@ -78,7 +79,7 @@ const sessionOpts = {
 if (portArg) {
   const p = Number(portArg);
   if (!Number.isInteger(p) || p < 1 || p > 65535) {
-    console.error("--port must be 1–65535");
+    console.error("--port 必须是 1–65535 之间的整数。");
     process.exit(1);
   }
   sessionOpts.port = p;
@@ -146,7 +147,11 @@ function publicTheme(theme) {
 
 function send(res, status, obj) {
   if (res.destroyed || res.writableEnded) return;
-  const body = JSON.stringify(obj);
+  const body = JSON.stringify(
+    obj && typeof obj.error === "string"
+      ? { ...obj, error: toChineseErrorMessage(obj.error) }
+      : obj,
+  );
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
@@ -156,7 +161,7 @@ function send(res, status, obj) {
 }
 
 function unauthorized(res) {
-  send(res, 401, { ok: false, error: "unauthorized" });
+  send(res, 401, { ok: false, error: "请求未授权。" });
 }
 
 function checkAuth(req) {
@@ -179,7 +184,7 @@ const server = http.createServer(
       return;
     }
     if (shuttingDown) {
-      send(res, 503, { ok: false, error: "shutting down" });
+      send(res, 503, { ok: false, error: "服务正在关闭。" });
       return;
     }
     const url = req.url?.split("?")[0] ?? "";
@@ -222,7 +227,7 @@ const server = http.createServer(
     if (req.method === "POST" && url === "/apply/image") {
       const body = await readBody(req);
       if (typeof body.imagePath !== "string" || !body.imagePath) {
-        send(res, 400, { ok: false, error: "imagePath required" });
+        send(res, 400, { ok: false, error: "必须提供 imagePath。" });
         return;
       }
       const result = await session.apply({
@@ -237,7 +242,7 @@ const server = http.createServer(
       if (typeof body.videoPath !== "string" || !body.videoPath) {
         send(res, 400, {
           ok: false,
-          error: "videoPath required (MP4). imagePath optional poster.",
+          error: "必须提供 videoPath（MP4）；imagePath 可选，用作海报图片。",
         });
         return;
       }
@@ -265,7 +270,7 @@ const server = http.createServer(
     if (req.method === "POST" && url === "/theme/save") {
       const body = await readBody(req);
       if (typeof body.name !== "string" || !body.name.trim()) {
-        send(res, 400, { ok: false, error: "name required" });
+        send(res, 400, { ok: false, error: "必须提供主题名称。" });
         return;
       }
       try {
@@ -274,7 +279,7 @@ const server = http.createServer(
       } catch (err) {
         send(res, 422, {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: toChineseErrorMessage(err),
         });
       }
       return;
@@ -287,7 +292,7 @@ const server = http.createServer(
     if (req.method === "POST" && url === "/theme/use") {
       const body = await readBody(req);
       if (typeof body.id !== "string" || !body.id.trim()) {
-        send(res, 400, { ok: false, error: "id required" });
+        send(res, 400, { ok: false, error: "必须提供主题 ID。" });
         return;
       }
       const result = await session.useSavedTheme(body.id.trim());
@@ -297,7 +302,7 @@ const server = http.createServer(
     if (req.method === "POST" && url === "/theme/delete") {
       const body = await readBody(req);
       if (typeof body.id !== "string" || !body.id.trim()) {
-        send(res, 400, { ok: false, error: "id required" });
+        send(res, 400, { ok: false, error: "必须提供主题 ID。" });
         return;
       }
       try {
@@ -305,13 +310,13 @@ const server = http.createServer(
         send(res, deleted ? 200 : 404, {
           ok: deleted,
           deleted,
-          ...(deleted ? {} : { error: "Saved theme not found." }),
+          ...(deleted ? {} : { error: "未找到已保存的主题。" }),
         });
       } catch (err) {
         send(res, 422, {
           ok: false,
           deleted: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: toChineseErrorMessage(err),
         });
       }
       return;
@@ -319,7 +324,7 @@ const server = http.createServer(
     if (req.method === "POST" && url === "/mode/fish") {
       const body = await readBody(req);
       if (typeof body.enabled !== "boolean") {
-        send(res, 400, { ok: false, error: "enabled boolean required" });
+        send(res, 400, { ok: false, error: "enabled 必须是布尔值。" });
         return;
       }
       const result = await session.setFishMode(body.enabled);
@@ -329,7 +334,7 @@ const server = http.createServer(
     if (req.method === "POST" && url === "/mode/muted") {
       const body = await readBody(req);
       if (typeof body.muted !== "boolean") {
-        send(res, 400, { ok: false, error: "muted boolean required" });
+        send(res, 400, { ok: false, error: "muted 必须是布尔值。" });
         return;
       }
       const result = await session.setMuted(body.muted);
@@ -339,7 +344,7 @@ const server = http.createServer(
     if (req.method === "POST" && url === "/mode/tone") {
       const body = await readBody(req);
       if (!["dark", "light", "auto"].includes(body.tone)) {
-        send(res, 400, { ok: false, error: "tone must be dark, light, or auto" });
+        send(res, 400, { ok: false, error: "tone 必须是 dark、light 或 auto。" });
         return;
       }
       const result = await session.setBackgroundTone(body.tone);
@@ -351,7 +356,7 @@ const server = http.createServer(
       setImmediate(() => void shutdown(0));
       return;
     }
-    send(res, 404, { ok: false, error: "not found" });
+    send(res, 404, { ok: false, error: "未找到请求的资源。" });
   } catch (err) {
     const status =
       err && typeof err === "object" && Number.isInteger(err.statusCode)
@@ -359,7 +364,7 @@ const server = http.createServer(
         : 500;
     send(res, status, {
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: toChineseErrorMessage(err),
     });
   }
   },
@@ -388,9 +393,9 @@ try {
   await session.start();
 } catch (err) {
   console.error(
-    err instanceof Error ? err.message : String(err),
+    toChineseErrorMessage(err),
   );
-  console.error("session-host: failed to start BeautiSession (fail closed)");
+  console.error("session-host：beautiCode 会话启动失败，已安全退出。");
   process.exit(1);
 }
 
