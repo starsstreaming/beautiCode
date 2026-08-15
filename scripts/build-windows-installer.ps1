@@ -4,14 +4,16 @@
   Build a self-contained beautiCode Windows installer.
 
 .DESCRIPTION
-  Builds TypeScript, stages only runtime files, downloads and verifies the
-  official Node.js Windows x64 runtime, then compiles an Inno Setup installer.
+  Builds TypeScript, stages both host adapters, downloads and verifies the
+  official Node.js Windows x64 runtime, installs the integrity-pinned DSH into
+  a private bundle, then compiles an Inno Setup installer.
 #>
 [CmdletBinding()]
 param(
   [ValidatePattern("^\d+\.\d+\.\d+$")]
   [string]$NodeVersion = "24.18.0",
-  [string]$InnoCompiler = ""
+  [string]$InnoCompiler = "",
+  [string]$DshRuntimeCache = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +22,11 @@ $ArtifactsRoot = Join-Path $RepoRoot "artifacts\windows"
 $StageRoot = Join-Path $ArtifactsRoot "stage"
 $CacheRoot = Join-Path $ArtifactsRoot "cache"
 $OutputRoot = Join-Path $ArtifactsRoot "installer"
+$DshCacheRoot = if ($DshRuntimeCache) {
+  [IO.Path]::GetFullPath($DshRuntimeCache)
+} else {
+  Join-Path $CacheRoot "dsh-runtime"
+}
 $InstallerScript = Join-Path $RepoRoot "installer\windows\beauticode.iss"
 $PinnedNodeVersion = "24.18.0"
 $PinnedNodeArchiveSha256 = "0ae68406b42d7725661da979b1403ec9926da205c6770827f33aac9d8f26e821"
@@ -33,6 +40,17 @@ function Assert-WorkspaceChild([string]$Path) {
   $target = [System.IO.Path]::GetFullPath($Path)
   if (-not $target.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw ("Refusing to modify a path outside the repository: {0}" -f $target)
+  }
+}
+
+function Get-Sha256Hex([string]$Path) {
+  $stream = [System.IO.File]::OpenRead($Path)
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+    $stream.Dispose()
   }
 }
 
@@ -144,6 +162,12 @@ if (-not (Test-Path -LiteralPath $InstallerScript -PathType Leaf)) {
 
 $package = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot "package.json") |
   ConvertFrom-Json
+$compatibility = Get-Content -Raw -LiteralPath (
+  Join-Path $RepoRoot "integrations\deepseek-harness\compatibility.json"
+) | ConvertFrom-Json
+if ($compatibility.schema -ne "beauticode.dsh-compatibility/v1") {
+  throw "DSH compatibility manifest is invalid."
+}
 $appVersion = [string]$package.version
 if ($appVersion -notmatch "^\d+\.\d+\.\d+$") {
   throw ("Installer requires a numeric three-part package version: {0}" -f $appVersion)
@@ -177,7 +201,7 @@ if (-not $checksumLine) {
   throw ("Official checksum was not found for {0}" -f $nodeArchiveName)
 }
 $expectedHash = ($checksumLine -split "\s+")[0].ToLowerInvariant()
-$actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $nodeArchive).Hash.ToLowerInvariant()
+$actualHash = Get-Sha256Hex $nodeArchive
 if ($actualHash -ne $expectedHash) {
   throw ("Node.js archive checksum mismatch: expected {0}, got {1}" -f $expectedHash, $actualHash)
 }
@@ -196,9 +220,12 @@ foreach ($relativeDir in @(
     "scripts",
     "packages\core",
     "packages\adapter-codex",
+    "packages\adapter-dsh",
+    "integrations\deepseek-harness",
     "node_modules\@beauticode\core",
     "runtime",
-    "licenses\node"
+    "licenses\node",
+    "licenses\dsh"
   )) {
   New-Item -ItemType Directory -Path (Join-Path $StageRoot $relativeDir) -Force | Out-Null
 }
@@ -208,9 +235,16 @@ foreach ($relativeFile in @(
     "apps\tray\start-tray.ps1",
     "assets\beauticode-icon-borderless.png",
     "scripts\codex-launch.ps1",
+    "scripts\start-beauticode.ps1",
     "scripts\start-beauticode-engine.ps1",
+    "scripts\start-beauticode-dsh.ps1",
+    "scripts\install-dsh-runtime.ps1",
     "packages\core\package.json",
     "packages\adapter-codex\package.json",
+    "packages\adapter-dsh\package.json",
+    "integrations\deepseek-harness\index.mjs",
+    "integrations\deepseek-harness\client.js",
+    "integrations\deepseek-harness\compatibility.json",
     "LICENSE",
     "NOTICE.md",
     "THIRD_PARTY_NOTICES.md"
@@ -229,6 +263,9 @@ Copy-RuntimeDirectory `
 Copy-RuntimeDirectory `
   (Join-Path $RepoRoot "packages\adapter-codex\dist") `
   (Join-Path $StageRoot "packages\adapter-codex\dist")
+Copy-RuntimeDirectory `
+  (Join-Path $RepoRoot "packages\adapter-dsh\dist") `
+  (Join-Path $StageRoot "packages\adapter-dsh\dist")
 Copy-Item -LiteralPath (Join-Path $RepoRoot "packages\core\package.json") `
   -Destination (Join-Path $StageRoot "node_modules\@beauticode\core\package.json") -Force
 Copy-RuntimeDirectory `
@@ -240,6 +277,18 @@ Copy-Item -LiteralPath (Join-Path $nodeDistribution "node.exe") `
 Copy-Item -LiteralPath (Join-Path $nodeDistribution "LICENSE") `
   -Destination (Join-Path $StageRoot "licenses\node\LICENSE") -Force
 
+& (Join-Path $RepoRoot "scripts\install-dsh-runtime.ps1") `
+  -InstallRoot $DshCacheRoot `
+  -CompatibilityFile (Join-Path $RepoRoot "integrations\deepseek-harness\compatibility.json") `
+  -NodeCommand (Join-Path $StageRoot "runtime\node.exe") `
+  -NpmCommand ((Get-Command npm.cmd -ErrorAction Stop).Source)
+Copy-RuntimeDirectory $DshCacheRoot (Join-Path $StageRoot "runtime\dsh")
+$dshLicense = Join-Path $StageRoot "runtime\dsh\versions\$($compatibility.supportedVersion)\node_modules\@deepseek-ai\dsh\LICENSE"
+if (-not (Test-Path -LiteralPath $dshLicense -PathType Leaf)) {
+  throw "Staged DSH license is missing."
+}
+Copy-Item -LiteralPath $dshLicense -Destination (Join-Path $StageRoot "licenses\dsh\LICENSE") -Force
+
 New-InstallerIcon `
   (Join-Path $RepoRoot "assets\beauticode-icon-borderless.png") `
   (Join-Path $StageRoot "beauticode.ico")
@@ -250,6 +299,8 @@ $manifest = [ordered]@{
   schema = "beauticode.release/v1"
   appVersion = $appVersion
   nodeVersion = $NodeVersion
+  dshVersion = [string]$compatibility.supportedVersion
+  dshBridgeProtocol = [int]$compatibility.bridgeProtocol
   platform = "win-x64"
   commit = $commit
   dirty = ($trackedChanges.Count -gt 0)
@@ -271,6 +322,19 @@ $adapterProbe = & $stagedNode --input-type=module -e `
 if ($LASTEXITCODE -ne 0 -or $adapterProbe -ne "function") {
   throw ("Staged adapter import failed: {0}" -f $adapterProbe)
 }
+$dshAdapterUrl = ([System.Uri](Join-Path $StageRoot "packages\adapter-dsh\dist\index.js")).AbsoluteUri
+$dshAdapterProbe = & $stagedNode --input-type=module -e `
+  "const m=await import(process.argv[1]); console.log(typeof m.DshSession);" `
+  $dshAdapterUrl
+if ($LASTEXITCODE -ne 0 -or $dshAdapterProbe -ne "function") {
+  throw ("Staged DSH adapter import failed: {0}" -f $dshAdapterProbe)
+}
+$dshManifest = Get-Content -Raw -LiteralPath (Join-Path $StageRoot "runtime\dsh\current.json") | ConvertFrom-Json
+$dshCli = Join-Path (Join-Path $StageRoot "runtime\dsh") ([string]$dshManifest.cli)
+$stagedDshVersion = (& $stagedNode $dshCli --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $stagedDshVersion -ne [string]$compatibility.supportedVersion) {
+  throw ("Staged DSH version mismatch: expected {0}, got {1}" -f $compatibility.supportedVersion, $stagedDshVersion)
+}
 
 $iscc = Resolve-InnoCompiler $InnoCompiler
 & $iscc `
@@ -289,8 +353,8 @@ if (-not $installer) {
   throw "Inno Setup completed without producing an installer."
 }
 
-$installerHash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
+$installerHash = Get-Sha256Hex $installer.FullName
 Write-Host ""
 Write-Host "Windows installer created:"
 Write-Host ("  {0}" -f $installer.FullName)
-Write-Host ("  SHA256 {0}" -f $installerHash.Hash)
+Write-Host ("  SHA256 {0}" -f $installerHash.ToUpperInvariant())

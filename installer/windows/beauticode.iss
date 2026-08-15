@@ -1,4 +1,4 @@
-#pragma codepage "utf-8"
+#pragma codepage 65001
 
 #define MyAppName "beautiCode"
 #define MyAppPublisher "beautiCode"
@@ -53,9 +53,10 @@ Name: "autostart"; Description: "登录 Windows 后自动启动"; GroupDescripti
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode-engine.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"
-Name: "{autodesktop}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode-engine.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"; Tasks: desktopicon
+Name: "{autoprograms}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"
+Name: "{autoprograms}\beautiCode · DeepSeek Harness"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode-dsh.ps1"" -SkipBuild"; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"
+Name: "{autodesktop}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"; Tasks: desktopicon
 Name: "{userstartup}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode-engine.ps1"" -NoLaunchCodex"; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"; Tasks: autostart
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode-engine.ps1"""; WorkingDir: "{app}"; Description: "启动 beautiCode"; Flags: postinstall nowait skipifsilent
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode.ps1"""; WorkingDir: "{app}"; Description: "启动 beautiCode"; Flags: postinstall nowait skipifsilent
