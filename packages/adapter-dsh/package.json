@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test test/**/*.test.js ../../integrations/deepseek-harness/test/*.test.mjs"
+    "test": "npm run build && node ../../scripts/test-runner.mjs --test test/**/*.test.js ../../integrations/deepseek-harness/test/*.test.mjs"
   },
   "dependencies": {
     "@beauticode/core": "0.1.0"
