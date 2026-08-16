@@ -16,6 +16,8 @@ beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`@beauticode/
 
 ## 安装插件
 
+Windows 安装包会在安装结束时（以及选择 DeepSeek Harness 时）自动写入你的 DSH profile。没有 DSH 也不影响安装；第一次运行 `dsh web` 会走 home 层补丁。也可手动：
+
 ```sh
 # 源码目录
 dsh plugin --profile web add file:<beautiCode 路径>/integrations/deepseek-harness
