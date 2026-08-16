@@ -69,8 +69,8 @@ beautiCode 可以让你：
 
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
 
+<img width="1280" height="808" alt="QQ20260816-201114" src="https://github.com/user-attachments/assets/2faef226-c493-49ef-815b-daec8593a329" />
 
-https://github.com/user-attachments/assets/19a9729c-45c2-4c83-9e41-befd8c2d3af6
 
 
 
