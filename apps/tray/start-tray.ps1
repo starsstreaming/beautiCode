@@ -54,36 +54,36 @@ $script:hostInstanceMutexOwned = $false
 $script:showPanelEvent = $null
 $script:shutdownEvent = $null
 $script:showPanelTimer = $null
-$createdNew = $false
-$script:trayInstanceMutex = [System.Threading.Mutex]::new(
-  $true,
-  "Local\beautiCode.Engine.Tray.v1",
-  [ref]$createdNew
-)
-if (-not $createdNew) {
-  $script:trayInstanceMutex.Dispose()
+$bcRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+. (Join-Path $bcRoot "scripts\bc-tray-singleton.ps1")
+
+$trayLock = Enter-BcNamedMutex -Name (Get-BcTrayMutexName)
+if (-not $trayLock.Owned) {
+  Write-BcTrayLog "tray already running"
+  [void](Request-BcTrayPanelEvent)
   exit 0
 }
+Write-BcTrayLog ("acquired tray lock created={0}" -f $trayLock.Created)
+$script:trayInstanceMutex = $trayLock.Mutex
 $script:trayInstanceMutexOwned = $true
-$hostMutexCreated = $false
-$script:hostInstanceMutex = [System.Threading.Mutex]::new(
-  $true,
-  ("Local\beautiCode.Engine.Host.{0}.v1" -f $TargetHost),
-  [ref]$hostMutexCreated
-)
-$script:hostInstanceMutexOwned = $hostMutexCreated
+$hostLock = Enter-BcNamedMutex -Name (Get-BcHostMutexName -TargetHost $TargetHost)
+$script:hostInstanceMutex = $hostLock.Mutex
+$script:hostInstanceMutexOwned = $hostLock.Owned
+if (-not $hostLock.Owned) {
+  Write-BcTrayLog ("host lock busy for {0}" -f $TargetHost)
+}
 $showPanelEventCreated = $false
 $script:showPanelEvent = [System.Threading.EventWaitHandle]::new(
   $false,
   [System.Threading.EventResetMode]::AutoReset,
-  "Local\beautiCode.Engine.ShowPanel.v1",
+  (Get-BcTrayPanelEventName),
   [ref]$showPanelEventCreated
 )
 $shutdownEventCreated = $false
 $script:shutdownEvent = [System.Threading.EventWaitHandle]::new(
   $false,
   [System.Threading.EventResetMode]::AutoReset,
-  "Local\beautiCode.Engine.Shutdown.v1",
+  (Get-BcTrayShutdownEventName),
   [ref]$shutdownEventCreated
 )
 
@@ -2540,6 +2540,13 @@ $script:showPanelTimer.Start()
 
 Rebuild-BcTrayMenu
 if ($null -ne $script:bcUiColors) { Set-BcFallbackMenuStyle }
+
+try {
+  Show-BcTrayPanel -EnsureVisible
+  Write-BcTrayLog "tray panel shown on start"
+} catch {
+  Write-BcTrayLog ("tray panel show-on-start failed: {0}" -f $_.Exception.Message)
+}
 
 $null = $notify.add_MouseUp({
     param($sender, $eventArgs)

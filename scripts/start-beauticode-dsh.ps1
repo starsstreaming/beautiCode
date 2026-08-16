@@ -13,6 +13,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $repoRoot "scripts\bc-tray-singleton.ps1")
 $trayScript = Join-Path $repoRoot "apps\tray\start-tray.ps1"
 $pluginSourceRoot = Join-Path $repoRoot "integrations\deepseek-harness"
 $compatibilityFile = Join-Path $pluginSourceRoot "compatibility.json"
@@ -284,18 +285,6 @@ function Invoke-BcHealDshProfile {
   Write-Host "DSH profile 模块已就绪。"
 }
 
-function Test-BcTrayMutexPresent {
-  $mutex = $null
-  try {
-    $mutex = [System.Threading.Mutex]::OpenExisting("Local\beautiCode.Engine.Tray.v1")
-    return $true
-  } catch [System.Threading.WaitHandleCannotBeOpenedException] {
-    return $false
-  } finally {
-    if ($null -ne $mutex) { $mutex.Dispose() }
-  }
-}
-
 function Get-BcNodePath {
   $bundled = Join-Path $repoRoot "runtime\node.exe"
   if (Test-Path -LiteralPath $bundled -PathType Leaf) { return $bundled }
@@ -500,37 +489,12 @@ function Start-BcDshTray {
     [Uri]$BaseUri,
     [string]$EffectiveDataRoot
   )
-  $argList = New-Object System.Collections.ArrayList
-  [void]$argList.Add("-NoProfile")
-  [void]$argList.Add("-ExecutionPolicy")
-  [void]$argList.Add("Bypass")
-  [void]$argList.Add("-WindowStyle")
-  [void]$argList.Add("Hidden")
-  [void]$argList.Add("-File")
-  [void]$argList.Add($trayScript)
-  [void]$argList.Add("-TargetHost")
-  [void]$argList.Add("dsh")
-  [void]$argList.Add("-DshUrl")
-  [void]$argList.Add($BaseUri.AbsoluteUri)
-  [void]$argList.Add("-DataRoot")
-  [void]$argList.Add($EffectiveDataRoot)
-  if ($SkipBuild) { [void]$argList.Add("-SkipBuild") }
-
-  $quoted = @()
-  foreach ($a in $argList) {
-    if ($a -match '[\s"]') {
-      $quoted += ('"{0}"' -f ($a -replace '"', '\"'))
-    } else {
-      $quoted += $a
-    }
-  }
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "powershell.exe"
-  $psi.Arguments = ($quoted -join " ")
-  $psi.WorkingDirectory = $repoRoot
-  $psi.UseShellExecute = $true
-  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-  [void][System.Diagnostics.Process]::Start($psi)
+  [void](Start-BcTrayProcess `
+    -InstallRoot $repoRoot `
+    -TargetHost dsh `
+    -DshUrl $BaseUri.AbsoluteUri `
+    -DataRoot $EffectiveDataRoot `
+    -SkipBuild:$SkipBuild)
 }
 
 $baseUri = ConvertTo-BcDshUrl -Value $DshUrl
@@ -574,7 +538,6 @@ Write-Host ("DSH {0}（{1}）；桥接协议 {2}，版本 {3}。" -f $runtime.Ve
 
 function Show-BcDshTrayIfNeeded {
   if ($EnsureBridgeOnly) { return }
-  if (Test-BcTrayMutexPresent) { return }
   Start-BcDshTray -BaseUri $baseUri -EffectiveDataRoot $effectiveDataRoot
 }
 

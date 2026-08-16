@@ -92,6 +92,60 @@ test("heal replaces a blocking real directory with a junction", async (t) => {
   assert.equal(stat.isSymbolicLink(), true);
 });
 
+test("heal does not delete the install when dest node_modules is a junction", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-heal-passthrough-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const install = await makeInstall(path.join(root, "install"));
+  const dshHome = path.join(root, "home");
+  await fs.mkdir(path.join(dshHome, "profiles"), { recursive: true });
+  await fs.symlink(install.modules, path.join(dshHome, "profiles", "node_modules"), "junction");
+
+  const result = heal.healDshProfile({
+    dshHome,
+    installAnchor: install.installAnchor,
+  });
+  assert.ok(result.resolved["@deepseek-ai/dsh"]);
+  await fs.access(path.join(install.modules, "@deepseek-ai", "dsh", "package.json"));
+});
+
+test("heal does not delete the install when dest @deepseek-ai is a junction", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-heal-scope-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const install = await makeInstall(path.join(root, "install"));
+  const dshHome = path.join(root, "home");
+  const destScope = path.join(dshHome, "profiles", "node_modules", "@deepseek-ai");
+  await fs.mkdir(path.dirname(destScope), { recursive: true });
+  await fs.symlink(path.join(install.modules, "@deepseek-ai"), destScope, "junction");
+
+  heal.healDshProfile({
+    dshHome,
+    installAnchor: install.installAnchor,
+  });
+  await fs.access(path.join(install.modules, "@deepseek-ai", "dsh", "package.json"));
+  await fs.access(path.join(dshHome, "profiles", "node_modules", "@deepseek-ai", "dsh", "package.json"));
+});
+
+test("heal replaces a dead junction that still names the install path", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-heal-dead-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const install = await makeInstall(path.join(root, "install"));
+  const dshHome = path.join(root, "home");
+  const dest = path.join(dshHome, "profiles", "node_modules", "@deepseek-ai", "dsh");
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  const vanished = path.join(root, "vanished-dsh");
+  await writePackage(vanished, "@deepseek-ai/dsh");
+  await fs.symlink(vanished, dest, "junction");
+  await fs.rm(vanished, { recursive: true, force: true });
+
+  heal.healDshProfile({
+    dshHome,
+    installAnchor: install.installAnchor,
+  });
+  const stat = await fs.lstat(dest);
+  assert.equal(stat.isSymbolicLink(), true);
+  await fs.access(path.join(dest, "package.json"));
+});
+
 test("heal-dsh-profile CLI prints JSON on success", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-heal-cli-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

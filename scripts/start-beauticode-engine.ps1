@@ -21,6 +21,7 @@ if ($Port -lt 0 -or $Port -gt 65535) {
   throw "端口必须为 0（自动）或 1 到 65535 之间的整数。"
 }
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $RepoRoot "scripts\bc-tray-singleton.ps1")
 $TrayScript = Join-Path $RepoRoot "apps\tray\start-tray.ps1"
 $CodexLaunchScript = Join-Path $RepoRoot "scripts\codex-launch.ps1"
 $ReleaseManifest = Join-Path $RepoRoot "release-manifest.json"
@@ -30,8 +31,8 @@ $LogRoot = if ($env:LOCALAPPDATA) {
   Join-Path ([System.IO.Path]::GetTempPath()) "beautiCode\logs"
 }
 $LogPath = Join-Path $LogRoot "engine-launcher.log"
-$TrayMutexName = "Local\beautiCode.Engine.Tray.v1"
-$TrayPanelEventName = "Local\beautiCode.Engine.ShowPanel.v1"
+$TrayMutexName = Get-BcTrayMutexName
+$TrayPanelEventName = Get-BcTrayPanelEventName
 $LauncherMutexName = "Local\beautiCode.Engine.Launcher.v1"
 $script:launcherMutex = $null
 $script:launcherMutexOwned = $false
@@ -150,20 +151,7 @@ function Request-BcTrayPanel([int]$WaitMilliseconds = 0) {
 }
 
 function Test-BcTrayRunningFast {
-  $mutex = $null
-  try {
-    $mutex = [System.Threading.Mutex]::OpenExisting($TrayMutexName)
-    return $true
-  } catch [System.Threading.WaitHandleCannotBeOpenedException] {
-    return $false
-  } catch {
-    # Fail open: the session-host injector lock still rejects duplicate owners.
-    return $false
-  } finally {
-    if ($null -ne $mutex) {
-      try { $mutex.Dispose() } catch {}
-    }
-  }
+  return (Test-BcTrayReady)
 }
 
 function Get-BcTrayPids {
@@ -173,7 +161,7 @@ function Get-BcTrayPids {
     Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'pwsh.exe' OR Name = 'node.exe'" -ErrorAction SilentlyContinue |
       Where-Object {
         $_.CommandLine -and (
-          $_.CommandLine -match 'start-tray\.ps1' -or
+          (Test-BcTrayCommandLine -CommandLine $_.CommandLine) -or
           $_.CommandLine -match 'session-host\.mjs'
         )
       } |
@@ -237,37 +225,11 @@ function Start-CodexWithCdpFast([int]$CdpPort) {
 }
 
 function Start-BcTray([int]$CdpPort) {
-  $argList = New-Object System.Collections.ArrayList
-  [void]$argList.Add("-NoProfile")
-  [void]$argList.Add("-ExecutionPolicy")
-  [void]$argList.Add("Bypass")
-  [void]$argList.Add("-File")
-  [void]$argList.Add(('{0}' -f $TrayScript))
-  if ($CdpPort -gt 0) {
-    [void]$argList.Add("-Port")
-    [void]$argList.Add("$CdpPort")
-  }
-  if (Test-Path -LiteralPath $ReleaseManifest -PathType Leaf) {
-    [void]$argList.Add("-SkipBuild")
-  }
-  # The tray owns the source-vs-dist freshness check and rebuilds stale dist.
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "powershell.exe"
-  # Quote the -File path; join the rest as separate args via ProcessStartInfo is
-  # awkward in PS 5.1 — keep a single argument string with proper quoting.
-  $quoted = @()
-  foreach ($a in $argList) {
-    if ($a -match '[\s"]') {
-      $quoted += ('"{0}"' -f ($a -replace '"', '\"'))
-    } else {
-      $quoted += $a
-    }
-  }
-  $psi.Arguments = ($quoted -join " ")
-  $psi.WorkingDirectory = $RepoRoot
-  $psi.UseShellExecute = $true
-  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-  [void][System.Diagnostics.Process]::Start($psi)
+  [void](Start-BcTrayProcess `
+    -InstallRoot $RepoRoot `
+    -TargetHost codex `
+    -Port $CdpPort `
+    -SkipBuild:(Test-Path -LiteralPath $ReleaseManifest -PathType Leaf))
   Write-BcLog ("started tray Port={0} FreshnessCheck=True" -f $CdpPort)
 }
 

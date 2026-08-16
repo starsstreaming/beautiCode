@@ -235,6 +235,7 @@ foreach ($relativeFile in @(
     "apps\tray\start-tray.ps1",
     "assets\beauticode-icon-borderless.png",
     "scripts\codex-launch.ps1",
+    "scripts\bc-tray-singleton.ps1",
     "scripts\start-beauticode.ps1",
     "scripts\start-beauticode-engine.ps1",
     "scripts\start-beauticode-dsh.ps1",

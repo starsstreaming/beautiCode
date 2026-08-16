@@ -12,11 +12,14 @@
 param(
   [ValidateSet("prompt", "codex", "dsh")]
   [string]$TargetHost = "prompt",
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$WaitNotice,
+  [string]$WaitNoticeEvent = ""
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $repoRoot "scripts\bc-tray-singleton.ps1")
 $codexLauncher = Join-Path $repoRoot "scripts\start-beauticode-engine.ps1"
 $dshLauncher = Join-Path $repoRoot "scripts\start-beauticode-dsh.ps1"
 $iconPath = Join-Path $repoRoot "beauticode.ico"
@@ -353,12 +356,11 @@ public static class BeautiCodeHostPickerNative {
 }
 
 function Get-BcRunningHost {
+  if (-not (Test-BcTrayReady)) { return $null }
   foreach ($candidate in @("codex", "dsh")) {
     $mutex = $null
     try {
-      $mutex = [System.Threading.Mutex]::OpenExisting(
-        ("Local\beautiCode.Engine.Host.{0}.v1" -f $candidate)
-      )
+      $mutex = [System.Threading.Mutex]::OpenExisting((Get-BcHostMutexName -TargetHost $candidate))
       return $candidate
     } catch [System.Threading.WaitHandleCannotBeOpenedException] {
       continue
@@ -370,29 +372,237 @@ function Get-BcRunningHost {
 }
 
 function Test-BcTrayRunning {
-  $mutex = $null
-  try {
-    $mutex = [System.Threading.Mutex]::OpenExisting("Local\beautiCode.Engine.Tray.v1")
-    return $true
-  } catch [System.Threading.WaitHandleCannotBeOpenedException] {
-    return $false
-  } finally {
-    if ($null -ne $mutex) { $mutex.Dispose() }
-  }
+  return (Test-BcTrayReady)
 }
 
 function Send-BcTrayEvent {
   param([string]$Name)
-  $event = $null
-  try {
-    $event = [System.Threading.EventWaitHandle]::OpenExisting($Name)
-    [void]$event.Set()
-    return $true
-  } catch [System.Threading.WaitHandleCannotBeOpenedException] {
-    return $false
-  } finally {
-    if ($null -ne $event) { $event.Dispose() }
+  return (Send-BcNamedEvent -Name $Name)
+}
+
+function Initialize-BcWaitNoticeNative {
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+  if ("BeautiCodeHostPickerNative" -as [type]) { return }
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class BeautiCodeHostPickerNative {
+  private static readonly IntPtr PerMonitorAwareV2 = new IntPtr(-4);
+  [DllImport("user32.dll", SetLastError = true)]
+  private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+  [DllImport("user32.dll")]
+  private static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindow(IntPtr hWnd, int command);
+  [DllImport("user32.dll")]
+  public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")]
+  public static extern bool ReleaseCapture();
+  [DllImport("user32.dll")]
+  public static extern IntPtr SendMessage(IntPtr hWnd, int message, IntPtr wParam, IntPtr lParam);
+  public static bool EnableDpi() {
+    try {
+      if (SetProcessDpiAwarenessContext(PerMonitorAwareV2)) return true;
+    } catch (EntryPointNotFoundException) { }
+    try { return SetProcessDPIAware(); } catch { return false; }
   }
+}
+'@
+}
+
+function Show-BcDshWaitNotice {
+  param([string]$EventName)
+  Initialize-BcWaitNoticeNative
+  [void][BeautiCodeHostPickerNative]::EnableDpi()
+  [System.Windows.Forms.Application]::EnableVisualStyles()
+  try {
+    [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
+  } catch [System.InvalidOperationException] { }
+
+  $closeEvent = $null
+  if ($EventName) {
+    try {
+      $closeEvent = [System.Threading.EventWaitHandle]::OpenExisting($EventName)
+    } catch {
+      $closeEvent = $null
+    }
+  }
+  if ($closeEvent -and $closeEvent.WaitOne(0)) {
+    $closeEvent.Dispose()
+    return
+  }
+
+  $colors = @{
+    Window = [System.Drawing.ColorTranslator]::FromHtml("#1E201D")
+    Line = [System.Drawing.ColorTranslator]::FromHtml("#454942")
+    Text = [System.Drawing.ColorTranslator]::FromHtml("#F1EEE7")
+    Muted = [System.Drawing.ColorTranslator]::FromHtml("#9CA198")
+    Jade = [System.Drawing.ColorTranslator]::FromHtml("#86AA91")
+    Copper = [System.Drawing.ColorTranslator]::FromHtml("#B98265")
+    Panel = [System.Drawing.ColorTranslator]::FromHtml("#242723")
+  }
+  $titleFont = New-Object System.Drawing.Font("Microsoft YaHei UI", 14, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
+  $bodyFont = New-Object System.Drawing.Font("Microsoft YaHei UI", 10, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+  $closeFont = New-Object System.Drawing.Font("Microsoft YaHei UI", 11, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+
+  $form = New-Object System.Windows.Forms.Form
+  $form.Text = "beautiCode"
+  $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+  $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+  $form.ClientSize = New-Object System.Drawing.Size(320, 132)
+  $form.TopMost = $true
+  $form.ShowInTaskbar = $true
+  $form.KeyPreview = $true
+  $form.BackColor = $colors.Line
+  $form.Padding = New-Object System.Windows.Forms.Padding(1)
+  if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+    try { $form.Icon = New-Object System.Drawing.Icon($iconPath) } catch {}
+  }
+
+  $root = New-Object System.Windows.Forms.Panel
+  $root.Dock = [System.Windows.Forms.DockStyle]::Fill
+  $root.BackColor = $colors.Window
+  [void]$form.Controls.Add($root)
+
+  $title = New-Object System.Windows.Forms.Label
+  $title.Text = "启动中"
+  $title.Font = $titleFont
+  $title.ForeColor = $colors.Text
+  $title.BackColor = [System.Drawing.Color]::Transparent
+  $title.Location = New-Object System.Drawing.Point(22, 28)
+  $title.Size = New-Object System.Drawing.Size(230, 32)
+  [void]$root.Controls.Add($title)
+
+  $hint = New-Object System.Windows.Forms.Label
+  $hint.Text = "请等待 30s"
+  $hint.Font = $bodyFont
+  $hint.ForeColor = $colors.Muted
+  $hint.BackColor = [System.Drawing.Color]::Transparent
+  $hint.Location = New-Object System.Drawing.Point(22, 68)
+  $hint.Size = New-Object System.Drawing.Size(250, 28)
+  [void]$root.Controls.Add($hint)
+
+  $close = New-Object System.Windows.Forms.Button
+  $close.Text = "×"
+  $close.Font = $closeFont
+  $close.Location = New-Object System.Drawing.Point(276, 8)
+  $close.Size = New-Object System.Drawing.Size(28, 28)
+  $close.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+  $close.FlatAppearance.BorderSize = 0
+  $close.FlatAppearance.MouseOverBackColor = $colors.Panel
+  $close.BackColor = $colors.Window
+  $close.ForeColor = $colors.Copper
+  $close.UseVisualStyleBackColor = $false
+  $close.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $close.TabStop = $false
+  [void]$root.Controls.Add($close)
+
+  $countdown = @{ Left = 30 }
+  $poll = New-Object System.Windows.Forms.Timer
+  $poll.Interval = 80
+  $tick = New-Object System.Windows.Forms.Timer
+  $tick.Interval = 1000
+  $null = $poll.add_Tick({
+    if ($closeEvent -and $closeEvent.WaitOne(0)) {
+      $poll.Stop()
+      $tick.Stop()
+      $form.Close()
+    }
+  }.GetNewClosure())
+  $null = $tick.add_Tick({
+    if ($countdown.Left -gt 0) { $countdown.Left -= 1 }
+    if ($countdown.Left -gt 0) {
+      $hint.Text = "请等待 {0}s" -f $countdown.Left
+    } else {
+      $hint.Text = "仍在启动，请稍候"
+    }
+  }.GetNewClosure())
+
+  $null = $close.add_Click({ $form.Close() }.GetNewClosure())
+  $null = $form.add_KeyDown({
+    param($sender, $eventArgs)
+    if ($eventArgs.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+      $form.Close()
+      $eventArgs.Handled = $true
+    }
+  })
+  $form.Add_Shown({
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    try {
+      $d = 28
+      $path.AddArc(0, 0, $d, $d, 180, 90)
+      $path.AddArc($form.Width - $d, 0, $d, $d, 270, 90)
+      $path.AddArc($form.Width - $d, $form.Height - $d, $d, $d, 0, 90)
+      $path.AddArc(0, $form.Height - $d, $d, $d, 90, 90)
+      $path.CloseFigure()
+      $old = $form.Region
+      $form.Region = New-Object System.Drawing.Region($path)
+      if ($null -ne $old) { $old.Dispose() }
+    } finally {
+      $path.Dispose()
+    }
+    [void][BeautiCodeHostPickerNative]::ShowWindow($form.Handle, 5)
+    [void][BeautiCodeHostPickerNative]::SetForegroundWindow($form.Handle)
+    $poll.Start()
+    $tick.Start()
+  })
+  try {
+    [void]$form.ShowDialog()
+  } finally {
+    $poll.Stop()
+    $tick.Stop()
+    $poll.Dispose()
+    $tick.Dispose()
+    $titleFont.Dispose()
+    $bodyFont.Dispose()
+    $closeFont.Dispose()
+    if ($null -ne $form.Icon) { $form.Icon.Dispose() }
+    $form.Dispose()
+    if ($null -ne $closeEvent) { $closeEvent.Dispose() }
+  }
+}
+
+function Start-BcDshWaitNotice {
+  $script:dshWaitEventName = "Local\beautiCode.Engine.DshWaitClose.{0}" -f [guid]::NewGuid().ToString("N")
+  $createdNew = $false
+  $script:dshWaitEvent = [System.Threading.EventWaitHandle]::new(
+    $false,
+    [System.Threading.EventResetMode]::ManualReset,
+    $script:dshWaitEventName,
+    [ref]$createdNew
+  )
+  [void]$script:dshWaitEvent.Reset()
+  $argList = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-WindowStyle", "Hidden",
+    "-File", $PSCommandPath,
+    "-WaitNotice",
+    "-WaitNoticeEvent", $script:dshWaitEventName
+  )
+  $quoted = @()
+  foreach ($a in $argList) {
+    if ($a -match '[\s"]') {
+      $quoted += ('"{0}"' -f ($a -replace '"', '\"'))
+    } else {
+      $quoted += $a
+    }
+  }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "powershell.exe"
+  $psi.Arguments = ($quoted -join " ")
+  $psi.WorkingDirectory = $repoRoot
+  $psi.UseShellExecute = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  [void][System.Diagnostics.Process]::Start($psi)
+}
+
+function Close-BcDshWaitNotice {
+  if ($null -eq $script:dshWaitEvent) { return }
+  try { [void]$script:dshWaitEvent.Set() } catch {}
+  try { $script:dshWaitEvent.Dispose() } catch {}
+  $script:dshWaitEvent = $null
 }
 
 function Start-BcDshWarmup {
@@ -461,6 +671,11 @@ public static class BeautiCodeHostPickerNative {
   }
 }
 
+if ($WaitNotice) {
+  Show-BcDshWaitNotice -EventName $WaitNoticeEvent
+  return
+}
+
 if ($DryRun -and $TargetHost -eq "prompt") {
   throw "DryRun 必须显式指定 -TargetHost codex 或 dsh。"
 }
@@ -501,43 +716,77 @@ if ($DryRun) {
   return
 }
 
-$runningHost = Get-BcRunningHost
-if ($runningHost -eq $route.Host) {
-  if ($route.Host -eq "dsh") {
-    try {
-      $routeArguments = $route.Arguments
-      & $route.Script @routeArguments
-    } catch {
-      Show-BcSwitchError ("启动 DeepSeek Harness 失败：{0}" -f $_.Exception.Message)
-      return
-    }
-  }
-  [void](Send-BcTrayEvent -Name "Local\beautiCode.Engine.ShowPanel.v1")
-  return
-}
-if (Test-BcTrayRunning) {
-  if (-not $runningHost) {
-    Show-BcSwitchError "检测到旧版或未知的 beautiCode 托盘。请先从托盘菜单退出，再重新选择目标应用。"
+if ($selected -eq "dsh") {
+  try {
+    [void](Start-BcTrayProcess -InstallRoot $repoRoot -TargetHost dsh -SkipBuild)
+  } catch {
+    Show-BcSwitchError ("启动 beautiCode 托盘失败：{0}" -f $_.Exception.Message)
     return
   }
-  if (-not (Send-BcTrayEvent -Name "Local\beautiCode.Engine.Shutdown.v1")) {
-    Show-BcSwitchError "无法通知当前 beautiCode 托盘退出。请手动退出后重试。"
-    return
-  }
-  $deadline = [DateTime]::UtcNow.AddSeconds(15)
-  while (Test-BcTrayRunning) {
-    if ([DateTime]::UtcNow -ge $deadline) {
-      Show-BcSwitchError "等待当前 beautiCode 托盘退出超时。请手动退出后重试。"
-      return
-    }
-    Start-Sleep -Milliseconds 100
-  }
+  Start-BcDshWaitNotice
 }
 
+$script:bcLaunchFailed = $false
 try {
-  $routeArguments = $route.Arguments
-  & $route.Script @routeArguments
-} catch {
-  Show-BcSwitchError ("启动 {0} 失败：{1}" -f $route.Host, $_.Exception.Message)
-  exit 1
+  $runningHost = Get-BcRunningHost
+  if ($runningHost -eq $route.Host) {
+    if ($route.Host -eq "dsh") {
+      try {
+        $routeArguments = $route.Arguments
+        & $route.Script @routeArguments
+      } catch {
+        $script:bcLaunchFailed = $true
+        Close-BcDshWaitNotice
+        Show-BcSwitchError ("启动 DeepSeek Harness 失败：{0}" -f $_.Exception.Message)
+        return
+      }
+    }
+    if ($route.Host -ne "dsh") {
+      [void](Request-BcTrayPanelEvent)
+    }
+    return
+  }
+  if (Test-BcTrayRunning) {
+    if (-not $runningHost) {
+      $script:bcLaunchFailed = $true
+      Close-BcDshWaitNotice
+      Show-BcSwitchError "检测到旧版或未知的 beautiCode 托盘。请先从托盘菜单退出，再重新选择目标应用。"
+      return
+    }
+    if (-not (Request-BcTrayShutdownEvent)) {
+      $script:bcLaunchFailed = $true
+      Close-BcDshWaitNotice
+      Show-BcSwitchError "无法通知当前 beautiCode 托盘退出。请手动退出后重试。"
+      return
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (Test-BcTrayRunning) {
+      if ([DateTime]::UtcNow -ge $deadline) {
+        $script:bcLaunchFailed = $true
+        Close-BcDshWaitNotice
+        Show-BcSwitchError "等待当前 beautiCode 托盘退出超时。请手动退出后重试。"
+        return
+      }
+      Start-Sleep -Milliseconds 100
+    }
+  }
+
+  try {
+    $routeArguments = $route.Arguments
+    & $route.Script @routeArguments
+  } catch {
+    $script:bcLaunchFailed = $true
+    Close-BcDshWaitNotice
+    Show-BcSwitchError ("启动 {0} 失败：{1}" -f $route.Host, $_.Exception.Message)
+    exit 1
+  }
+} finally {
+  Close-BcDshWaitNotice
+  if ($selected -eq "dsh" -and -not $script:bcLaunchFailed) {
+    $panelDeadline = [DateTime]::UtcNow.AddSeconds(8)
+    while ([DateTime]::UtcNow -lt $panelDeadline) {
+      if (Request-BcTrayPanelEvent) { break }
+      Start-Sleep -Milliseconds 150
+    }
+  }
 }

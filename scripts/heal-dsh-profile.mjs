@@ -39,9 +39,53 @@ function isDirectory(filePath) {
   }
 }
 
+function realPathOrNull(filePath) {
+  try {
+    return fs.realpathSync(filePath);
+  } catch {
+    return null;
+  }
+}
+
+function sameRealPath(left, right) {
+  const resolvedLeft = realPathOrNull(left);
+  const resolvedRight = realPathOrNull(right);
+  return Boolean(resolvedLeft && resolvedRight && samePath(resolvedLeft, resolvedRight));
+}
+
+export function packageVisible(dir) {
+  return fs.existsSync(path.join(dir, "package.json"));
+}
+
+function readLinkOrEmpty(link) {
+  try {
+    return fs.readlinkSync(link);
+  } catch {
+    return "";
+  }
+}
+
+function isLinkTo(link, target) {
+  try {
+    const stat = fs.lstatSync(link);
+    if (!stat.isSymbolicLink()) return false;
+    return samePath(readLinkOrEmpty(link), target) || sameRealPath(link, target);
+  } catch {
+    return false;
+  }
+}
+
 export function ensureJunction(link, target) {
   if (!isDirectory(target)) {
     throw new Error(`heal-dsh-profile: target is not a directory: ${target}`);
+  }
+  // dest/node_modules may itself be a junction onto the install tree. In that
+  // case `link` *is* the install package — never delete it.
+  if (samePath(link, target) || sameRealPath(link, target)) {
+    if (!packageVisible(link)) {
+      throw new Error(`heal-dsh-profile: install package has no package.json: ${target}`);
+    }
+    return "kept";
   }
   let stat;
   try {
@@ -51,20 +95,32 @@ export function ensureJunction(link, target) {
   }
   if (stat) {
     if (stat.isSymbolicLink()) {
-      let current = "";
-      try {
-        current = fs.readlinkSync(link);
-      } catch {
-        current = "";
-      }
-      if (samePath(current, target) || samePath(link, target)) return "kept";
+      const current = readLinkOrEmpty(link);
+      if (samePath(current, target) && packageVisible(link)) return "kept";
       fs.unlinkSync(link);
     } else {
       fs.rmSync(link, { recursive: true, force: true });
     }
   }
   fs.mkdirSync(path.dirname(link), { recursive: true });
-  fs.symlinkSync(target, link, "junction");
+  try {
+    fs.symlinkSync(target, link, "junction");
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "EEXIST" &&
+      isLinkTo(link, target) &&
+      packageVisible(link)
+    ) {
+      return "kept";
+    }
+    throw error;
+  }
+  if (!packageVisible(link)) {
+    throw new Error(`heal-dsh-profile: ${link} is not visible from ${path.join(link, "package.json")}`);
+  }
   return "linked";
 }
 
@@ -97,6 +153,47 @@ export function initWebProfile(dshHome) {
   return dir;
 }
 
+export function prepareDestNodeModules(destNodeModules, installNodeModules) {
+  let stat;
+  try {
+    stat = fs.lstatSync(destNodeModules);
+  } catch {
+    stat = null;
+  }
+  if (stat?.isSymbolicLink()) {
+    if (isLinkTo(destNodeModules, installNodeModules)) return "passthrough";
+    fs.unlinkSync(destNodeModules);
+  }
+  fs.mkdirSync(destNodeModules, { recursive: true });
+  return "directory";
+}
+
+export function packageDirFromAnchor(anchor, packageName) {
+  const require = createRequire(pathToFileURL(path.resolve(anchor)).href);
+  for (const searchPath of require.resolve.paths(packageName) ?? []) {
+    const candidate = path.join(searchPath, packageName);
+    if (packageVisible(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function linkRequiredPackages(installAnchor, destNodeModules) {
+  const absAnchor = path.resolve(installAnchor);
+  const required = new Map();
+  required.set("@deepseek-ai/dsh", path.dirname(absAnchor));
+  for (const name of REQUIRED_PACKAGES) {
+    if (required.has(name)) continue;
+    const dir = packageDirFromAnchor(absAnchor, name);
+    if (dir) required.set(name, dir);
+  }
+  let linked = 0;
+  for (const [name, target] of required) {
+    ensureJunction(path.join(destNodeModules, ...name.split("/")), target);
+    linked += 1;
+  }
+  return linked;
+}
+
 export function linkInstallModules(installNodeModules, destNodeModules) {
   if (!isDirectory(installNodeModules)) {
     throw new Error(`heal-dsh-profile: install node_modules missing: ${installNodeModules}`);
@@ -114,7 +211,10 @@ export function linkInstallModules(installNodeModules, destNodeModules) {
       } catch {
         scopeStat = null;
       }
-      if (scopeStat?.isSymbolicLink()) fs.unlinkSync(scopeDest);
+      if (scopeStat?.isSymbolicLink()) {
+        if (sameRealPath(scopeDest, source)) continue;
+        fs.unlinkSync(scopeDest);
+      }
       fs.mkdirSync(scopeDest, { recursive: true });
       if (!isDirectory(source)) continue;
       for (const pkg of fs.readdirSync(source, { withFileTypes: true })) {
@@ -162,6 +262,20 @@ export function verifyProfileResolution(dshHome, packageNames = REQUIRED_PACKAGE
   return resolved;
 }
 
+function verifyWithRetry(dshHome, attempts = 4) {
+  let lastError;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return verifyProfileResolution(dshHome);
+    } catch (error) {
+      lastError = error;
+      if (i === attempts - 1) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  throw lastError;
+}
+
 export function healDshProfile({ dshHome, installAnchor }) {
   if (!dshHome) throw new Error("heal-dsh-profile: --dsh-home is required");
   if (!installAnchor) throw new Error("heal-dsh-profile: --install-anchor is required");
@@ -175,8 +289,13 @@ export function healDshProfile({ dshHome, installAnchor }) {
   fs.mkdirSync(absHome, { recursive: true });
   initWebProfile(absHome);
   const removedShadow = removeShadowingProfileModules(absHome);
-  const linked = linkInstallModules(installNodeModules, destNodeModules);
-  const resolved = verifyProfileResolution(absHome);
+  const destKind = prepareDestNodeModules(destNodeModules, installNodeModules);
+  let linked = 0;
+  if (destKind !== "passthrough") {
+    linked += linkInstallModules(installNodeModules, destNodeModules);
+  }
+  linked += linkRequiredPackages(absAnchor, destNodeModules);
+  const resolved = verifyWithRetry(absHome);
   return {
     dshHome: absHome,
     installNodeModules,
