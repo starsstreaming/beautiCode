@@ -250,19 +250,11 @@ public sealed class BeautiCodeToggle : Control {
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $HostScript = Join-Path $PSScriptRoot "session-host.mjs"
-$CodexLaunchScript = Join-Path $RepoRoot "scripts\codex-launch.ps1"
 $ReleaseManifest = Join-Path $RepoRoot "release-manifest.json"
 $BundledNode = Join-Path $RepoRoot "runtime\node.exe"
 $coreDist = Join-Path $RepoRoot "packages\core\dist\index.js"
 $adapterFolder = if ($TargetHost -eq "dsh") { "adapter-dsh" } else { "adapter-codex" }
 $adapterDist = Join-Path $RepoRoot ("packages\{0}\dist\index.js" -f $adapterFolder)
-
-if ($TargetHost -eq "codex") {
-  if (-not (Test-Path -LiteralPath $CodexLaunchScript -PathType Leaf)) {
-    throw "缺少 Codex 启动脚本：$CodexLaunchScript"
-  }
-  . $CodexLaunchScript
-}
 
 if ($NodePath) {
   if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
@@ -633,68 +625,6 @@ function Get-BcThemeName {
   }
 }
 
-function Find-ChatGptExe {
-  if ($script:cachedChatGptExe -and (Test-Path -LiteralPath $script:cachedChatGptExe)) {
-    return $script:cachedChatGptExe
-  }
-  $script:cachedChatGptExe = Find-BcCodexExecutable
-  return $script:cachedChatGptExe
-}
-
-function Start-ChatGptDesktop {
-  param([int]$CdpPort = 9335)
-  $errors = New-Object System.Collections.ArrayList
-  try {
-    $result = Start-BcCodexWithCdp -CdpPort $CdpPort
-    if ($result.Method -eq "appx") {
-      [void]$errors.Add("Store launch may ignore custom CDP arguments; beautiCode will keep discovering the host.")
-    }
-    return $true
-  } catch {
-    [void]$errors.Add(("Codex launch: {0}" -f $_.Exception.Message))
-  }
-  throw ("无法启动 ChatGPT/Codex：{0}" -f ([string]::Join(" | ", @($errors))))
-}
-
-function Stop-ChatGptDesktop {
-  $targets = @(Get-BcCodexMainProcesses)
-  if ($targets.Count -eq 0) { return $true }
-
-  $answer = [System.Windows.Forms.MessageBox]::Show(
-    $L.RestartConfirm,
-    $L.AppName,
-    [System.Windows.Forms.MessageBoxButtons]::YesNo,
-    [System.Windows.Forms.MessageBoxIcon]::Warning,
-    [System.Windows.Forms.MessageBoxDefaultButton]::Button2
-  )
-  if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
-    Show-Tip -Title $L.AppName -Text $L.RestartCancelled -Icon Info
-    return $false
-  }
-
-  # Shared helper: CloseMainWindow first, then a non-force Stop-Process.
-  if (Stop-BcCodexGracefully -WaitSeconds 5) { return $true }
-
-  $answer = [System.Windows.Forms.MessageBox]::Show(
-    $L.ForceCloseConfirm,
-    $L.AppName,
-    [System.Windows.Forms.MessageBoxButtons]::YesNo,
-    [System.Windows.Forms.MessageBoxIcon]::Warning,
-    [System.Windows.Forms.MessageBoxDefaultButton]::Button2
-  )
-  if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
-    Show-Tip -Title $L.AppName -Text $L.RestartCancelled -Icon Info
-    return $false
-  }
-
-  if (Stop-BcCodexForcefully -WaitSeconds 3) { return $true }
-
-  $remaining = @(Get-BcCodexMainProcesses)
-  throw ("无法停止 ChatGPT/Codex 进程：{0}" -f (
-    [string]::Join(", ", @($remaining | ForEach-Object { $_.Process.Id }))
-  ))
-}
-
 function Test-BcCdpPort([int]$CdpPort) {
   if ($CdpPort -le 0) { return $false }
   # Cheap TCP first — avoids 1s HTTP timeout on closed ports.
@@ -720,11 +650,6 @@ function Test-BcCdpPort([int]$CdpPort) {
   } catch {
     return $false
   }
-}
-
-function Test-ChatGptRunning {
-  $procs = @(Get-Process -Name "ChatGPT","Codex" -ErrorAction SilentlyContinue)
-  return ($procs.Count -gt 0)
 }
 
 function Wait-BcCdpReady {
@@ -824,12 +749,10 @@ function Ensure-BcDshReady {
   return $true
 }
 
-# Ensure ChatGPT/Codex is up with loopback CDP, then re-publish the active
-# (default) background. Used by tray "应用或重新应用".
-# - CDP healthy + process up  → reapply only
-# - process up, CDP missing   → restart with CDP flags, wait, reapply
-# - process down              → start with CDP flags, wait, reapply
-# DSH: start dsh web if needed, open the page if no browser client, then reapply.
+# Re-publish the active (default) background into live pages. Used by tray
+# "应用或重新应用". beautiCode never starts/stops a host:
+# - DSH:   bridge up → open page if no client → reapply; else ask user to run dsh web
+# - Codex: loopback CDP up → reapply; else ask user to open Codex with CDP flags
 function Invoke-BcEnsureHostAndReapply {
   if ($script:targetHost -eq "dsh") {
     Ensure-BcDshReady
@@ -869,22 +792,9 @@ function Invoke-BcEnsureHostAndReapply {
   }
 
   if (-not $cdpOk) {
-    $running = Test-ChatGptRunning
-    if ($running) {
-      Show-Tip -Title $L.AppName -Text $L.RestartingChat -Icon Info
-      if (-not (Stop-ChatGptDesktop)) { return $false }
-    } else {
-      Show-Tip -Title $L.AppName -Text $L.StartingChat -Icon Info
-    }
-    $launchPort = Get-BcLoopbackCdpPort -Preferred $preferred
-    [void](Start-ChatGptDesktop -CdpPort $launchPort)
-    # Codex cold start is the real wall clock; poll aggressively so we attach
-    # as soon as :9335 answers instead of sleeping 700ms between probes.
-    $readyPort = Wait-BcCdpReady -PreferredPort $launchPort -TimeoutSec 40
-    if ($readyPort -le 0) {
-      throw $L.NoCdp
-    }
-    $script:cdpPort = $readyPort
+    # beautiCode never launches/restarts Codex. Ask the user to open Codex
+    # Desktop with loopback CDP instead.
+    throw "未发现健康的 Codex CDP。请先打开带本机 CDP 调试端口的 Codex Desktop（如 --remote-debugging-port=9335 --remote-debugging-address=127.0.0.1），再点「应用或重新应用」。"
   }
 
   # Import / re-publish the stored default (active) background into live pages.
@@ -988,15 +898,9 @@ $L = @{
   RolledBack     = (U "5DF2 56DE 6EDA 3002")                               # 已回滚。
   ApplyFail      = (U "5E94 7528 5931 8D25")                               # 应用失败
   BusyTip        = (U "6B63 5728 5E94 7528 6216 6821 9A8C FF0C 8BF7 7B49 5F85 5F53 524D 64CD 4F5C 5B8C 6210 3002") # 正在应用或校验，请等待当前操作完成。
-  NoCdp          = (U "672A 627E 5230 5065 5EB7 7684 672C 673A 0020 0043 006F 0064 0065 0078 0020 0043 0044 0050 3002 8BF7 7A0D 5019 518D 8BD5 3002") # 未找到健康的本机 Codex CDP。请稍后再试。
-  StartingChat   = (U "6B63 5728 6253 5F00 0020 0043 0068 0061 0074 0047 0050 0054 002F 0043 006F 0064 0065 0078 2026") # 正在打开 ChatGPT/Codex…
   OpeningDsh     = (U "6B63 5728 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 2026") # 正在打开 DeepSeek Harness 网页…
   DshPageWaitFail = (U "5DF2 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 FF0C 4F46 9875 9762 5C1A 672A 8FDE 4E0A 3002 8BF7 5237 65B0 540E 518D 8BD5 3002") # 已打开 DeepSeek Harness 网页，但页面尚未连上。请刷新后再试。
   ReapplyNoBgDsh = (U "5DF2 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 3002 5F53 524D 65E0 9ED8 8BA4 80CC 666F 53EF 5BFC 5165 3002") # 已打开 DeepSeek Harness。当前无默认背景可导入。
-  RestartingChat = (U "6B63 5728 91CD 542F 0020 0043 0068 0061 0074 0047 0050 0054 002F 0043 006F 0064 0065 0078 2026") # 正在重启 ChatGPT/Codex…
-  RestartConfirm = (U "0043 0068 0061 0074 0047 0050 0054 002F 0043 006F 0064 0065 0078 0020 6B63 5728 8FD0 884C 3002 91CD 542F 53EF 80FD 4E22 5931 672A 4FDD 5B58 5185 5BB9 3002 662F 5426 7EE7 7EED FF1F")
-  ForceCloseConfirm = (U "5E94 7528 672A 5728 0020 0035 0020 79D2 5185 9000 51FA 3002 662F 5426 5F3A 5236 7ED3 675F 5269 4F59 8FDB 7A0B FF1F")
-  RestartCancelled = (U "5DF2 53D6 6D88 91CD 542F 3002")
   RunningTip     = (U "6258 76D8 5DF2 542F 52A8 3002 0043 0074 0072 006C 002B 0053 0068 0069 0066 0074 002B 0053 0070 0061 0063 0065 0020 6478 9C7C 3002") # 托盘已启动。Ctrl+Shift+Space 摸鱼。
   RunningTipDsh  = (U "6258 76D8 5DF2 542F 52A8 3002 8BF7 5148 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 3002") # 托盘已启动。请先打开 DeepSeek Harness 网页。
   HostCodex      = "Codex Desktop"

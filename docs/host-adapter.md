@@ -1,5 +1,33 @@
 # Host adapter contract
 
+## Multi-host model
+
+beautiCode is host-agnostic. Every supported tool (DeepSeek Harness, Codex
+Desktop, future hosts) is one **host adapter** that implements the shared
+`HostSession` interface from `packages/core` and nothing else is host-aware:
+
+```
+control plane (tray / session-host / CLI)
+        │  talks to HostSession only
+        ▼
+host adapter (adapter-dsh | adapter-codex | adapter-<future>)
+        │  owns one host mechanism
+        ▼
+host page (DSH web / Codex Desktop / …)
+```
+
+- The control plane never knows a host's internals; it drives apply, reapply,
+  modes, themes, progress through `HostSession`.
+- `ApplyTransaction` (packages/core) is reused by every adapter: snapshot →
+  commit → stage → host apply → verify → finalize/rollback.
+- **beautiCode never starts or stops a host.** Each adapter attaches to a host
+  the user already launched (DSH: Cordis plugin; Codex: loopback CDP). A
+  missing host is a clear error, not an auto-launch.
+- The browser half is shared too: DSH loads it via the `@beauticode/dsh-plugin`
+  Cordis plugin (`client.js` + `/__beauticode/*`). A new adapter either serves
+  the same bridge protocol or injects its own page runtime — the control plane
+  does not care which.
+
 ## Principles
 
 1. **Background-first and scoped.** The injected stage owns media. The adapter
@@ -148,6 +176,8 @@ Runtime API: `getPlaybackPosition()` / `seekTo(seconds)` (no media rebuild).
 
 - Full theme CSS packs
 - DOM screenshot pipelines
-- Non-Codex hosts (terminal adapters come later and share only `packages/core`)
 - Renaming the host window title / taskbar icon for disguise
 - Persisting fish mode across tray restarts
+
+New hosts are added by writing a new `HostSession` adapter (see
+[Multi-host model](#multi-host-model)); they share only `packages/core`.
