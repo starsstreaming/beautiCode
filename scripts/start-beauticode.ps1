@@ -468,6 +468,18 @@ if ($DryRun) {
   return
 }
 
+if ($route.Host -eq "dsh") {
+  $pluginInstaller = Join-Path $repoRoot "scripts\install-dsh-plugin.ps1"
+  $pluginRoot = Join-Path $repoRoot "integrations\deepseek-harness"
+  if (Test-Path -LiteralPath $pluginInstaller -PathType Leaf) {
+    try {
+      & $pluginInstaller -PluginRoot $pluginRoot
+    } catch {
+      Write-Host ("未能自动写入 DSH 插件：{0}" -f $_.Exception.Message)
+    }
+  }
+}
+
 $runningHost = Get-BcRunningHost
 if ($runningHost -eq $route.Host) {
   [void](Send-BcTrayEvent -Name "Local\beautiCode.Engine.ShowPanel.v1")

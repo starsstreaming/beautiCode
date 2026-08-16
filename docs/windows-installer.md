@@ -10,8 +10,9 @@
 
 The package includes the compiled beautiCode runtime and a pinned Node.js x64
 runtime. The target machine does not need Node.js, npm, TypeScript, or a source
-checkout. DeepSeek Harness is **not** bundled — install the plugin from
-`{app}\integrations\deepseek-harness` into your DSH profile and run `dsh web`
+checkout. DeepSeek Harness is **not** bundled. The installer ships the plugin files and
+wires them into the user's DSH profile (`dsh plugin` is not required; if no
+profile exists yet, a home-level `cordis.patch.yml` is written). Run `dsh web`
 yourself. Codex Desktop is optional and remains a separate prerequisite if you
 choose that host; the tray still launches Codex as before.
 

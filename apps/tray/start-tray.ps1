@@ -335,6 +335,18 @@ foreach ($requiredRuntimeFile in @($HostScript, $coreDist, $adapterDist)) {
   }
 }
 
+if ($script:targetHost -eq "dsh") {
+  $pluginInstaller = Join-Path $RepoRoot "scripts\install-dsh-plugin.ps1"
+  $pluginRoot = Join-Path $RepoRoot "integrations\deepseek-harness"
+  if (Test-Path -LiteralPath $pluginInstaller -PathType Leaf) {
+    try {
+      & $pluginInstaller -PluginRoot $pluginRoot
+    } catch {
+      Write-BcTrayLog ("dsh plugin install failed: {0}" -f $_.Exception.Message)
+    }
+  }
+}
+
 # Cryptographically strong token for the local control plane.
 $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
 try {
