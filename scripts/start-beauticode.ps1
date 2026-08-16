@@ -1,16 +1,16 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Choose which host beautiCode should control.
+  Launch beautiCode for Codex Desktop.
 
 .DESCRIPTION
   The normal beautiCode shortcut opens a small host picker, then delegates to
-  the DeepSeek Harness launcher (default path) or the Codex launcher. Direct
-  launchers remain available for automation and Windows logon startup.
+  the Codex engine launcher. DeepSeek Harness is user-managed: install the
+  @beauticode/dsh-plugin into your DSH profile and run `dsh web` yourself.
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet("prompt", "codex", "dsh")]
+  [ValidateSet("prompt", "codex")]
   [string]$TargetHost = "prompt",
   [switch]$DryRun
 )
@@ -18,7 +18,6 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $codexLauncher = Join-Path $repoRoot "scripts\start-beauticode-engine.ps1"
-$dshLauncher = Join-Path $repoRoot "scripts\start-beauticode-dsh.ps1"
 $iconPath = Join-Path $repoRoot "beauticode.ico"
 $brandImagePath = Join-Path $repoRoot "assets\beauticode-icon-borderless.png"
 
@@ -185,9 +184,7 @@ public static class BeautiCodeHostPickerNative {
   [void]$header.Controls.Add($eyebrow)
 
   $currentHost = Get-BcRunningHost
-  $statusText = if ($currentHost -eq "dsh") {
-    "● 已连接 DeepSeek Harness"
-  } elseif ($currentHost -eq "codex") {
+  $statusText = if ($currentHost -eq "codex") {
     "● 已连接 Codex Desktop"
   } else {
     "● 本地引擎待连接"
@@ -286,12 +283,9 @@ public static class BeautiCodeHostPickerNative {
     [void]$root.Controls.Add($outer)
   }
 
-  Add-BcHostCard -CardHost "dsh" -Title "DeepSeek Harness" `
-    -Description "内置运行时。打开网页，套上图片或视频背景。" -Action "打开 →" `
-    -X 20 -Current ($currentHost -eq "dsh")
   Add-BcHostCard -CardHost "codex" -Title "Codex Desktop" `
     -Description "连接 Codex 桌面端，应用背景与显示控制。" -Action "启动 →" `
-    -X 266 -Current ($currentHost -eq "codex")
+    -X 20 -Current ($currentHost -eq "codex")
 
   $footerHint = New-BcPickerLabel -Text "选择会替换当前托盘目标" -X 20 -Y 275 -Width 250 -Height 25 `
     -Font $sectionFont -Color $colors.Muted
@@ -353,20 +347,17 @@ public static class BeautiCodeHostPickerNative {
 }
 
 function Get-BcRunningHost {
-  foreach ($candidate in @("codex", "dsh")) {
-    $mutex = $null
-    try {
-      $mutex = [System.Threading.Mutex]::OpenExisting(
-        ("Local\beautiCode.Engine.Host.{0}.v1" -f $candidate)
-      )
-      return $candidate
-    } catch [System.Threading.WaitHandleCannotBeOpenedException] {
-      continue
-    } finally {
-      if ($null -ne $mutex) { $mutex.Dispose() }
-    }
+  $mutex = $null
+  try {
+    $mutex = [System.Threading.Mutex]::OpenExisting(
+      "Local\beautiCode.Engine.Host.codex.v1"
+    )
+    return "codex"
+  } catch [System.Threading.WaitHandleCannotBeOpenedException] {
+    return $null
+  } finally {
+    if ($null -ne $mutex) { $mutex.Dispose() }
   }
-  return $null
 }
 
 function Test-BcTrayRunning {
@@ -393,34 +384,6 @@ function Send-BcTrayEvent {
   } finally {
     if ($null -ne $event) { $event.Dispose() }
   }
-}
-
-function Start-BcDshWarmup {
-  if (-not (Test-Path -LiteralPath $dshLauncher -PathType Leaf)) { return }
-  $argList = @(
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-WindowStyle", "Hidden",
-    "-File", $dshLauncher,
-    "-EnsureBridgeOnly",
-    "-NoBrowser",
-    "-SkipBuild"
-  )
-  $quoted = @()
-  foreach ($a in $argList) {
-    if ($a -match '[\s"]') {
-      $quoted += ('"{0}"' -f ($a -replace '"', '\"'))
-    } else {
-      $quoted += $a
-    }
-  }
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "powershell.exe"
-  $psi.Arguments = ($quoted -join " ")
-  $psi.WorkingDirectory = $repoRoot
-  $psi.UseShellExecute = $true
-  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-  [void][System.Diagnostics.Process]::Start($psi)
 }
 
 function Show-BcSwitchError([string]$Message) {
@@ -462,13 +425,7 @@ public static class BeautiCodeHostPickerNative {
 }
 
 if ($DryRun -and $TargetHost -eq "prompt") {
-  throw "DryRun 必须显式指定 -TargetHost codex 或 dsh。"
-}
-
-if ($TargetHost -eq "prompt" -and -not $DryRun) {
-  # Boot DSH while the picker is on screen. The dedicated launcher then
-  # reuses that process instead of paying the whole cold start after click.
-  Start-BcDshWarmup
+  throw "DryRun 必须显式指定 -TargetHost codex。"
 }
 
 $selected = if ($TargetHost -eq "prompt") {
@@ -478,18 +435,10 @@ $selected = if ($TargetHost -eq "prompt") {
 }
 if (-not $selected) { return }
 
-$route = if ($selected -eq "dsh") {
-  [pscustomobject]@{
-    Host = "dsh"
-    Script = $dshLauncher
-    Arguments = @{ SkipBuild = $true }
-  }
-} else {
-  [pscustomobject]@{
-    Host = "codex"
-    Script = $codexLauncher
-    Arguments = @{}
-  }
+$route = [pscustomobject]@{
+  Host = "codex"
+  Script = $codexLauncher
+  Arguments = @{}
 }
 if (-not (Test-Path -LiteralPath $route.Script -PathType Leaf)) {
   Show-BcSwitchError "缺少 beautiCode 启动脚本：$($route.Script)"
@@ -503,15 +452,6 @@ if ($DryRun) {
 
 $runningHost = Get-BcRunningHost
 if ($runningHost -eq $route.Host) {
-  if ($route.Host -eq "dsh") {
-    try {
-      $routeArguments = $route.Arguments
-      & $route.Script @routeArguments
-    } catch {
-      Show-BcSwitchError ("启动 DeepSeek Harness 失败：{0}" -f $_.Exception.Message)
-      return
-    }
-  }
   [void](Send-BcTrayEvent -Name "Local\beautiCode.Engine.ShowPanel.v1")
   return
 }
