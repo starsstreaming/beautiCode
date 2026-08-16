@@ -593,9 +593,8 @@ test("data root ownership adopts a valid legacy active manifest", async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-test("data root tolerates launcher logs created before the ownership marker", async () => {
+test("data root tolerates tray logs created before the ownership marker", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-root-log-"));
-  await fs.writeFile(path.join(root, "engine-launcher.log"), "old launcher\n", "utf8");
   await fs.mkdir(path.join(root, "logs"));
   await fs.writeFile(path.join(root, "logs", "tray.log"), "old tray\n", "utf8");
 

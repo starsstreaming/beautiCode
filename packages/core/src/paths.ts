@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 import crypto from "node:crypto";
 import {
   ACTIVE_DIR_NAME,
@@ -15,16 +14,20 @@ import {
 const DATA_ROOT_MARKER_NAME = ".beauticode-root.json";
 const DATA_ROOT_SCHEMA = "beauticode.data-root/v1";
 
+/**
+ * The data root is always explicit: `BEAUTICODE_DATA_ROOT` or `--data-root`.
+ * There is no hidden default and no LOCALAPPDATA guess — two processes talking
+ * to the same store must agree on one root, so an implicit second copy would
+ * silently split them (the DSH-history bug class this replaces).
+ */
 export function defaultDataRoot(): string {
-  if (process.platform === "win32") {
-    const base = process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local");
-    return path.join(base, "beautiCode");
+  const value = process.env.BEAUTICODE_DATA_ROOT;
+  if (!value) {
+    throw new Error(
+      "未设置 BEAUTICODE_DATA_ROOT。beautiCode 数据根必须显式指定（环境变量 BEAUTICODE_DATA_ROOT 或 --data-root）。",
+    );
   }
-  if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "beautiCode");
-  }
-  const xdg = process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share");
-  return path.join(xdg, "beautiCode");
+  return path.resolve(value);
 }
 
 export interface DataPaths {
@@ -91,7 +94,6 @@ export async function ensureDataLayout(paths: DataPaths): Promise<void> {
       entry === SAVED_DIR_NAME ||
       entry === RUNTIME_MEDIA_DIR_NAME ||
       entry === "logs" ||
-      entry === "engine-launcher.log" ||
       entry === "injector.lock" ||
       entry === "store.lock" ||
       entry === ".beauticode-commit.json" ||

@@ -37,6 +37,12 @@ function finish(code) {
   process.exitCode = code;
 }
 
+function currentDataRootLabel() {
+  return process.env.BEAUTICODE_DATA_ROOT
+    ? path.resolve(process.env.BEAUTICODE_DATA_ROOT)
+    : "(必填：BEAUTICODE_DATA_ROOT 或 --data-root)";
+}
+
 function printUsage() {
   console.log(`beautiCode CLI
 
@@ -64,12 +70,12 @@ Windows tray:
 Options:
   --port <n>           Loopback CDP port
   --discover           Auto-pick a healthy loopback Codex CDP port
-  --data-root <path>   Override data directory (default: ${defaultDataRoot()})
+  --data-root <path>   Data directory (required; or BEAUTICODE_DATA_ROOT)
   --verify-ms <n>      Live verify deadline in ms (default 30000)
   --url-prefix <s>     Prefer page targets with this URL prefix (default app://)
   --allow-http         Allow http://127.0.0.1 test pages (disables app: requirement)
 
-Data root: ${defaultDataRoot()}
+Data root: ${currentDataRootLabel()}
 `);
 }
 
@@ -203,7 +209,9 @@ async function main() {
 
   const [cmd, a, b] = parsed.positionals;
   const { flags } = parsed;
-  const dataRoot = flags.dataRoot ?? defaultDataRoot();
+  // Data root is lazy: discovery/probe commands never touch the store and must
+  // work without BEAUTICODE_DATA_ROOT. Store-touching commands resolve it now.
+  const requireDataRoot = () => flags.dataRoot ?? defaultDataRoot();
   const adapter = await import(adapterEntry);
 
   if (cmd === "how-to-cdp" || cmd === "howto" || cmd === "cdp-help") {
@@ -253,7 +261,7 @@ async function main() {
   }
 
   if (cmd === "status") {
-    const store = new BackgroundStore({ root: dataRoot });
+    const store = new BackgroundStore({ root: requireDataRoot() });
     await store.init();
     const m = await store.readActiveManifest();
     console.log(JSON.stringify(m, null, 2));
@@ -309,10 +317,10 @@ async function main() {
     const onSignal = () => ac.abort();
     process.on("SIGINT", onSignal);
     process.on("SIGTERM", onSignal);
-    console.error(`watching CDP :${port} (dataRoot=${dataRoot}); Ctrl+C to stop`);
+    console.error(`watching CDP :${port} (dataRoot=${requireDataRoot()}); Ctrl+C to stop`);
     await adapter.runWatch({
       port,
-      dataRoot,
+      dataRoot: requireDataRoot(),
       requireAppProtocol: !flags.allowHttp,
       ...(flags.urlPrefix !== undefined ? { urlPrefix: flags.urlPrefix } : {}),
       signal: ac.signal,
@@ -387,7 +395,7 @@ async function main() {
     const result = await adapter.runApplyOnce({
       port,
       input,
-      dataRoot,
+      dataRoot: requireDataRoot(),
       verifyDeadlineMs: flags.verifyMs,
       requireAppProtocol: !flags.allowHttp,
       ...(flags.urlPrefix !== undefined ? { urlPrefix: flags.urlPrefix } : {}),
@@ -397,7 +405,7 @@ async function main() {
     return;
   }
 
-  const store = new BackgroundStore({ root: dataRoot });
+  const store = new BackgroundStore({ root: requireDataRoot() });
   const media = new MediaServerController({ enabled: false });
   const tx = new ApplyTransaction({ store, media, offline: true });
   try {

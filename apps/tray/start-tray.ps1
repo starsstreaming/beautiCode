@@ -341,6 +341,17 @@ function ConvertTo-PsLiteral([string]$Value) {
   return "'" + ($Value -replace "'", "''") + "'"
 }
 
+# The data root is explicit: the tray (as launcher) always picks one and hands
+# it to the engine — core never guesses a default. Default follows the Windows
+# install convention; DSH/Codex control must share the same root.
+if (-not $DataRoot) {
+  $DataRoot = if ($env:LOCALAPPDATA) {
+    Join-Path $env:LOCALAPPDATA "beautiCode"
+  } else {
+    Join-Path ([System.IO.Path]::GetTempPath()) "beautiCode"
+  }
+}
+
 $nodeInvocationParts = @(
   (ConvertTo-PsLiteral $Node),
   (ConvertTo-PsLiteral $HostScript),

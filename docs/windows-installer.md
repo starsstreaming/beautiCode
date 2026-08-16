@@ -8,16 +8,18 @@
 %LOCALAPPDATA%\Programs\beautiCode
 ```
 
-The package includes the compiled beautiCode runtime, a pinned Node.js x64
-runtime, and a compatible DeepSeek Harness. The target machine does not need
-Node.js, npm, TypeScript, DSH, or a source checkout. Codex Desktop is optional
-and remains a separate prerequisite if you choose that host.
+The package includes the compiled beautiCode runtime and a pinned Node.js x64
+runtime. The target machine does not need Node.js, npm, TypeScript, or a source
+checkout. DeepSeek Harness is **not** bundled — install the
+`@beauticode/dsh-plugin` into your DSH profile and run `dsh web` yourself.
+Codex Desktop is optional and remains a separate prerequisite if you choose
+that host.
 
 The installer creates a Start menu shortcut. Desktop and login-start shortcuts
 are optional installer tasks. Uninstall removes program files and shortcuts but
-preserves `%LOCALAPPDATA%\beautiCode`, which contains user media and themes.
-Quit the beautiCode tray before an upgrade or uninstall so the bundled runtime
-is not in use.
+preserves the data root (tray default `%LOCALAPPDATA%\beautiCode`), which
+contains user media and themes. Quit the beautiCode tray before an upgrade or
+uninstall so the bundled runtime is not in use.
 
 ## Build
 
@@ -56,18 +58,19 @@ The locally installed Inno Setup 6.7.3 compiler identifies itself as
 non-commercial-use-only. Review or replace that build-tool license before using
 this pipeline for a commercial distribution.
 
-The installer targets x64-compatible Windows. DeepSeek Harness is bundled and
-is the recommended host. The installer does not patch Codex Desktop; that path
-still depends on Codex exposing a healthy loopback CDP endpoint.
+The installer targets x64-compatible Windows. DeepSeek Harness is the
+recommended host and is user-managed (plugin + `dsh web`). The installer does
+not patch Codex Desktop; that path still depends on Codex exposing a healthy
+loopback CDP endpoint.
 
 The current bundled Node.js runtime requires 64-bit Windows 10 version 1809
-(build 17763) or newer. If you use Codex and it was already running without
-loopback CDP, use the tray's “Apply or re-apply” action; it will restart Codex
-only after the normal confirmation prompt.
+(build 17763) or newer. beautiCode never starts or restarts a host: if Codex is
+running without loopback CDP, open it with `--remote-debugging-port=9335
+--remote-debugging-address=127.0.0.1` (the tray's “Apply or re-apply” will ask
+you to do so).
 
 Startup diagnostics are written to:
 
 ```text
-%LOCALAPPDATA%\beautiCode\logs\engine-launcher.log
 %LOCALAPPDATA%\beautiCode\logs\tray.log
 ```

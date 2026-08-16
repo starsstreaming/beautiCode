@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,13 +28,16 @@ async function readBridgeIdentity() {
   return { protocol: bridgeProtocol, revision: "source" };
 }
 
-function defaultTokenFile() {
-  const base =
-    process.env.BEAUTICODE_DATA_ROOT ||
-    (process.env.LOCALAPPDATA
-      ? path.join(process.env.LOCALAPPDATA, "beautiCode")
-      : path.join(os.homedir(), ".beauticode"));
-  return path.join(base, "dsh-bridge.token");
+/**
+ * Token file must be explicit too: plugin `config.tokenFile` or the shared
+ * `BEAUTICODE_DATA_ROOT` environment variable. No LOCALAPPDATA guess — the
+ * control side and the plugin must agree on one data root.
+ */
+function resolveTokenFile(config) {
+  if (config.tokenFile) return path.resolve(config.tokenFile);
+  const base = process.env.BEAUTICODE_DATA_ROOT;
+  if (base) return path.join(base, "dsh-bridge.token");
+  return null;
 }
 
 function sendJson(res, status, body) {
@@ -178,11 +180,20 @@ function publicStatus(current, modes, clients, clientStates) {
 }
 
 export function apply(ctx, config = {}) {
-  const tokenFile = path.resolve(config.tokenFile || defaultTokenFile());
+  const tokenFile = resolveTokenFile(config);
   const clients = new Map();
   const clientStates = new Map();
   let current = null;
   const modes = { fish: false, muted: true, tone: "dark" };
+
+  const requireTokenFile = (res) => {
+    if (tokenFile) return true;
+    sendJson(res, 503, {
+      ok: false,
+      error: "未配置数据根。请设置 BEAUTICODE_DATA_ROOT 或插件 config.tokenFile。",
+    });
+    return false;
+  };
 
   const broadcast = (payload) => {
     const frame = `data: ${JSON.stringify(payload)}\n\n`;
@@ -275,6 +286,7 @@ export function apply(ctx, config = {}) {
             res.writeHead(405).end();
             return;
           }
+          if (!requireTokenFile(res)) return;
           if (!(await authorized(req, tokenFile))) {
             sendJson(res, 401, { ok: false, error: "未授权的请求。" });
             return;
@@ -306,6 +318,7 @@ export function apply(ctx, config = {}) {
             res.writeHead(405).end();
             return;
           }
+          if (!requireTokenFile(res)) return;
           if (!(await authorized(req, tokenFile))) {
             sendJson(res, 401, { ok: false, error: "未授权的请求。" });
             return;
@@ -338,6 +351,7 @@ export function apply(ctx, config = {}) {
             res.writeHead(405).end();
             return;
           }
+          if (!requireTokenFile(res)) return;
           if (!(await authorized(req, tokenFile))) {
             sendJson(res, 401, { ok: false, error: "未授权的请求。" });
             return;
