@@ -185,7 +185,11 @@ function Ensure-WebPackageDep {
   }
   if ($current -eq $linkSpec) { return }
   $deps | Add-Member -NotePropertyName $pluginName -NotePropertyValue $linkSpec -Force
-  $json | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $webPackage -Encoding UTF8
+  # Windows PowerShell 5.1 Set-Content -Encoding UTF8 writes a BOM.
+  # DSH reads the profile manifest with JSON.parse and rejects that.
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  $text = $json | ConvertTo-Json -Depth 8
+  [IO.File]::WriteAllText($webPackage, ($text.TrimEnd() + "`n"), $utf8)
 }
 
 if (-not (Test-Path -LiteralPath $indexFile -PathType Leaf)) {
