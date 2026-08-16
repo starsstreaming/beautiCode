@@ -179,7 +179,7 @@ dsh plugin --profile web add @beauticode/dsh-plugin
 dsh web
 ```
 
-安装完成后启动 beautiCode，选择 **DeepSeek Harness** 目标。Windows 右下角会出现托盘图标。
+安装完成后从开始菜单或桌面启动 beautiCode，Windows 右下角会出现托盘图标。
 
 之后在托盘里：
 

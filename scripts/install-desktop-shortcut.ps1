@@ -9,9 +9,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$Launcher = Join-Path $RepoRoot "scripts\start-beauticode-engine.ps1"
-if (-not (Test-Path -LiteralPath $Launcher)) {
-  throw "Missing launcher: $Launcher"
+$TrayScript = Join-Path $RepoRoot "apps\tray\start-tray.ps1"
+if (-not (Test-Path -LiteralPath $TrayScript)) {
+  throw "Missing tray script: $TrayScript"
 }
 
 if (-not $DesktopPath) {
@@ -34,7 +34,7 @@ $iconCandidate = @(
 $wsh = New-Object -ComObject WScript.Shell
 $sc = $wsh.CreateShortcut($shortcutPath)
 $sc.TargetPath = "powershell.exe"
-$sc.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`""
+$sc.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TrayScript`" -TargetHost dsh"
 $sc.WorkingDirectory = $RepoRoot
 $sc.WindowStyle = 7
 $sc.Description = "Start beautiCode (system tray background for DeepSeek Harness)"
@@ -47,4 +47,4 @@ $sc.Save()
 Write-Host "Desktop shortcut created:"
 Write-Host "  $shortcutPath"
 Write-Host "Target launcher:"
-Write-Host "  $Launcher"
+Write-Host "  $TrayScript"
