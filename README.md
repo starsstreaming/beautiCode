@@ -81,8 +81,7 @@ https://github.com/user-attachments/assets/19a9729c-45c2-4c83-9e41-befd8c2d3af6
 安装包自带 Node.js 和 DeepSeek Harness 运行时，不需要另外安装 Node.js、npm 或 DSH。
 启动后选择 **DeepSeek Harness** 即可；也可以从开始菜单打开「beautiCode · DeepSeek Harness」直接进入。
 同一安装包仍可选 Codex Desktop。
-<img width="548" height="814" alt="image" src="https://github.com/user-attachments/assets/c609fd9f-3be7-41e5-a84b-265cead956f4" />
-
+<img width="533" height="660" alt="image" src="https://github.com/user-attachments/assets/8c16eeb9-94d0-4f19-a816-b32fba8a110c" />
 
 
 ---
