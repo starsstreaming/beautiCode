@@ -125,6 +125,20 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     return node;
   }
 
+  /**
+   * Fail closed on DSH DOM drift: the injected CSS depends on `#root` (and its
+   * `data-phase` markers). If the shell no longer exposes them, report a clear
+   * error through the render ack instead of silently painting a broken page.
+   * Only `#root` is a hard dependency — `data-phase` is optional because the
+   * hero/home phase legitimately has no active/settling marker.
+   */
+  function dshStructureIssue() {
+    if (!document.getElementById("root")) {
+      return "DSH 页面结构不兼容：未找到 #root。";
+    }
+    return null;
+  }
+
   function activeVideo() {
     return document.querySelector("#beauticode-bg-stage video");
   }
@@ -252,6 +266,11 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       return;
     }
     if (typeof payload.imageUrl !== "string") return;
+    const structureIssue = dshStructureIssue();
+    if (structureIssue) {
+      await acknowledgeRender(payload, false, false, structureIssue);
+      return;
+    }
     try {
       const image = await loadImage(payload.imageUrl);
       if (activePayload !== payload) return;

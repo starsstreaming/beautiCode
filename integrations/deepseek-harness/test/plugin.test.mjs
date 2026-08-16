@@ -100,6 +100,9 @@ test("plugin injects its client script exactly once", async (t) => {
   assert.match(source, /toggleAttribute\("data-ds-dark-theme"/);
   assert.match(source, /prefers-color-scheme: dark/);
   assert.match(source, /new MutationObserver\(scheduleDshThemeSync\)/);
+  // Structure probe: fail closed on missing DSH #root instead of silent breakage.
+  assert.match(source, /function dshStructureIssue\(\)/);
+  assert.match(source, /未找到 #root/);
 
   const version = await fetch(`${plugin.origin}/__beauticode/version`);
   assert.deepEqual(await version.json(), {
