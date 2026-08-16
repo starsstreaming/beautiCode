@@ -916,13 +916,9 @@ $L = @{
   RunningTipDsh  = (U "6258 76D8 5DF2 542F 52A8 3002 8BF7 5148 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 3002") # 托盘已启动。请先打开 DeepSeek Harness 网页。
   HostCodex      = "Codex Desktop"
   HostDsh        = "DeepSeek Harness"
-  DshPhaseOne    = (U "0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7B2C 4E00 9636 6BB5 4EC5 652F 6301 56FE 7247 80CC 666F 3001 6E05 9664 548C 91CD 65B0 5E94 7528 3002") # DeepSeek Harness 第一阶段仅支持图片背景、清除和重新应用。
-  FailedSuffix   = (U "5931 8D25")                                         # 失败
   MediaImage     = (U "56FE 7247")                                         # 图片
   MediaVideo     = (U "89C6 9891")                                         # 视频
-  MediaClear     = (U "65E0")                                               # 无
   NoBackground   = (U "6682 65E0 80CC 666F")                               # 暂无背景
-  Sessions       = (U "4F1A 8BDD")                                         # 会话
   HotkeyFail     = (U "5168 5C40 5FEB 6377 952E 6CE8 518C 5931 8D25 FF0C 4ECD 53EF 7528 6258 76D8 83DC 5355 5207 6362 6478 9C7C 6A21 5F0F 3002") # 全局快捷键注册失败，仍可用托盘菜单切换摸鱼模式。
 }
 

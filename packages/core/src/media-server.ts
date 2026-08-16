@@ -551,29 +551,6 @@ export async function createMediaServer(
   };
 }
 
-function isAssetHandle(value: unknown): value is MediaAssetHandle {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return (
-    (v.kind === "image" || v.kind === "video") &&
-    typeof v.token === "string" &&
-    typeof v.srcUrl === "string" &&
-    !("image" in v && typeof v.image === "object") &&
-    !("video" in v && typeof v.video === "object")
-  );
-}
-
-function isPairCommit(
-  value: unknown,
-): value is {
-  image?: MediaAssetHandle | null;
-  video?: MediaAssetHandle | null;
-} {
-  if (!value || typeof value !== "object") return false;
-  // Pair shape is chosen when image/video keys are present (even if null).
-  return "image" in value || "video" in value;
-}
-
 /**
  * Controller that can hold poster image + video assets on one hub.
  */
@@ -610,30 +587,13 @@ export class MediaServerController {
    * Promote staged image/video handles; close assets that are no longer needed.
    */
   async commit(
-    next:
-      | {
-          image?: MediaAssetHandle | null;
-          video?: MediaAssetHandle | null;
-        }
-      | MediaAssetHandle
-      | null,
+    next: {
+      image?: MediaAssetHandle | null;
+      video?: MediaAssetHandle | null;
+    } | null,
   ): Promise<void> {
-    let nextImage: MediaAssetHandle | null = null;
-    let nextVideo: MediaAssetHandle | null = null;
-
-    if (next == null) {
-      nextImage = null;
-      nextVideo = null;
-    } else if (isPairCommit(next)) {
-      nextImage = next.image ?? null;
-      nextVideo = next.video ?? null;
-    } else if (isAssetHandle(next)) {
-      // Legacy single-handle commit.
-      if (next.kind === "image") nextImage = next;
-      else nextVideo = next;
-    } else {
-      throw new Error("Invalid media commit payload.");
-    }
+    const nextImage = next?.image ?? null;
+    const nextVideo = next?.video ?? null;
 
     const prevImage = this.#image;
     const prevVideo = this.#video;

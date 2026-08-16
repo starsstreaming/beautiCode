@@ -9,24 +9,7 @@ export const bridgeProtocol = 4;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
-const REVISION_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_BODY_BYTES = 64 * 1024;
-
-async function readBridgeIdentity() {
-  try {
-    const manifest = JSON.parse(
-      await fs.readFile(path.join(here, "bridge-manifest.json"), "utf8"),
-    );
-    if (
-      manifest.schema === "beauticode.dsh-bridge/v1" &&
-      manifest.protocol === bridgeProtocol &&
-      REVISION_PATTERN.test(manifest.revision)
-    ) {
-      return { protocol: bridgeProtocol, revision: manifest.revision };
-    }
-  } catch {}
-  return { protocol: bridgeProtocol, revision: "source" };
-}
 
 /**
  * Token file must be explicit too: plugin `config.tokenFile` or the shared
@@ -218,12 +201,15 @@ export function apply(ctx, config = {}) {
             res.writeHead(405).end();
             return;
           }
-          const identity = await readBridgeIdentity();
           if (req.method === "HEAD") {
             res.writeHead(200, { "cache-control": "no-store" }).end();
             return;
           }
-          sendJson(res, 200, { ok: true, ...identity });
+          sendJson(res, 200, {
+            ok: true,
+            protocol: bridgeProtocol,
+            revision: "source",
+          });
         },
       }),
       ctx.webServer.register({

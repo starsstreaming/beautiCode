@@ -351,30 +351,14 @@ async function main() {
       finish(1);
       return;
     }
-    // Dream-Skin style: video-only is enough. Optional poster as 2nd arg.
-    // Legacy form `apply-video <image> <video.mp4>` still works when the first
-    // arg is an image and the second is .mp4.
+    // <video.mp4> [poster]; video-only is enough.
     const aPath = path.resolve(a);
-    const bPath = b ? path.resolve(b) : null;
     const aIsMp4 = path.extname(aPath).toLowerCase() === ".mp4";
-    const bIsMp4 = bPath
-      ? path.extname(bPath).toLowerCase() === ".mp4"
-      : false;
-    if (aIsMp4 && !bIsMp4) {
+    if (aIsMp4) {
       input = { type: "video", videoPath: aPath };
-      if (bPath) input.imagePath = bPath;
-    } else if (bIsMp4) {
-      input = {
-        type: "video",
-        imagePath: aPath,
-        videoPath: bPath,
-      };
-    } else if (aIsMp4) {
-      input = { type: "video", videoPath: aPath };
+      if (b) input.imagePath = path.resolve(b);
     } else {
-      console.error(
-        "apply-video 需要 <video.mp4> [poster]（或旧格式 <poster> <video.mp4>）。",
-      );
+      console.error("apply-video 需要 <video.mp4> [poster]。");
       finish(1);
       return;
     }

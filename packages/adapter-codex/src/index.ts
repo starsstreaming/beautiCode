@@ -34,11 +34,6 @@ export {
 } from "./payload.js";
 
 export {
-  MemoryHostApplier,
-  type MemoryHostOptions,
-} from "./memory-host.js";
-
-export {
   CodexHostApplier,
   type CodexHostApplierOptions,
   type ConnectedTarget,

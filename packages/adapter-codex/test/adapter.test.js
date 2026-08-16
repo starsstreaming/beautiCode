@@ -9,7 +9,6 @@ import {
   buildInjectionExpression,
   CodexHostApplier,
   isCandidatePageTarget,
-  MemoryHostApplier,
   readBoundedJson,
   runApplyOnce,
   runWatch,
@@ -21,6 +20,7 @@ import {
   getCodexLaunchGuidance,
   BeautiSession,
 } from "../dist/index.js";
+import { MemoryHostApplier } from "./helpers/memory-host.js";
 import { startMockCdp } from "./mock-cdp.js";
 import http from "node:http";
 
