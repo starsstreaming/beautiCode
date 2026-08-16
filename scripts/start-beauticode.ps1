@@ -395,6 +395,34 @@ function Send-BcTrayEvent {
   }
 }
 
+function Start-BcDshWarmup {
+  if (-not (Test-Path -LiteralPath $dshLauncher -PathType Leaf)) { return }
+  $argList = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-WindowStyle", "Hidden",
+    "-File", $dshLauncher,
+    "-EnsureBridgeOnly",
+    "-NoBrowser",
+    "-SkipBuild"
+  )
+  $quoted = @()
+  foreach ($a in $argList) {
+    if ($a -match '[\s"]') {
+      $quoted += ('"{0}"' -f ($a -replace '"', '\"'))
+    } else {
+      $quoted += $a
+    }
+  }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "powershell.exe"
+  $psi.Arguments = ($quoted -join " ")
+  $psi.WorkingDirectory = $repoRoot
+  $psi.UseShellExecute = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  [void][System.Diagnostics.Process]::Start($psi)
+}
+
 function Show-BcSwitchError([string]$Message) {
   Add-Type -AssemblyName System.Windows.Forms
   if (-not ("BeautiCodeHostPickerNative" -as [type])) {
@@ -437,6 +465,12 @@ if ($DryRun -and $TargetHost -eq "prompt") {
   throw "DryRun 必须显式指定 -TargetHost codex 或 dsh。"
 }
 
+if ($TargetHost -eq "prompt" -and -not $DryRun) {
+  # Boot DSH while the picker is on screen. The dedicated launcher then
+  # reuses that process instead of paying the whole cold start after click.
+  Start-BcDshWarmup
+}
+
 $selected = if ($TargetHost -eq "prompt") {
   Show-BcHostPicker
 } else {
@@ -471,9 +505,10 @@ $runningHost = Get-BcRunningHost
 if ($runningHost -eq $route.Host) {
   if ($route.Host -eq "dsh") {
     try {
-      Start-Process -FilePath "http://127.0.0.1:3080" | Out-Null
+      $routeArguments = $route.Arguments
+      & $route.Script @routeArguments
     } catch {
-      Show-BcSwitchError ("打开 DeepSeek Harness 网站失败：{0}" -f $_.Exception.Message)
+      Show-BcSwitchError ("启动 DeepSeek Harness 失败：{0}" -f $_.Exception.Message)
       return
     }
   }

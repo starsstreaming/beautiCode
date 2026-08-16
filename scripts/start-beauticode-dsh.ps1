@@ -125,20 +125,6 @@ function Install-BcBridgeRevision {
   return [pscustomobject]@{ Revision = $revision; Index = $targetIndex; Root = $targetRoot }
 }
 
-function Get-BcDshBridgeInfo {
-  param([Uri]$BaseUri)
-  if (-not (Test-BcDshServer -BaseUri $BaseUri -WaitMilliseconds 80)) {
-    return $null
-  }
-  try {
-    $probe = Invoke-RestMethod -UseBasicParsing -Uri ([Uri]::new($BaseUri, "/__beauticode/version")) -TimeoutSec 1
-    if ($probe.ok -eq $true -and $probe.protocol -is [int] -and $probe.revision -is [string]) {
-      return $probe
-    }
-  } catch {}
-  return $null
-}
-
 function Test-BcDshServer {
   param(
     [Uri]$BaseUri,
@@ -154,6 +140,122 @@ function Test-BcDshServer {
     return $false
   } finally {
     $client.Dispose()
+  }
+}
+
+function Get-BcDshVersionProbe {
+  param([Uri]$BaseUri)
+  if (-not (Test-BcDshServer -BaseUri $BaseUri -WaitMilliseconds 80)) {
+    return [pscustomobject]@{ Kind = "down"; Identity = $null }
+  }
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri ([Uri]::new($BaseUri, "/__beauticode/version")) -TimeoutSec 1
+    $text = [string]$response.Content
+    try {
+      $probe = $text | ConvertFrom-Json
+      if ($probe.ok -eq $true -and $probe.protocol -is [int] -and $probe.revision -is [string]) {
+        return [pscustomobject]@{ Kind = "bridge"; Identity = $probe }
+      }
+    } catch {}
+    return [pscustomobject]@{ Kind = "http"; Identity = $null }
+  } catch {
+    $httpResponse = $_.Exception.Response
+    if ($null -ne $httpResponse) {
+      return [pscustomobject]@{ Kind = "http"; Identity = $null }
+    }
+    return [pscustomobject]@{ Kind = "starting"; Identity = $null }
+  }
+}
+
+function Get-BcDshBridgeInfo {
+  param([Uri]$BaseUri)
+  $probe = Get-BcDshVersionProbe -BaseUri $BaseUri
+  if ($probe.Kind -eq "bridge") { return $probe.Identity }
+  return $null
+}
+
+function Test-BcMatchingBridge {
+  param([pscustomobject]$Identity, [pscustomobject]$Bridge)
+  return [bool](
+    $Identity -and
+    $Identity.protocol -eq $bridgeProtocol -and
+    $Identity.revision -eq $Bridge.Revision
+  )
+}
+
+function Wait-BcDshOccupant {
+  param(
+    [Uri]$BaseUri,
+    [pscustomobject]$Bridge,
+    [int]$TimeoutSeconds = 45
+  )
+  $deadline = (Get-Date).AddSeconds([Math]::Max(2, $TimeoutSeconds))
+  while ((Get-Date) -lt $deadline) {
+    $probe = Get-BcDshVersionProbe -BaseUri $BaseUri
+    if ($probe.Kind -eq "bridge") {
+      if (Test-BcMatchingBridge -Identity $probe.Identity -Bridge $Bridge) {
+        return [pscustomobject]@{ Kind = "ready"; Identity = $probe.Identity }
+      }
+      return [pscustomobject]@{ Kind = "foreign"; Identity = $probe.Identity }
+    }
+    if ($probe.Kind -eq "down") {
+      return [pscustomobject]@{ Kind = "empty"; Identity = $null }
+    }
+    Start-Sleep -Milliseconds 100
+  }
+  return [pscustomobject]@{ Kind = "timeout"; Identity = $null }
+}
+
+function Enter-BcDshLaunchLock {
+  param([int]$TimeoutSeconds = 180)
+  $createdNew = $false
+  $script:dshLaunchMutex = [System.Threading.Mutex]::new(
+    $false,
+    "Local\beautiCode.Engine.DshLaunch.v1",
+    [ref]$createdNew
+  )
+  try {
+    $script:dshLaunchMutexOwned = $script:dshLaunchMutex.WaitOne([TimeSpan]::FromSeconds([Math]::Max(5, $TimeoutSeconds)))
+  } catch [System.Threading.AbandonedMutexException] {
+    $script:dshLaunchMutexOwned = $true
+  }
+  if (-not $script:dshLaunchMutexOwned) {
+    throw "另一个 beautiCode 正在启动 DeepSeek Harness，请稍后重试。"
+  }
+}
+
+function Exit-BcDshLaunchLock {
+  if ($script:dshLaunchMutexOwned -and $null -ne $script:dshLaunchMutex) {
+    try { [void]$script:dshLaunchMutex.ReleaseMutex() } catch {}
+    $script:dshLaunchMutexOwned = $false
+  }
+  if ($null -ne $script:dshLaunchMutex) {
+    $script:dshLaunchMutex.Dispose()
+    $script:dshLaunchMutex = $null
+  }
+}
+
+function Get-BcDshLaunchFailureKind {
+  param([string]$Stderr)
+  $text = if ($Stderr -and (Test-Path -LiteralPath $Stderr)) {
+    Get-Content -Raw -LiteralPath $Stderr
+  } else {
+    ""
+  }
+  if ($text -match "EADDRINUSE|address already in use|EADDRNOTAVAIL") { return "port-busy" }
+  if ($text -match "EPERM|EACCES") { return "locked" }
+  return "crash"
+}
+
+function Test-BcTrayMutexPresent {
+  $mutex = $null
+  try {
+    $mutex = [System.Threading.Mutex]::OpenExisting("Local\beautiCode.Engine.Tray.v1")
+    return $true
+  } catch [System.Threading.WaitHandleCannotBeOpenedException] {
+    return $false
+  } finally {
+    if ($null -ne $mutex) { $mutex.Dispose() }
   }
 }
 
@@ -299,6 +401,10 @@ function Start-BcDshProcess {
   $stderr = Join-Path $logRoot ("dsh-{0}.err.log" -f $stamp)
   $oldDataRoot = $env:BEAUTICODE_DATA_ROOT
   $oldDshHome = $env:DSH_HOME
+  $oldCompileCache = $env:NODE_COMPILE_CACHE
+  $oldTelemetry = $env:DSH_TELEMETRY_DISABLED
+  $compileCacheRoot = Join-Path $EffectiveDataRoot "node-compile-cache\dsh-web"
+  [IO.Directory]::CreateDirectory($compileCacheRoot) | Out-Null
   $processEnvironment = [Environment]::GetEnvironmentVariables()
   $pathKeys = @($processEnvironment.Keys | Where-Object { $_ -ieq "path" })
   $duplicatePath = $pathKeys.Count -gt 1 -and $pathKeys -contains "PATH"
@@ -307,6 +413,8 @@ function Start-BcDshProcess {
     if ($duplicatePath) { [Environment]::SetEnvironmentVariable("PATH", $null, "Process") }
     $env:BEAUTICODE_DATA_ROOT = $EffectiveDataRoot
     $env:DSH_HOME = $EffectiveDshHome
+    $env:NODE_COMPILE_CACHE = $compileCacheRoot
+    $env:DSH_TELEMETRY_DISABLED = "1"
     $process = Start-Process `
       -FilePath $Runtime.FilePath `
       -ArgumentList $arguments `
@@ -318,6 +426,8 @@ function Start-BcDshProcess {
   } finally {
     if ($null -eq $oldDataRoot) { Remove-Item Env:BEAUTICODE_DATA_ROOT -ErrorAction SilentlyContinue } else { $env:BEAUTICODE_DATA_ROOT = $oldDataRoot }
     if ($null -eq $oldDshHome) { Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue } else { $env:DSH_HOME = $oldDshHome }
+    if ($null -eq $oldCompileCache) { Remove-Item Env:NODE_COMPILE_CACHE -ErrorAction SilentlyContinue } else { $env:NODE_COMPILE_CACHE = $oldCompileCache }
+    if ($null -eq $oldTelemetry) { Remove-Item Env:DSH_TELEMETRY_DISABLED -ErrorAction SilentlyContinue } else { $env:DSH_TELEMETRY_DISABLED = $oldTelemetry }
     if ($duplicatePath) { [Environment]::SetEnvironmentVariable("PATH", $oldUpperPath, "Process") }
   }
 
@@ -428,40 +538,95 @@ $bridge = Install-BcBridgeRevision -SourceRoot $pluginSourceRoot -EffectiveDshHo
 Write-Host "beautiCode · DeepSeek Harness"
 Write-Host ("DSH {0}（{1}）；桥接协议 {2}，版本 {3}。" -f $runtime.Version, $runtime.Source, $bridgeProtocol, $bridge.Revision.Substring(0, 12))
 
-$runningBridge = Get-BcDshBridgeInfo -BaseUri $baseUri
-$started = $null
-if ($runningBridge) {
-  if ($runningBridge.protocol -eq $bridgeProtocol -and $runningBridge.revision -eq $bridge.Revision) {
-    Write-Host ("复用已加载当前 beautiCode 桥接的 DSH：{0}" -f $baseUri.AbsoluteUri)
-  } else {
-    throw ("目标地址正在运行旧版 beautiCode 桥接（协议 {0}，版本 {1}）。插件已更新到 {2}，但为避免中断现有会话不会自动重启；请关闭该 DSH 后重新运行此启动器。" -f $runningBridge.protocol, $runningBridge.revision, $bridge.Revision.Substring(0, 12))
+function Show-BcDshTrayIfNeeded {
+  if ($EnsureBridgeOnly) { return }
+  if (Test-BcTrayMutexPresent) { return }
+  Start-BcDshTray -BaseUri $baseUri -EffectiveDataRoot $effectiveDataRoot
+}
+
+function Wait-BcStartedDsh {
+  param([pscustomobject]$Started)
+  try {
+    [void](Wait-BcDshBridge -BaseUri $baseUri -Bridge $bridge -Process $Started.Process -Stdout $Started.Stdout -Stderr $Started.Stderr)
+    return $Started
+  } catch {
+    $kind = Get-BcDshLaunchFailureKind -Stderr $Started.Stderr
+    if ($kind -eq "port-busy") {
+      Write-Host "端口在启动瞬间被占用，改为等待现有进程……"
+      $waited = Wait-BcDshOccupant -BaseUri $baseUri -Bridge $bridge -TimeoutSeconds 90
+      if ($waited.Kind -eq "ready") { return $null }
+    }
+    throw
   }
-} elseif (Test-BcDshServer -BaseUri $baseUri) {
-  throw "目标地址已有 DeepSeek Harness，但未加载 beautiCode 桥接。为避免中断现有会话，脚本不会自动重启；请关闭该 DSH 后重新运行此启动器。"
-} else {
-  $started = Start-BcDshProcess `
-    -BaseUri $baseUri `
-    -Bridge $bridge `
-    -Runtime $runtime `
-    -EffectiveDataRoot $effectiveDataRoot `
-    -EffectiveDshHome $effectiveDshHome `
-    -WorkspaceRoot $dshWorkspace
+}
+
+$script:dshLaunchMutex = $null
+$script:dshLaunchMutexOwned = $false
+$started = $null
+try {
+  Enter-BcDshLaunchLock
+  $attempts = 0
+  while ($attempts -lt 2) {
+    $attempts += 1
+    $probe = Get-BcDshVersionProbe -BaseUri $baseUri
+    if ($probe.Kind -eq "bridge") {
+      if (Test-BcMatchingBridge -Identity $probe.Identity -Bridge $bridge) {
+        Write-Host ("复用已加载当前 beautiCode 桥接的 DSH：{0}" -f $baseUri.AbsoluteUri)
+        Show-BcDshTrayIfNeeded
+        break
+      }
+      throw ("目标地址正在运行旧版 beautiCode 桥接（协议 {0}，版本 {1}）。插件已更新到 {2}，但为避免中断现有会话不会自动重启；请关闭该 DSH 后重新运行此启动器。" -f $probe.Identity.protocol, $probe.Identity.revision, $bridge.Revision.Substring(0, 12))
+    }
+
+    if ($probe.Kind -ne "down") {
+      Write-Host "目标端口已有进程，正在等待 beautiCode 桥接就绪……"
+      Show-BcDshTrayIfNeeded
+      $waited = Wait-BcDshOccupant -BaseUri $baseUri -Bridge $bridge -TimeoutSeconds 90
+      if ($waited.Kind -eq "ready") {
+        Write-Host ("复用正在启动的 DeepSeek Harness：{0}" -f $baseUri.AbsoluteUri)
+        break
+      }
+      if ($waited.Kind -eq "foreign") {
+        throw "目标地址已有 DeepSeek Harness，但未加载 beautiCode 桥接。为避免中断现有会话，脚本不会自动重启；请关闭该 DSH 后重新运行此启动器。"
+      }
+      if ($waited.Kind -ne "empty") {
+        throw ("等待已占用端口上的 DeepSeek Harness 桥接超时。地址：{0}" -f $baseUri.AbsoluteUri)
+      }
+    }
+
+    $launched = Start-BcDshProcess `
+      -BaseUri $baseUri `
+      -Bridge $bridge `
+      -Runtime $runtime `
+      -EffectiveDataRoot $effectiveDataRoot `
+      -EffectiveDshHome $effectiveDshHome `
+      -WorkspaceRoot $dshWorkspace
+    Show-BcDshTrayIfNeeded
+    try {
+      $started = Wait-BcStartedDsh -Started $launched
+      break
+    } catch {
+      $kind = Get-BcDshLaunchFailureKind -Stderr $launched.Stderr
+      if ($kind -eq "locked" -and $attempts -lt 2) {
+        Write-Host "DeepSeek Harness 配置文件被占用，正在重试……"
+        Start-Sleep -Milliseconds 500
+        continue
+      }
+      throw
+    }
+  }
+} finally {
+  Exit-BcDshLaunchLock
 }
 
 if ($EnsureBridgeOnly) {
   if ($started) {
-    [void](Wait-BcDshBridge -BaseUri $baseUri -Bridge $bridge -Process $started.Process -Stdout $started.Stdout -Stderr $started.Stderr)
     Write-Host ("DeepSeek Harness 桥接已就绪；退出托盘时不会自动结束该进程。日志：{0}" -f $started.Stdout)
   }
   return
 }
 
-# Show the tray immediately (Codex already does this). DSH keeps booting in
-# the background; the browser opens once the bridge answers.
-Start-BcDshTray -BaseUri $baseUri -EffectiveDataRoot $effectiveDataRoot
-
 if ($started) {
-  [void](Wait-BcDshBridge -BaseUri $baseUri -Bridge $bridge -Process $started.Process -Stdout $started.Stdout -Stderr $started.Stderr)
   Write-Host ("DeepSeek Harness 桥接已就绪；退出托盘时不会自动结束该进程。日志：{0}" -f $started.Stdout)
 }
 if (-not $NoBrowser) { Start-Process -FilePath $baseUri.AbsoluteUri | Out-Null }

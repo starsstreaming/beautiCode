@@ -812,15 +812,19 @@ function Start-BcDshBridgeIfNeeded {
   $psi.UseShellExecute = $true
   $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
   $proc = [System.Diagnostics.Process]::Start($psi)
-  $deadline = [datetime]::UtcNow.AddSeconds(90)
+  $deadline = [datetime]::UtcNow.AddSeconds(180)
   while ([datetime]::UtcNow -lt $deadline) {
-    if (Test-BcDshBridgeUp) { return $true }
+    if (Test-BcDshBridgeUp) {
+      Write-BcTrayLog "DSH bridge is up"
+      return $true
+    }
     if ($null -ne $proc -and $proc.HasExited -and $proc.ExitCode -ne 0) {
       Write-BcTrayLog ("DSH launcher exited {0}" -f $proc.ExitCode)
       return $false
     }
     Start-Sleep -Milliseconds 200
   }
+  Write-BcTrayLog "DSH bridge wait timed out after 180s"
   return (Test-BcDshBridgeUp)
 }
 
