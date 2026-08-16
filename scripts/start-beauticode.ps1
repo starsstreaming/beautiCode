@@ -402,7 +402,7 @@ function Start-BcDshWarmup {
     "-ExecutionPolicy", "Bypass",
     "-WindowStyle", "Hidden",
     "-File", $dshLauncher,
-    "-EnsureBridgeOnly",
+    "-HealOnly",
     "-NoBrowser",
     "-SkipBuild"
   )
@@ -466,8 +466,8 @@ if ($DryRun -and $TargetHost -eq "prompt") {
 }
 
 if ($TargetHost -eq "prompt" -and -not $DryRun) {
-  # Boot DSH while the picker is on screen. The dedicated launcher then
-  # reuses that process instead of paying the whole cold start after click.
+  # Prepare DSH profile junctions while the picker is on screen. Do not
+  # start `dsh web` yet — overlapping boots race those links and crash.
   Start-BcDshWarmup
 }
 

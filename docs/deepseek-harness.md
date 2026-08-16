@@ -29,8 +29,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File C:\WoRk\beautiCode\scripts\s
 1. 校验本地 DSH 的 pinned current.json 与 CLI 路径（安装时已核对版本和 npm SHA-512）；点击启动时不再先跑一遍 `dsh --version`。
 2. 将桥接按内容哈希发布到独立、不可变的版本目录；安装包升级后，下次启动会自动采用新插件。
 3. 检查目标地址的桥接协议与内容版本；完全一致时复用现有 DSH，不会重启它。
-4. 地址无人监听时启动 `dsh web`：托盘立即出现，桥接就绪后再打开页面。工作目录是数据目录下的 `dsh-workspace`，避免把安装包/仓库当成工作区扫一遍。选择框弹出时会在后台预热 DSH；托盘「应用或重新应用」在 DSH 未启动时会拉起它，网页已关掉时会重新打开页面。托盘已在运行但 DSH 已退出时，再次点击 beautiCode 会重新拉起 DSH，而不是只打开一个连不上的页面。
-5. 同一时刻只允许一个启动器拉起 `dsh web`。端口已开但桥接还没就绪时会等待并复用，而不是立刻报失败或再起一个进程。启动失败若是端口冲突或配置文件被锁，会改等现有进程或重试一次。
+4. 地址无人监听时启动 `dsh web`：先在启动锁内把 `$DSH_HOME/profiles/node_modules` 的安装包 junction 全部建好并校验能解析，再拉起进程。选择框弹出时只预热这些链接，不会同时再开一个 `dsh web`。托盘「应用或重新应用」在 DSH 未启动时会拉起它，网页已关掉时会重新打开页面。托盘已在运行但 DSH 已退出时，再次点击 beautiCode 会重新拉起 DSH，而不是只打开一个连不上的页面。
+5. 同一时刻只允许一个启动器拉起 `dsh web`。自己拉起的进程一旦退出会立刻失败并修复 profile 后重试一次，不会再空等 90 秒。端口已开且桥接已就绪时复用现有进程。
 6. 若端口已有旧桥接、或页面已能打开但始终没有当前 beautiCode 桥接，停止并给出错误；不会中断现有会话。用户关闭该 DSH 后再次启动即可加载新插件。
 7. 每 24 小时最多查询一次 npm 最新版本。只提示新版本，不会把未经回归验证的 DSH 自动升级为兼容版本。该检查在页面打开之后才跑，不挡启动。Node 编译缓存在数据目录的 `node-compile-cache`，第二次冷启动会更快。
 
@@ -42,6 +42,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File C:\WoRk\beautiCode\scripts\s
 
 # 只确保桥接已启动，不打开浏览器和托盘（诊断/自动化）
 .\scripts\start-beauticode-dsh.ps1 -NoBrowser -EnsureBridgeOnly
+
+# 只预热 $DSH_HOME 的 profile 模块链接，不启动 dsh web
+.\scripts\start-beauticode-dsh.ps1 -HealOnly
 
 # 输出本地、兼容、npm 最新及正在运行的桥接版本（JSON）
 .\scripts\start-beauticode-dsh.ps1 -VersionOnly

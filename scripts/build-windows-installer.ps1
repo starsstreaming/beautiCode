@@ -238,6 +238,7 @@ foreach ($relativeFile in @(
     "scripts\start-beauticode.ps1",
     "scripts\start-beauticode-engine.ps1",
     "scripts\start-beauticode-dsh.ps1",
+    "scripts\heal-dsh-profile.mjs",
     "scripts\install-dsh-runtime.ps1",
     "packages\core\package.json",
     "packages\adapter-codex\package.json",

@@ -5,6 +5,7 @@ param(
   [switch]$SkipBuild,
   [switch]$NoBrowser,
   [switch]$EnsureBridgeOnly,
+  [switch]$HealOnly,
   [string]$DshCommand = "",
   [switch]$VersionOnly,
   [switch]$NoVersionCheck
@@ -16,6 +17,7 @@ $trayScript = Join-Path $repoRoot "apps\tray\start-tray.ps1"
 $pluginSourceRoot = Join-Path $repoRoot "integrations\deepseek-harness"
 $compatibilityFile = Join-Path $pluginSourceRoot "compatibility.json"
 $runtimeInstaller = Join-Path $repoRoot "scripts\install-dsh-runtime.ps1"
+$healScript = Join-Path $repoRoot "scripts\heal-dsh-profile.mjs"
 
 if (-not (Test-Path -LiteralPath $compatibilityFile -PathType Leaf)) {
   throw "缺少 DSH 兼容性清单：$compatibilityFile"
@@ -242,9 +244,44 @@ function Get-BcDshLaunchFailureKind {
   } else {
     ""
   }
+  if ($text -match "ERR_MODULE_NOT_FOUND|Cannot find package") { return "modules" }
   if ($text -match "EADDRINUSE|address already in use|EADDRNOTAVAIL") { return "port-busy" }
   if ($text -match "EPERM|EACCES") { return "locked" }
   return "crash"
+}
+
+function Get-BcDshInstallAnchor {
+  param([pscustomobject]$Runtime)
+  $cli = $null
+  if ($Runtime.Arguments -and $Runtime.Arguments.Count -gt 0) {
+    $cli = [string]$Runtime.Arguments[0]
+    $cli = $cli.Trim().Trim('"')
+  }
+  if (-not $cli -or -not (Test-Path -LiteralPath $cli -PathType Leaf)) {
+    return $null
+  }
+  $anchor = Join-Path (Split-Path (Split-Path $cli)) "package.json"
+  if (-not (Test-Path -LiteralPath $anchor -PathType Leaf)) {
+    throw "DSH 安装锚点缺失：$anchor"
+  }
+  return $anchor
+}
+
+function Invoke-BcHealDshProfile {
+  param([pscustomobject]$Runtime, [string]$EffectiveDshHome)
+  if (-not (Test-Path -LiteralPath $healScript -PathType Leaf)) {
+    throw "缺少 DSH profile 修复脚本：$healScript"
+  }
+  $anchor = Get-BcDshInstallAnchor -Runtime $Runtime
+  if (-not $anchor) {
+    Write-Warning "未找到捆绑 DSH 安装锚点，跳过 profile 模块预热。"
+    return
+  }
+  $output = & $Runtime.FilePath $healScript --dsh-home $EffectiveDshHome --install-anchor $anchor 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw ("预热 DSH profile 模块失败：{0}" -f (($output | ForEach-Object { [string]$_ }) -join "`n"))
+  }
+  Write-Host "DSH profile 模块已就绪。"
 }
 
 function Test-BcTrayMutexPresent {
@@ -401,10 +438,7 @@ function Start-BcDshProcess {
   $stderr = Join-Path $logRoot ("dsh-{0}.err.log" -f $stamp)
   $oldDataRoot = $env:BEAUTICODE_DATA_ROOT
   $oldDshHome = $env:DSH_HOME
-  $oldCompileCache = $env:NODE_COMPILE_CACHE
   $oldTelemetry = $env:DSH_TELEMETRY_DISABLED
-  $compileCacheRoot = Join-Path $EffectiveDataRoot "node-compile-cache\dsh-web"
-  [IO.Directory]::CreateDirectory($compileCacheRoot) | Out-Null
   $processEnvironment = [Environment]::GetEnvironmentVariables()
   $pathKeys = @($processEnvironment.Keys | Where-Object { $_ -ieq "path" })
   $duplicatePath = $pathKeys.Count -gt 1 -and $pathKeys -contains "PATH"
@@ -413,8 +447,8 @@ function Start-BcDshProcess {
     if ($duplicatePath) { [Environment]::SetEnvironmentVariable("PATH", $null, "Process") }
     $env:BEAUTICODE_DATA_ROOT = $EffectiveDataRoot
     $env:DSH_HOME = $EffectiveDshHome
-    $env:NODE_COMPILE_CACHE = $compileCacheRoot
     $env:DSH_TELEMETRY_DISABLED = "1"
+    Remove-Item Env:NODE_COMPILE_CACHE -ErrorAction SilentlyContinue
     $process = Start-Process `
       -FilePath $Runtime.FilePath `
       -ArgumentList $arguments `
@@ -426,7 +460,6 @@ function Start-BcDshProcess {
   } finally {
     if ($null -eq $oldDataRoot) { Remove-Item Env:BEAUTICODE_DATA_ROOT -ErrorAction SilentlyContinue } else { $env:BEAUTICODE_DATA_ROOT = $oldDataRoot }
     if ($null -eq $oldDshHome) { Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue } else { $env:DSH_HOME = $oldDshHome }
-    if ($null -eq $oldCompileCache) { Remove-Item Env:NODE_COMPILE_CACHE -ErrorAction SilentlyContinue } else { $env:NODE_COMPILE_CACHE = $oldCompileCache }
     if ($null -eq $oldTelemetry) { Remove-Item Env:DSH_TELEMETRY_DISABLED -ErrorAction SilentlyContinue } else { $env:DSH_TELEMETRY_DISABLED = $oldTelemetry }
     if ($duplicatePath) { [Environment]::SetEnvironmentVariable("PATH", $oldUpperPath, "Process") }
   }
@@ -454,6 +487,7 @@ function Wait-BcDshBridge {
       $Process.Refresh()
       $rawDetail = if ($Stderr -and (Test-Path -LiteralPath $Stderr)) { Get-Content -Raw -LiteralPath $Stderr } else { "" }
       $detail = if ($rawDetail) { $rawDetail.Trim() } else { "" }
+      if ($detail.Length -gt 1200) { $detail = $detail.Substring(0, 1200) + "`n…" }
       throw ("DeepSeek Harness 启动失败（退出码 {0}）。{1}`n日志：{2}" -f $Process.ExitCode, $detail, $Stderr)
     }
     Start-Sleep -Milliseconds 100
@@ -553,7 +587,7 @@ function Wait-BcStartedDsh {
     $kind = Get-BcDshLaunchFailureKind -Stderr $Started.Stderr
     if ($kind -eq "port-busy") {
       Write-Host "端口在启动瞬间被占用，改为等待现有进程……"
-      $waited = Wait-BcDshOccupant -BaseUri $baseUri -Bridge $bridge -TimeoutSeconds 90
+      $waited = Wait-BcDshOccupant -BaseUri $baseUri -Bridge $bridge -TimeoutSeconds 8
       if ($waited.Kind -eq "ready") { return $null }
     }
     throw
@@ -565,6 +599,9 @@ $script:dshLaunchMutexOwned = $false
 $started = $null
 try {
   Enter-BcDshLaunchLock
+  Invoke-BcHealDshProfile -Runtime $runtime -EffectiveDshHome $effectiveDshHome
+  if ($HealOnly) { return }
+
   $attempts = 0
   while ($attempts -lt 2) {
     $attempts += 1
@@ -579,9 +616,9 @@ try {
     }
 
     if ($probe.Kind -ne "down") {
-      Write-Host "目标端口已有进程，正在等待 beautiCode 桥接就绪……"
+      Write-Host "目标端口已有进程，正在确认是否可复用……"
       Show-BcDshTrayIfNeeded
-      $waited = Wait-BcDshOccupant -BaseUri $baseUri -Bridge $bridge -TimeoutSeconds 90
+      $waited = Wait-BcDshOccupant -BaseUri $baseUri -Bridge $bridge -TimeoutSeconds 8
       if ($waited.Kind -eq "ready") {
         Write-Host ("复用正在启动的 DeepSeek Harness：{0}" -f $baseUri.AbsoluteUri)
         break
@@ -590,7 +627,7 @@ try {
         throw "目标地址已有 DeepSeek Harness，但未加载 beautiCode 桥接。为避免中断现有会话，脚本不会自动重启；请关闭该 DSH 后重新运行此启动器。"
       }
       if ($waited.Kind -ne "empty") {
-        throw ("等待已占用端口上的 DeepSeek Harness 桥接超时。地址：{0}" -f $baseUri.AbsoluteUri)
+        throw ("目标端口已被占用，且未出现 beautiCode 桥接。地址：{0}" -f $baseUri.AbsoluteUri)
       }
     }
 
@@ -607,9 +644,10 @@ try {
       break
     } catch {
       $kind = Get-BcDshLaunchFailureKind -Stderr $launched.Stderr
-      if ($kind -eq "locked" -and $attempts -lt 2) {
-        Write-Host "DeepSeek Harness 配置文件被占用，正在重试……"
-        Start-Sleep -Milliseconds 500
+      if ($kind -in @("locked", "modules") -and $attempts -lt 2) {
+        Write-Host "DeepSeek Harness 首次启动未就绪，正在修复 profile 并重试……"
+        Invoke-BcHealDshProfile -Runtime $runtime -EffectiveDshHome $effectiveDshHome
+        Start-Sleep -Milliseconds 300
         continue
       }
       throw
