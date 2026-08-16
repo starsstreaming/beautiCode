@@ -9,7 +9,7 @@
 
 <p align="center">
   为 DeepSeek Harness 添加图片与视频背景，也支持 Codex Desktop。<br>
-  可以是一张壁纸，也可以是一部番剧、一场电影，或者一段陪你度过漫长工作的风景。
+  可以是一张壁纸，也可以是一部番剧、一个壁纸，或者一段陪你度过漫长工作的风景。
 </p>
 
 <p align="center">
@@ -25,9 +25,9 @@
 
 ## 它是什么？
 
-beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness**。
+beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex**。
 
-安装包已内置兼容的 DeepSeek Harness 运行时。启动 beautiCode，选中 DeepSeek Harness，就可以把电脑里的：
+安装包已内置兼容的 DeepSeek Harness 运行时。启动 beautiCode，选中 DeepSeek Harness或Codex，就可以把电脑里的：
 
 * 图片
 * 动态壁纸
@@ -42,9 +42,6 @@ beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness**。
 它不会把工作窗口变成一个播放器，而是让画面安静地待在对话和工作区后面。
 
 代码、输入框和按钮仍然可以正常使用。
-
-你也可以继续把它用在 Codex Desktop 上；同一套托盘，启动时选一下目标即可。
-
 
 <img width="1280" height="794" alt="download" src="https://github.com/user-attachments/assets/186162ec-b42a-4846-b2d8-08ab4ad81313" />
 
