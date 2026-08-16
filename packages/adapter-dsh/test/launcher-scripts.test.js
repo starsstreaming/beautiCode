@@ -160,6 +160,9 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", () => {
     const webPatch = fs.readFileSync(path.join(web, "cordis.patch.yml"), "utf8");
     assert.match(webPatch, /@beauticode\/dsh-plugin/);
     assert.equal(fs.existsSync(path.join(home, "cordis.patch.yml")), false);
+    const pkgBytes = fs.readFileSync(path.join(web, "package.json"));
+    assert.notEqual(pkgBytes[0], 0xef, "profile package.json must not have a UTF-8 BOM");
+    JSON.parse(pkgBytes.toString("utf8"));
     assert.ok(
       fs.existsSync(
         path.join(web, "node_modules", "@beauticode", "dsh-plugin", "index.mjs"),
