@@ -169,6 +169,27 @@ test("heal-dsh-profile CLI prints JSON on success", async (t) => {
   assert.ok(parsed.resolved["@deepseek-ai/dsh"]);
 });
 
+test("second heal skips relinking when the stamp still matches", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-heal-stamp-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const install = await makeInstall(path.join(root, "install"));
+  const dshHome = path.join(root, "home");
+  const first = heal.healDshProfile({
+    dshHome,
+    installAnchor: install.installAnchor,
+  });
+  assert.equal(first.ok, true, first.warning);
+  assert.equal(first.skipped, false);
+  assert.ok(first.linked >= 4);
+  const second = heal.healDshProfile({
+    dshHome,
+    installAnchor: install.installAnchor,
+  });
+  assert.equal(second.ok, true, second.warning);
+  assert.equal(second.skipped, true);
+  assert.equal(second.linked, 0);
+});
+
 test("heal CLI stays successful when only verification is incomplete", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-heal-soft-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

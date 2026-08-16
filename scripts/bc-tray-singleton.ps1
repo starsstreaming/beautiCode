@@ -97,6 +97,36 @@ function Request-BcTrayShutdownEvent {
   return (Send-BcNamedEvent -Name (Get-BcTrayShutdownEventName))
 }
 
+function Get-BcDshCompileCacheRoot {
+  param([string]$DataRoot)
+  return (Join-Path $DataRoot "node-compile-cache")
+}
+
+function Test-BcDshLaunchInProgress {
+  $mutex = $null
+  try {
+    $mutex = [System.Threading.Mutex]::OpenExisting("Local\beautiCode.Engine.DshLaunch.v1")
+  } catch [System.Threading.WaitHandleCannotBeOpenedException] {
+    return $false
+  } catch {
+    return $false
+  }
+  try {
+    try {
+      if ($mutex.WaitOne(0)) {
+        [void]$mutex.ReleaseMutex()
+        return $false
+      }
+      return $true
+    } catch [System.Threading.AbandonedMutexException] {
+      try { [void]$mutex.ReleaseMutex() } catch {}
+      return $false
+    }
+  } finally {
+    try { $mutex.Dispose() } catch {}
+  }
+}
+
 function Start-BcTrayProcess {
   param(
     [Parameter(Mandatory = $true)][string]$InstallRoot,
@@ -155,7 +185,7 @@ function Start-BcTrayProcess {
 
   $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(3, $TimeoutSeconds))
   while ([DateTime]::UtcNow -lt $deadline) {
-    if (Test-BcTrayReady) {
+    if (Test-BcTrayLockPresent) {
       [void](Request-BcTrayPanelEvent)
       return [pscustomobject]@{ Started = $true; Alive = $true }
     }

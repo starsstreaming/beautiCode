@@ -779,6 +779,19 @@ function Test-BcDshBridgeUp {
 
 function Start-BcDshBridgeIfNeeded {
   if (Test-BcDshBridgeUp) { return $true }
+  if (Test-BcDshLaunchInProgress) {
+    Write-BcTrayLog "DSH launch already in progress; waiting for bridge"
+    $deadline = [datetime]::UtcNow.AddSeconds(45)
+    while ([datetime]::UtcNow -lt $deadline) {
+      if (Test-BcDshBridgeUp) {
+        Write-BcTrayLog "DSH bridge is up"
+        return $true
+      }
+      Start-Sleep -Milliseconds 200
+    }
+    Write-BcTrayLog "DSH launch wait timed out"
+    return (Test-BcDshBridgeUp)
+  }
   $launcher = Join-Path $RepoRoot "scripts\start-beauticode-dsh.ps1"
   if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
     throw ("缺少 DSH 启动脚本：{0}" -f $launcher)

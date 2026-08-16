@@ -19,6 +19,21 @@ $pluginSourceRoot = Join-Path $repoRoot "integrations\deepseek-harness"
 $compatibilityFile = Join-Path $pluginSourceRoot "compatibility.json"
 $runtimeInstaller = Join-Path $repoRoot "scripts\install-dsh-runtime.ps1"
 $healScript = Join-Path $repoRoot "scripts\heal-dsh-profile.mjs"
+$loadingPageScript = Join-Path $repoRoot "scripts\dsh-loading-page.mjs"
+
+function Write-BcDshLog([string]$Message) {
+  try {
+    $root = if ($env:LOCALAPPDATA) {
+      Join-Path $env:LOCALAPPDATA "beautiCode\logs"
+    } else {
+      Join-Path ([IO.Path]::GetTempPath()) "beautiCode\logs"
+    }
+    [IO.Directory]::CreateDirectory($root) | Out-Null
+    Add-Content -LiteralPath (Join-Path $root "dsh-launcher.log") `
+      -Value (("[{0:u}] {1}" -f [DateTime]::UtcNow, $Message)) `
+      -Encoding UTF8
+  } catch {}
+}
 
 if (-not (Test-Path -LiteralPath $compatibilityFile -PathType Leaf)) {
   throw "缺少 DSH 兼容性清单：$compatibilityFile"
@@ -287,25 +302,19 @@ function Invoke-BcHealDshProfile {
     $anchor.Replace('"', '\"'))
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
   $psi.WorkingDirectory = $repoRoot
   $proc = [System.Diagnostics.Process]::Start($psi)
-  $stdout = $proc.StandardOutput.ReadToEnd()
-  $stderr = $proc.StandardError.ReadToEnd()
-  $proc.WaitForExit()
-  $detail = (($stdout + "`n" + $stderr).Trim())
-  if ($proc.ExitCode -ne 0) {
-    Write-Warning ("预热 DSH profile 未完全成功，继续启动。{0}" -f $detail)
+  if (-not $proc.WaitForExit(15000)) {
+    try { $proc.Kill() } catch {}
+    Write-Warning "预热 DSH profile 超时，继续启动 DeepSeek Harness。"
+    Write-BcDshLog "heal timed out after 15s"
     return
   }
-  try {
-    $parsed = $stdout | ConvertFrom-Json
-    if ($parsed.ok -eq $false -and $parsed.warning) {
-      Write-Warning ("预热 DSH profile 校验未完成，继续启动。{0}" -f [string]$parsed.warning)
-      return
-    }
-  } catch {}
+  if ($proc.ExitCode -ne 0) {
+    Write-Warning "预热 DSH profile 未完全成功，继续启动。"
+    Write-BcDshLog ("heal exit {0}" -f $proc.ExitCode)
+    return
+  }
   Write-Host "DSH profile 模块已就绪。"
 }
 
@@ -452,6 +461,7 @@ function Start-BcDshProcess {
   $oldDataRoot = $env:BEAUTICODE_DATA_ROOT
   $oldDshHome = $env:DSH_HOME
   $oldTelemetry = $env:DSH_TELEMETRY_DISABLED
+  $oldCompileCache = $env:NODE_COMPILE_CACHE
   $processEnvironment = [Environment]::GetEnvironmentVariables()
   $pathKeys = @($processEnvironment.Keys | Where-Object { $_ -ieq "path" })
   $duplicatePath = $pathKeys.Count -gt 1 -and $pathKeys -contains "PATH"
@@ -461,7 +471,9 @@ function Start-BcDshProcess {
     $env:BEAUTICODE_DATA_ROOT = $EffectiveDataRoot
     $env:DSH_HOME = $EffectiveDshHome
     $env:DSH_TELEMETRY_DISABLED = "1"
-    Remove-Item Env:NODE_COMPILE_CACHE -ErrorAction SilentlyContinue
+    $compileCache = Get-BcDshCompileCacheRoot -DataRoot $EffectiveDataRoot
+    [IO.Directory]::CreateDirectory($compileCache) | Out-Null
+    $env:NODE_COMPILE_CACHE = $compileCache
     $process = Start-Process `
       -FilePath $Runtime.FilePath `
       -ArgumentList $arguments `
@@ -474,6 +486,7 @@ function Start-BcDshProcess {
     if ($null -eq $oldDataRoot) { Remove-Item Env:BEAUTICODE_DATA_ROOT -ErrorAction SilentlyContinue } else { $env:BEAUTICODE_DATA_ROOT = $oldDataRoot }
     if ($null -eq $oldDshHome) { Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue } else { $env:DSH_HOME = $oldDshHome }
     if ($null -eq $oldTelemetry) { Remove-Item Env:DSH_TELEMETRY_DISABLED -ErrorAction SilentlyContinue } else { $env:DSH_TELEMETRY_DISABLED = $oldTelemetry }
+    if ($null -eq $oldCompileCache) { Remove-Item Env:NODE_COMPILE_CACHE -ErrorAction SilentlyContinue } else { $env:NODE_COMPILE_CACHE = $oldCompileCache }
     if ($duplicatePath) { [Environment]::SetEnvironmentVariable("PATH", $oldUpperPath, "Process") }
   }
 
@@ -488,7 +501,7 @@ function Wait-BcDshBridge {
     [System.Diagnostics.Process]$Process,
     [string]$Stdout,
     [string]$Stderr,
-    [int]$TimeoutSeconds = 300
+    [int]$TimeoutSeconds = 40
   )
   $deadline = (Get-Date).AddSeconds([Math]::Max(5, $TimeoutSeconds))
   while ((Get-Date) -lt $deadline) {
@@ -506,6 +519,29 @@ function Wait-BcDshBridge {
     Start-Sleep -Milliseconds 100
   }
   throw ("等待 DeepSeek Harness 桥接超时。日志：{0} / {1}" -f $Stdout, $Stderr)
+}
+
+function Start-BcDshLoadingPage {
+  param([string]$TargetUrl, [string]$NodePath)
+  if (-not $NodePath -or -not (Test-Path -LiteralPath $loadingPageScript -PathType Leaf)) { return $null }
+  $port = 3099
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $NodePath
+  $psi.Arguments = ('"{0}" "{1}" {2}' -f $loadingPageScript.Replace('"', '\"'), $TargetUrl.TrimEnd("/").Replace('"', '\"'), $port)
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.WorkingDirectory = $repoRoot
+  try {
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    if ($null -eq $proc) { return $null }
+    $url = "http://127.0.0.1:$port/"
+    Start-Process -FilePath $url | Out-Null
+    Write-BcDshLog ("opened loading page {0}" -f $url)
+    return [pscustomobject]@{ Url = $url; Process = $proc }
+  } catch {
+    Write-BcDshLog ("loading page failed: {0}" -f $_.Exception.Message)
+    return $null
+  }
 }
 
 function Start-BcDshTray {
@@ -559,6 +595,11 @@ $bridge = Install-BcBridgeRevision -SourceRoot $pluginSourceRoot -EffectiveDshHo
 
 Write-Host "beautiCode · DeepSeek Harness"
 Write-Host ("DSH {0}（{1}）；桥接协议 {2}，版本 {3}。" -f $runtime.Version, $runtime.Source, $bridgeProtocol, $bridge.Revision.Substring(0, 12))
+Write-BcDshLog ("launcher begin source={0} version={1} healOnly={2} ensureBridge={3}" -f $runtime.Source, $runtime.Version, [bool]$HealOnly, [bool]$EnsureBridgeOnly)
+$script:loadingPage = $null
+if (-not $HealOnly -and -not $EnsureBridgeOnly -and -not $NoBrowser) {
+  $script:loadingPage = Start-BcDshLoadingPage -TargetUrl $baseUri.AbsoluteUri -NodePath $runtime.FilePath
+}
 
 function Show-BcDshTrayIfNeeded {
   if ($EnsureBridgeOnly) { return }
@@ -585,8 +626,10 @@ $script:dshLaunchMutex = $null
 $script:dshLaunchMutexOwned = $false
 $started = $null
 try {
-  Enter-BcDshLaunchLock
+  Enter-BcDshLaunchLock -TimeoutSeconds $(if ($HealOnly) { 5 } else { 45 })
+  Write-BcDshLog "launch lock acquired; healing profile"
   Invoke-BcHealDshProfile -Runtime $runtime -EffectiveDshHome $effectiveDshHome
+  Write-BcDshLog "heal finished"
   if ($HealOnly) { return }
 
   $attempts = 0
@@ -654,7 +697,9 @@ if ($EnsureBridgeOnly) {
 if ($started) {
   Write-Host ("DeepSeek Harness 桥接已就绪；退出托盘时不会自动结束该进程。日志：{0}" -f $started.Stdout)
 }
-if (-not $NoBrowser) { Start-Process -FilePath $baseUri.AbsoluteUri | Out-Null }
+if (-not $NoBrowser -and -not $script:loadingPage) {
+  Start-Process -FilePath $baseUri.AbsoluteUri | Out-Null
+}
 
 $latestVersion = Get-BcLatestDshVersion -EffectiveDataRoot $effectiveDataRoot
 if ($latestVersion -and $latestVersion -ne $supportedVersion) {

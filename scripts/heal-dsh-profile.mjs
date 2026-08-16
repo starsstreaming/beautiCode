@@ -134,7 +134,6 @@ export function ensureJunction(link, target) {
     }
     throw error;
   }
-  waitUntilPackageVisible(link);
   return "linked";
 }
 
@@ -348,6 +347,45 @@ function verifyWithRetry(dshHome, attempts = 4) {
   throw lastError;
 }
 
+const HEAL_STAMP = ".beauticode-modules.json";
+
+function stampPath(dshHome) {
+  return path.join(dshHome, "profiles", HEAL_STAMP);
+}
+
+export function readHealStamp(dshHome) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(stampPath(dshHome), "utf8"));
+    if (parsed?.schema !== "beauticode.dsh-heal/v1") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeHealStamp(dshHome, installNodeModules, resolved) {
+  fs.writeFileSync(
+    stampPath(dshHome),
+    `${JSON.stringify({
+      schema: "beauticode.dsh-heal/v1",
+      installNodeModules,
+      required: resolved,
+      healedAtUtc: new Date().toISOString(),
+    })}\n`,
+  );
+}
+
+function requiredAlreadyVisible(dshHome, installNodeModules) {
+  const stamp = readHealStamp(dshHome);
+  if (!stamp || !samePath(stamp.installNodeModules, installNodeModules)) return false;
+  try {
+    verifyProfileResolution(dshHome);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function healDshProfile({ dshHome, installAnchor }) {
   if (!dshHome) throw new Error("heal-dsh-profile: --dsh-home is required");
   if (!installAnchor) throw new Error("heal-dsh-profile: --install-anchor is required");
@@ -363,10 +401,12 @@ export function healDshProfile({ dshHome, installAnchor }) {
   const removedShadow = removeShadowingProfileModules(absHome);
   const destKind = prepareDestNodeModules(destNodeModules, installNodeModules);
   let linked = 0;
-  if (destKind !== "passthrough") {
+  let skipped = false;
+  if (destKind !== "passthrough" && requiredAlreadyVisible(absHome, installNodeModules)) {
+    skipped = true;
+  } else if (destKind !== "passthrough") {
     linked += linkRequiredPackages(absAnchor, destNodeModules);
     linked += linkDependencyClosure(absAnchor, destNodeModules);
-    linked += linkInstallModules(installNodeModules, destNodeModules);
   } else {
     linked += linkRequiredPackages(absAnchor, destNodeModules);
   }
@@ -374,6 +414,7 @@ export function healDshProfile({ dshHome, installAnchor }) {
   let warning = "";
   try {
     resolved = verifyWithRetry(absHome);
+    if (!skipped) writeHealStamp(absHome, installNodeModules, resolved);
   } catch (error) {
     warning = error instanceof Error ? error.message : String(error);
   }
@@ -383,6 +424,7 @@ export function healDshProfile({ dshHome, installAnchor }) {
     installNodeModules,
     destKind,
     linked,
+    skipped,
     removedShadow,
     resolved,
     warning,

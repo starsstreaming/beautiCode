@@ -14,7 +14,8 @@ param(
   [string]$TargetHost = "prompt",
   [switch]$DryRun,
   [switch]$WaitNotice,
-  [string]$WaitNoticeEvent = ""
+  [string]$WaitNoticeEvent = "",
+  [string]$WaitNoticeOkEvent = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -412,7 +413,7 @@ public static class BeautiCodeHostPickerNative {
 }
 
 function Show-BcDshWaitNotice {
-  param([string]$EventName)
+  param([string]$EventName, [string]$OkEventName)
   Initialize-BcWaitNoticeNative
   [void][BeautiCodeHostPickerNative]::EnableDpi()
   [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -421,16 +422,12 @@ function Show-BcDshWaitNotice {
   } catch [System.InvalidOperationException] { }
 
   $closeEvent = $null
+  $okEvent = $null
   if ($EventName) {
-    try {
-      $closeEvent = [System.Threading.EventWaitHandle]::OpenExisting($EventName)
-    } catch {
-      $closeEvent = $null
-    }
+    try { $closeEvent = [System.Threading.EventWaitHandle]::OpenExisting($EventName) } catch { $closeEvent = $null }
   }
-  if ($closeEvent -and $closeEvent.WaitOne(0)) {
-    $closeEvent.Dispose()
-    return
+  if ($OkEventName) {
+    try { $okEvent = [System.Threading.EventWaitHandle]::OpenExisting($OkEventName) } catch { $okEvent = $null }
   }
 
   $colors = @{
@@ -498,24 +495,41 @@ function Show-BcDshWaitNotice {
   $close.TabStop = $false
   [void]$root.Controls.Add($close)
 
-  $countdown = @{ Left = 30 }
+  $countdown = @{ Left = 30; SuccessUntil = $null }
   $poll = New-Object System.Windows.Forms.Timer
   $poll.Interval = 80
   $tick = New-Object System.Windows.Forms.Timer
   $tick.Interval = 1000
+  $markSuccess = {
+    $title.Text = "已成功启动"
+    $hint.Text = "DeepSeek Harness 已就绪"
+    $hint.ForeColor = $colors.Jade
+    $countdown.SuccessUntil = [DateTime]::UtcNow.AddMilliseconds(1600)
+  }.GetNewClosure()
+  if ($okEvent -and $okEvent.WaitOne(0)) { & $markSuccess }
   $null = $poll.add_Tick({
-    if ($closeEvent -and $closeEvent.WaitOne(0)) {
+    if ($okEvent -and $okEvent.WaitOne(0) -and -not $countdown.SuccessUntil) {
+      & $markSuccess
+    }
+    if ($countdown.SuccessUntil -and [DateTime]::UtcNow -ge $countdown.SuccessUntil) {
+      $poll.Stop()
+      $tick.Stop()
+      $form.Close()
+      return
+    }
+    if ($closeEvent -and $closeEvent.WaitOne(0) -and -not $countdown.SuccessUntil) {
       $poll.Stop()
       $tick.Stop()
       $form.Close()
     }
   }.GetNewClosure())
   $null = $tick.add_Tick({
+    if ($countdown.SuccessUntil) { return }
     if ($countdown.Left -gt 0) { $countdown.Left -= 1 }
     if ($countdown.Left -gt 0) {
       $hint.Text = "请等待 {0}s" -f $countdown.Left
     } else {
-      $hint.Text = "仍在启动，请稍候"
+      $hint.Text = "插件树仍在加载，请稍候"
     }
   }.GetNewClosure())
 
@@ -560,11 +574,14 @@ function Show-BcDshWaitNotice {
     if ($null -ne $form.Icon) { $form.Icon.Dispose() }
     $form.Dispose()
     if ($null -ne $closeEvent) { $closeEvent.Dispose() }
+    if ($null -ne $okEvent) { $okEvent.Dispose() }
   }
 }
 
 function Start-BcDshWaitNotice {
-  $script:dshWaitEventName = "Local\beautiCode.Engine.DshWaitClose.{0}" -f [guid]::NewGuid().ToString("N")
+  $stamp = [guid]::NewGuid().ToString("N")
+  $script:dshWaitEventName = "Local\beautiCode.Engine.DshWaitClose.$stamp"
+  $script:dshWaitOkEventName = "Local\beautiCode.Engine.DshWaitOk.$stamp"
   $createdNew = $false
   $script:dshWaitEvent = [System.Threading.EventWaitHandle]::new(
     $false,
@@ -572,14 +589,22 @@ function Start-BcDshWaitNotice {
     $script:dshWaitEventName,
     [ref]$createdNew
   )
+  $script:dshWaitOkEvent = [System.Threading.EventWaitHandle]::new(
+    $false,
+    [System.Threading.EventResetMode]::ManualReset,
+    $script:dshWaitOkEventName,
+    [ref]$createdNew
+  )
   [void]$script:dshWaitEvent.Reset()
+  [void]$script:dshWaitOkEvent.Reset()
   $argList = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-WindowStyle", "Hidden",
     "-File", $PSCommandPath,
     "-WaitNotice",
-    "-WaitNoticeEvent", $script:dshWaitEventName
+    "-WaitNoticeEvent", $script:dshWaitEventName,
+    "-WaitNoticeOkEvent", $script:dshWaitOkEventName
   )
   $quoted = @()
   foreach ($a in $argList) {
@@ -598,11 +623,22 @@ function Start-BcDshWaitNotice {
   [void][System.Diagnostics.Process]::Start($psi)
 }
 
+function Complete-BcDshWaitNotice {
+  if ($null -ne $script:dshWaitOkEvent) {
+    try { [void]$script:dshWaitOkEvent.Set() } catch {}
+  }
+}
+
 function Close-BcDshWaitNotice {
-  if ($null -eq $script:dshWaitEvent) { return }
-  try { [void]$script:dshWaitEvent.Set() } catch {}
-  try { $script:dshWaitEvent.Dispose() } catch {}
-  $script:dshWaitEvent = $null
+  if ($null -ne $script:dshWaitEvent) {
+    try { [void]$script:dshWaitEvent.Set() } catch {}
+    try { $script:dshWaitEvent.Dispose() } catch {}
+    $script:dshWaitEvent = $null
+  }
+  if ($null -ne $script:dshWaitOkEvent) {
+    try { $script:dshWaitOkEvent.Dispose() } catch {}
+    $script:dshWaitOkEvent = $null
+  }
 }
 
 function Start-BcDshWarmup {
@@ -672,7 +708,7 @@ public static class BeautiCodeHostPickerNative {
 }
 
 if ($WaitNotice) {
-  Show-BcDshWaitNotice -EventName $WaitNoticeEvent
+  Show-BcDshWaitNotice -EventName $WaitNoticeEvent -OkEventName $WaitNoticeOkEvent
   return
 }
 
@@ -680,11 +716,8 @@ if ($DryRun -and $TargetHost -eq "prompt") {
   throw "DryRun 必须显式指定 -TargetHost codex 或 dsh。"
 }
 
-if ($TargetHost -eq "prompt" -and -not $DryRun) {
-  # Prepare DSH profile junctions while the picker is on screen. Do not
-  # start `dsh web` yet — overlapping boots race those links and crash.
-  Start-BcDshWarmup
-}
+# Do not spawn a HealOnly warmup while the picker is open. That process
+# took the launch mutex and, if heal blocked, froze every later DSH start.
 
 $selected = if ($TargetHost -eq "prompt") {
   Show-BcHostPicker
@@ -717,12 +750,6 @@ if ($DryRun) {
 }
 
 if ($selected -eq "dsh") {
-  try {
-    [void](Start-BcTrayProcess -InstallRoot $repoRoot -TargetHost dsh -SkipBuild)
-  } catch {
-    Show-BcSwitchError ("启动 beautiCode 托盘失败：{0}" -f $_.Exception.Message)
-    return
-  }
   Start-BcDshWaitNotice
 }
 
@@ -781,12 +808,10 @@ try {
     exit 1
   }
 } finally {
-  Close-BcDshWaitNotice
   if ($selected -eq "dsh" -and -not $script:bcLaunchFailed) {
-    $panelDeadline = [DateTime]::UtcNow.AddSeconds(8)
-    while ([DateTime]::UtcNow -lt $panelDeadline) {
-      if (Request-BcTrayPanelEvent) { break }
-      Start-Sleep -Milliseconds 150
-    }
+    Complete-BcDshWaitNotice
+    Start-Sleep -Milliseconds 1700
+    [void](Request-BcTrayPanelEvent)
   }
+  Close-BcDshWaitNotice
 }
