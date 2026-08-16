@@ -271,17 +271,41 @@ function Get-BcDshInstallAnchor {
 function Invoke-BcHealDshProfile {
   param([pscustomobject]$Runtime, [string]$EffectiveDshHome)
   if (-not (Test-Path -LiteralPath $healScript -PathType Leaf)) {
-    throw "缺少 DSH profile 修复脚本：$healScript"
+    Write-Warning "缺少 DSH profile 修复脚本，继续启动 DeepSeek Harness。"
+    return
   }
   $anchor = Get-BcDshInstallAnchor -Runtime $Runtime
   if (-not $anchor) {
     Write-Warning "未找到捆绑 DSH 安装锚点，跳过 profile 模块预热。"
     return
   }
-  $output = & $Runtime.FilePath $healScript --dsh-home $EffectiveDshHome --install-anchor $anchor 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw ("预热 DSH profile 模块失败：{0}" -f (($output | ForEach-Object { [string]$_ }) -join "`n"))
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $Runtime.FilePath
+  $psi.Arguments = ('"{0}" --dsh-home "{1}" --install-anchor "{2}"' -f `
+    $healScript.Replace('"', '\"'), `
+    $EffectiveDshHome.Replace('"', '\"'), `
+    $anchor.Replace('"', '\"'))
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.WorkingDirectory = $repoRoot
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  $stdout = $proc.StandardOutput.ReadToEnd()
+  $stderr = $proc.StandardError.ReadToEnd()
+  $proc.WaitForExit()
+  $detail = (($stdout + "`n" + $stderr).Trim())
+  if ($proc.ExitCode -ne 0) {
+    Write-Warning ("预热 DSH profile 未完全成功，继续启动。{0}" -f $detail)
+    return
   }
+  try {
+    $parsed = $stdout | ConvertFrom-Json
+    if ($parsed.ok -eq $false -and $parsed.warning) {
+      Write-Warning ("预热 DSH profile 校验未完成，继续启动。{0}" -f [string]$parsed.warning)
+      return
+    }
+  } catch {}
   Write-Host "DSH profile 模块已就绪。"
 }
 

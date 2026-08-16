@@ -53,8 +53,24 @@ function sameRealPath(left, right) {
   return Boolean(resolvedLeft && resolvedRight && samePath(resolvedLeft, resolvedRight));
 }
 
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 export function packageVisible(dir) {
-  return fs.existsSync(path.join(dir, "package.json"));
+  try {
+    return fs.statSync(path.join(dir, "package.json")).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function waitUntilPackageVisible(dir, attempts = 25) {
+  for (let i = 0; i < attempts; i += 1) {
+    if (packageVisible(dir)) return true;
+    sleepMs(40);
+  }
+  return packageVisible(dir);
 }
 
 function readLinkOrEmpty(link) {
@@ -112,15 +128,13 @@ export function ensureJunction(link, target) {
       "code" in error &&
       error.code === "EEXIST" &&
       isLinkTo(link, target) &&
-      packageVisible(link)
+      waitUntilPackageVisible(link)
     ) {
       return "kept";
     }
     throw error;
   }
-  if (!packageVisible(link)) {
-    throw new Error(`heal-dsh-profile: ${link} is not visible from ${path.join(link, "package.json")}`);
-  }
+  waitUntilPackageVisible(link);
   return "linked";
 }
 
@@ -188,8 +202,57 @@ export function linkRequiredPackages(installAnchor, destNodeModules) {
   }
   let linked = 0;
   for (const [name, target] of required) {
-    ensureJunction(path.join(destNodeModules, ...name.split("/")), target);
-    linked += 1;
+    try {
+      ensureJunction(path.join(destNodeModules, ...name.split("/")), target);
+      linked += 1;
+    } catch {
+      // Required-package retry happens in verify; do not abort heal.
+    }
+  }
+  return linked;
+}
+
+export function linkDependencyClosure(installAnchor, destNodeModules) {
+  const absAnchor = path.resolve(installAnchor);
+  let appManifest;
+  try {
+    appManifest = JSON.parse(fs.readFileSync(absAnchor, "utf8"));
+  } catch {
+    return 0;
+  }
+  const links = new Map();
+  if (appManifest.name) links.set(appManifest.name, path.dirname(absAnchor));
+  const queue = [{ anchor: absAnchor, manifest: appManifest }];
+  while (queue.length) {
+    const next = queue.shift();
+    const deps = [
+      ...Object.keys(next.manifest.dependencies ?? {}),
+      ...Object.keys(next.manifest.peerDependencies ?? {}),
+    ];
+    for (const dep of deps) {
+      if (links.has(dep)) continue;
+      const dir = packageDirFromAnchor(next.anchor, dep);
+      if (!dir) continue;
+      links.set(dep, dir);
+      const manifestPath = path.join(dir, "package.json");
+      try {
+        queue.push({
+          anchor: manifestPath,
+          manifest: JSON.parse(fs.readFileSync(manifestPath, "utf8")),
+        });
+      } catch {
+        // Skip a broken nested manifest.
+      }
+    }
+  }
+  let linked = 0;
+  for (const [name, target] of links) {
+    try {
+      ensureJunction(path.join(destNodeModules, ...name.split("/")), target);
+      linked += 1;
+    } catch {
+      // Continue the rest of the closure.
+    }
   }
   return linked;
 }
@@ -221,14 +284,22 @@ export function linkInstallModules(installNodeModules, destNodeModules) {
         if (pkg.name.startsWith(".")) continue;
         const pkgSource = path.join(source, pkg.name);
         if (!isDirectory(pkgSource)) continue;
-        ensureJunction(path.join(scopeDest, pkg.name), pkgSource);
-        linked += 1;
+        try {
+          ensureJunction(path.join(scopeDest, pkg.name), pkgSource);
+          linked += 1;
+        } catch {
+          // A single package must not abort first boot on a locked host.
+        }
       }
       continue;
     }
     if (!isDirectory(source)) continue;
-    ensureJunction(path.join(destNodeModules, entry.name), source);
-    linked += 1;
+    try {
+      ensureJunction(path.join(destNodeModules, entry.name), source);
+      linked += 1;
+    } catch {
+      // Continue linking the rest of the install tree.
+    }
   }
   return linked;
 }
@@ -245,13 +316,14 @@ export function verifyProfileResolution(dshHome, packageNames = REQUIRED_PACKAGE
       ...name.split("/"),
       "package.json",
     );
-    if (!fs.existsSync(packageJson)) {
+    const packageDir = path.dirname(packageJson);
+    if (!waitUntilPackageVisible(packageDir)) {
       throw new Error(`heal-dsh-profile: ${name} is not visible from ${packageJson}`);
     }
     const search = require.resolve.paths(name) ?? [];
     const visible = search.some((dir) =>
       samePath(path.join(dir, name, "package.json"), packageJson) &&
-      fs.existsSync(path.join(dir, name, "package.json")),
+      packageVisible(path.join(dir, name)),
     );
     if (!visible) {
       throw new Error(`heal-dsh-profile: Node cannot see ${name} from ${webManifest}`);
@@ -292,16 +364,28 @@ export function healDshProfile({ dshHome, installAnchor }) {
   const destKind = prepareDestNodeModules(destNodeModules, installNodeModules);
   let linked = 0;
   if (destKind !== "passthrough") {
+    linked += linkRequiredPackages(absAnchor, destNodeModules);
+    linked += linkDependencyClosure(absAnchor, destNodeModules);
     linked += linkInstallModules(installNodeModules, destNodeModules);
+  } else {
+    linked += linkRequiredPackages(absAnchor, destNodeModules);
   }
-  linked += linkRequiredPackages(absAnchor, destNodeModules);
-  const resolved = verifyWithRetry(absHome);
+  let resolved = {};
+  let warning = "";
+  try {
+    resolved = verifyWithRetry(absHome);
+  } catch (error) {
+    warning = error instanceof Error ? error.message : String(error);
+  }
   return {
+    ok: !warning,
     dshHome: absHome,
     installNodeModules,
+    destKind,
     linked,
     removedShadow,
     resolved,
+    warning,
   };
 }
 

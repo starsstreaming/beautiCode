@@ -49,6 +49,7 @@ test("heal links the install tree and verifies web-profile resolution", async (t
     dshHome,
     installAnchor: install.installAnchor,
   });
+  assert.equal(result.ok, true, result.warning);
   assert.ok(result.linked >= 4);
   assert.equal(result.removedShadow, false);
   assert.match(result.resolved["@deepseek-ai/cordis-plugin-timer"], /cordis-plugin-timer/);
@@ -163,6 +164,28 @@ test("heal-dsh-profile CLI prints JSON on success", async (t) => {
   );
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.ok, true, parsed.warning);
   assert.ok(parsed.linked > 0);
   assert.ok(parsed.resolved["@deepseek-ai/dsh"]);
+});
+
+test("heal CLI stays successful when only verification is incomplete", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-heal-soft-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const install = await makeInstall(path.join(root, "install"));
+  const dshHome = path.join(root, "home");
+  const result = heal.healDshProfile({
+    dshHome,
+    installAnchor: install.installAnchor,
+  });
+  assert.equal(result.ok, true);
+  await fs.rm(path.join(dshHome, "profiles", "node_modules"), { recursive: true, force: true });
+  const again = spawnSync(
+    process.execPath,
+    [healScript, "--dsh-home", dshHome, "--install-anchor", install.installAnchor],
+    { encoding: "utf8" },
+  );
+  assert.equal(again.status, 0, again.stderr);
+  const parsed = JSON.parse(again.stdout);
+  assert.equal(typeof parsed.ok, "boolean");
 });
