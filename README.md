@@ -192,8 +192,7 @@ dsh web
 退出托盘不会结束 DeepSeek Harness，避免打断正在进行的工作。
 
 当前安装包尚未进行商业代码签名，Windows 可能显示 SmartScreen 提示。
-用户导入的图片、视频和已保存主题位于
-`%LOCALAPPDATA%\beautiCode`，卸载程序默认保留这些数据。
+用户导入的图片、视频和已保存主题位于数据根目录（托盘默认 `%LOCALAPPDATA%\beautiCode`，由 `BEAUTICODE_DATA_ROOT` 或 `--data-root` 显式指定），卸载程序默认保留这些数据。
 
 ### 从源码运行
 

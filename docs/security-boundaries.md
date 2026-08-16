@@ -30,7 +30,7 @@
 
 | Zone | Trust | Notes |
 |---|---|---|
-| beautiCode data root | Owned | `%LOCALAPPDATA%\beautiCode` (Windows default) |
+| beautiCode data root | Owned | Explicit only: `BEAUTICODE_DATA_ROOT` or `--data-root`. No hidden default (tray defaults to `%LOCALAPPDATA%\beautiCode` and passes it explicitly) |
 | Imported user media | Untrusted input | Validated then copied into data root |
 | Loopback media server | Guarded | Token + origin + re-stat + identity hash |
 | Host renderer | Untrusted peer | May navigate, hide, or drop nodes; generation guards required |
