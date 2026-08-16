@@ -779,53 +779,9 @@ function Test-BcDshBridgeUp {
 
 function Start-BcDshBridgeIfNeeded {
   if (Test-BcDshBridgeUp) { return $true }
-  $launcher = Join-Path $RepoRoot "scripts\start-beauticode-dsh.ps1"
-  if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
-    throw ("缺少 DSH 启动脚本：{0}" -f $launcher)
-  }
-  Show-Tip -Title $L.AppName -Text $L.StartingDsh -Icon Info
-  Write-BcTrayLog "starting DSH via EnsureBridgeOnly"
-  $argList = New-Object System.Collections.ArrayList
-  foreach ($part in @(
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-      "-File", $launcher, "-EnsureBridgeOnly", "-NoBrowser", "-SkipBuild",
-      "-DshUrl", (Get-BcDshPageUrl)
-    )) {
-    [void]$argList.Add($part)
-  }
-  if ($DataRoot) {
-    [void]$argList.Add("-DataRoot")
-    [void]$argList.Add($DataRoot)
-  }
-  $quoted = @()
-  foreach ($a in $argList) {
-    if ($a -match '[\s"]') {
-      $quoted += ('"{0}"' -f ($a -replace '"', '\"'))
-    } else {
-      $quoted += $a
-    }
-  }
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "powershell.exe"
-  $psi.Arguments = ($quoted -join " ")
-  $psi.WorkingDirectory = $RepoRoot
-  $psi.UseShellExecute = $true
-  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-  $proc = [System.Diagnostics.Process]::Start($psi)
-  $deadline = [datetime]::UtcNow.AddSeconds(180)
-  while ([datetime]::UtcNow -lt $deadline) {
-    if (Test-BcDshBridgeUp) {
-      Write-BcTrayLog "DSH bridge is up"
-      return $true
-    }
-    if ($null -ne $proc -and $proc.HasExited -and $proc.ExitCode -ne 0) {
-      Write-BcTrayLog ("DSH launcher exited {0}" -f $proc.ExitCode)
-      return $false
-    }
-    Start-Sleep -Milliseconds 200
-  }
-  Write-BcTrayLog "DSH bridge wait timed out after 180s"
-  return (Test-BcDshBridgeUp)
+  # beautiCode never starts DSH. The user runs `dsh web` with the plugin
+  # installed; if the bridge is not reachable, ask them to bring DSH up.
+  throw "未检测到 DeepSeek Harness 桥接。请先用已安装 beautiCode 插件的 dsh 启动网页（dsh web），再点「应用或重新应用」。"
 }
 
 function Open-BcDshPage {
@@ -845,13 +801,12 @@ function Wait-BcDshBrowserClient {
   return $false
 }
 
-# DSH apply needs a live browser EventSource. If the page is closed or DSH is
-# down, start the bridge and open the page before publishing.
+# DSH apply needs a live browser EventSource. beautiCode never starts DSH:
+# if the bridge is missing, tell the user to bring DSH up; if the page is
+# closed, open it before publishing.
 function Ensure-BcDshReady {
   if ($script:targetHost -ne "dsh") { return $true }
-  if (-not (Start-BcDshBridgeIfNeeded)) {
-    throw $L.DshStartFail
-  }
+  [void](Start-BcDshBridgeIfNeeded)
   $sessions = 0
   try {
     $st = Invoke-BcApi -Method Get -Path "/status"
@@ -871,7 +826,7 @@ function Ensure-BcDshReady {
 # - CDP healthy + process up  → reapply only
 # - process up, CDP missing   → restart with CDP flags, wait, reapply
 # - process down              → start with CDP flags, wait, reapply
-# DSH: start dsh web if needed, open the page if no browser client, then reapply.
+# DSH: bridge up → open page if no client → reapply; else ask user to run dsh web.
 function Invoke-BcEnsureHostAndReapply {
   if ($script:targetHost -eq "dsh") {
     Ensure-BcDshReady

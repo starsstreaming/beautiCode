@@ -8,10 +8,12 @@
 %LOCALAPPDATA%\Programs\beautiCode
 ```
 
-The package includes the compiled beautiCode runtime, a pinned Node.js x64
-runtime, and a compatible DeepSeek Harness. The target machine does not need
-Node.js, npm, TypeScript, DSH, or a source checkout. Codex Desktop is optional
-and remains a separate prerequisite if you choose that host.
+The package includes the compiled beautiCode runtime and a pinned Node.js x64
+runtime. The target machine does not need Node.js, npm, TypeScript, or a source
+checkout. DeepSeek Harness is **not** bundled — install the plugin from
+`{app}\integrations\deepseek-harness` into your DSH profile and run `dsh web`
+yourself. Codex Desktop is optional and remains a separate prerequisite if you
+choose that host; the tray still launches Codex as before.
 
 The installer creates a Start menu shortcut. Desktop and login-start shortcuts
 are optional installer tasks. Uninstall removes program files and shortcuts but
@@ -56,9 +58,10 @@ The locally installed Inno Setup 6.7.3 compiler identifies itself as
 non-commercial-use-only. Review or replace that build-tool license before using
 this pipeline for a commercial distribution.
 
-The installer targets x64-compatible Windows. DeepSeek Harness is bundled and
-is the recommended host. The installer does not patch Codex Desktop; that path
-still depends on Codex exposing a healthy loopback CDP endpoint.
+The installer targets x64-compatible Windows. DeepSeek Harness is user-managed
+(plugin + `dsh web`). The installer does not patch Codex Desktop; that path
+still depends on Codex exposing a healthy loopback CDP endpoint, and the tray
+still starts or restarts Codex when needed.
 
 The current bundled Node.js runtime requires 64-bit Windows 10 version 1809
 (build 17763) or newer. If you use Codex and it was already running without
