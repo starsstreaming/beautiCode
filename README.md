@@ -1,6 +1,7 @@
 <div align="center">
   <h1>beautiCode</h1>
-  <img src="./assets/beauticode-icon-borderless.png" alt="beautiCode icon" width="200">
+  <img width="1672" height="941" alt="ChatGPT Image 2026年8月16日 10_58_15" src="https://github.com/user-attachments/assets/c943a0fb-ff48-4361-9e6f-c4b1521aee2b" />
+
 </div>
 
 <p align="center">
@@ -43,8 +44,7 @@ beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex
 
 代码、输入框和按钮仍然可以正常使用。
 
-<img width="1280" height="794" alt="download" src="https://github.com/user-attachments/assets/186162ec-b42a-4846-b2d8-08ab4ad81313" />
-
+<img width="1812" height="1164" alt="QQ20260816-110858-HD" src="https://github.com/user-attachments/assets/fbc7ae4a-2e68-4df6-be0d-29c63d65ab68" />
 
 ---
 
@@ -68,7 +68,12 @@ beautiCode 可以让你：
 需要声音时，也可以随时打开。
 
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
-<img width="1920" height="1240" alt="QQ20260729-212506-HD" src="https://github.com/user-attachments/assets/ca0ef07f-2aec-46b0-b996-1db9913efa6d" />
+
+
+https://github.com/user-attachments/assets/19a9729c-45c2-4c83-9e41-befd8c2d3af6
+
+
+
 
 ### v1.0.0 安装包
 
@@ -76,6 +81,7 @@ beautiCode 可以让你：
 安装包自带 Node.js 和 DeepSeek Harness 运行时，不需要另外安装 Node.js、npm 或 DSH。
 启动后选择 **DeepSeek Harness** 即可；也可以从开始菜单打开「beautiCode · DeepSeek Harness」直接进入。
 同一安装包仍可选 Codex Desktop。
+<img width="548" height="814" alt="image" src="https://github.com/user-attachments/assets/c609fd9f-3be7-41e5-a84b-265cead956f4" />
 
 
 
