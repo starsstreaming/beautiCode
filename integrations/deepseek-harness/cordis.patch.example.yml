@@ -1,5 +1,13 @@
-# Manual-use example. The launcher generates this patch for the actual install path.
+# Install into your own DSH web profile, then load from the profile patch.
+#
+#   dsh plugin --profile web add file:<abs path>/integrations/deepseek-harness
+#
+# Installed from a beautiCode Windows install:
+#   dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
+#
+# Then add this to ~/.dsh/cordis.patch.yml (or the profile cordis.patch.yml)
+# and restart `dsh web`. beautiCode does not start DSH for you.
 - insert:
     - id: beauticode-bridge
-      name: 'file:///C:/WoRk/beautiCode/integrations/deepseek-harness/index.mjs'
+      name: '@beauticode/dsh-plugin'
       inject: [webServer]

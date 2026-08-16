@@ -1,0 +1,20 @@
+{
+  "name": "@beauticode/dsh-plugin",
+  "version": "1.0.0",
+  "description": "Cordis plugin: image/video backgrounds for DeepSeek Harness web.",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": {
+      "import": "./index.mjs"
+    }
+  },
+  "files": [
+    "index.mjs",
+    "client.js"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

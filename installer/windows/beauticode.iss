@@ -54,7 +54,6 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 
 [Icons]
 Name: "{autoprograms}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"
-Name: "{autoprograms}\beautiCode · DeepSeek Harness"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode-dsh.ps1"" -SkipBuild"; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"
 Name: "{autodesktop}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"; Tasks: desktopicon
 Name: "{userstartup}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode-engine.ps1"" -NoLaunchCodex"; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"; Tasks: autostart
 

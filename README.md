@@ -78,9 +78,9 @@ https://github.com/user-attachments/assets/19a9729c-45c2-4c83-9e41-befd8c2d3af6
 ### v1.0.0 安装包
 
 想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v1.0.0)。
-安装包自带 Node.js 和 DeepSeek Harness 运行时，不需要另外安装 Node.js、npm 或 DSH。
-启动后选择 **DeepSeek Harness** 即可；也可以从开始菜单打开「beautiCode · DeepSeek Harness」直接进入。
-同一安装包仍可选 Codex Desktop。
+安装包自带 Node.js，不需要另外安装 Node.js 或 npm。
+Codex Desktop 路径与原来一样：启动后选 **Codex Desktop**，托盘会按需拉起 Codex。
+DeepSeek Harness 由你自己运行：把插件装进 DSH profile，再启动 `dsh web`，然后在选择框里选 **DeepSeek Harness**。
 <img width="533" height="660" alt="image" src="https://github.com/user-attachments/assets/8c16eeb9-94d0-4f19-a816-b32fba8a110c" />
 
 
@@ -170,13 +170,20 @@ Ctrl + Shift + Space
 beautiCode-Setup-1.0.0-win-x64.exe
 ```
 
-安装包自带 Node.js 和 DeepSeek Harness 运行时。使用者不需要安装 Node.js、npm、DSH，也不需要保留项目源码。
+安装包自带 Node.js，不需要另外安装 Node.js 或 npm，也不需要保留项目源码。
+DeepSeek Harness 需要你自己安装并启用插件：
 
-安装完成后启动 beautiCode，在选择框里点 **DeepSeek Harness**。Windows 右下角会出现托盘图标，浏览器会打开本机 DSH 页面。
+```sh
+dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
+# 在 ~/.dsh/cordis.patch.yml 里加入插件条目（见 integrations/deepseek-harness/cordis.patch.example.yml）
+dsh web
+```
+
+安装完成后启动 beautiCode：选 **Codex Desktop** 仍由托盘拉起 Codex；选 **DeepSeek Harness** 则连接你已经启动的 DSH 网页。
 
 之后在托盘里：
 
-* 点「应用或重新应用」：如果 DSH 还没启动，会先拉起它并打开网页；如果网页已经关掉，会重新打开
+* 点「应用或重新应用」：DSH 路径只连接已启动的网页（网页关了会重新打开，DSH 没运行则提示你先 `dsh web`）；Codex 路径与原来一样
 * 更换图片或视频
 * 清除背景、开关声音、摸鱼、保存和切换主题
 
@@ -192,13 +199,15 @@ beautiCode-Setup-1.0.0-win-x64.exe
 
 ```bash
 npm install
-npm run tray:dsh
+dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
+dsh web
+npm run tray
 ```
 
-只启动 DeepSeek Harness：
+或打开宿主选择器：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-beauticode-dsh.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-beauticode.ps1
 ```
 
 构建 Windows 安装包：

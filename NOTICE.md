@@ -22,8 +22,9 @@ It does **not** grant rights to:
 ## Scope of this project
 
 beautiCode v1 focuses on applying a **local image or MP4 video as a background
-layer** inside a supported host. The primary target is DeepSeek Harness (bundled
-runtime + page bridge). Codex Desktop remains available via loopback CDP. It
+layer** inside a supported host. The primary target is DeepSeek Harness (user
+installs DSH and the beautiCode plugin). Codex Desktop remains available via
+loopback CDP and is still launched by the tray. It
 does not modify official install trees and does not provide a theme marketplace.
 
 ## Third-party software

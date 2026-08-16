@@ -125,6 +125,18 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     return node;
   }
 
+  /**
+   * Fail closed on DSH DOM drift: the injected CSS depends on `#root`.
+   * If the shell no longer exposes it, report a clear error through the
+   * render ack instead of silently painting a broken page.
+   */
+  function dshStructureIssue() {
+    if (!document.getElementById("root")) {
+      return "DSH 页面结构不兼容：未找到 #root。";
+    }
+    return null;
+  }
+
   function activeVideo() {
     return document.querySelector("#beauticode-bg-stage video");
   }
@@ -252,6 +264,11 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       return;
     }
     if (typeof payload.imageUrl !== "string") return;
+    const structureIssue = dshStructureIssue();
+    if (structureIssue) {
+      await acknowledgeRender(payload, false, false, structureIssue);
+      return;
+    }
     try {
       const image = await loadImage(payload.imageUrl);
       if (activePayload !== payload) return;
