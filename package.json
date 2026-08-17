@@ -1,6 +1,6 @@
 {
   "name": "beauticode",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Local image/video backgrounds for DeepSeek Harness (also Codex Desktop). Unofficial.",

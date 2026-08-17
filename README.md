@@ -147,9 +147,9 @@ Ctrl + Shift + Space
 
 ---
 
-### v1.0.1 安装包
+### v1.0.0 安装包
 
-想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/latest)。
+想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v1.0.0)。
 安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm。
 Codex Desktop 路径与原来一样：启动后选 **Codex Desktop**，托盘会按需拉起 Codex。
 DeepSeek Harness 由你自己运行：把插件装进 DSH profile，再启动 `dsh web`，然后在选择框里选 **DeepSeek Harness**。beautiCode 绝不替你启动 DSH。页面打开后可以用 `/bg`、`/bg-theme`、`/bg-clear`，或直接跟 AI 说把本机图片/视频设成背景。
@@ -167,7 +167,7 @@ DeepSeek Harness 由你自己运行：把插件装进 DSH profile，再启动 `d
 运行：
 
 ```text
-beautiCode-Setup-1.0.1-win-x64.exe
+beautiCode-Setup-1.0.0-win-x64.exe
 ```
 
 安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm，也不需要保留项目源码。
