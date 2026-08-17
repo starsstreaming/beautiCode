@@ -76,6 +76,9 @@ test("picker and tray never spawn a DSH process", () => {
     assert.doesNotMatch(source, /start-beauticode-dsh/, `${name} must not launch DSH`);
     assert.doesNotMatch(source, /install-dsh-runtime/, `${name} must not install DSH`);
   }
+  assert.match(installer, /agent\.mjs/);
+  assert.match(installer, /control-client\.mjs/);
+  assert.match(installer, /host-apply\.mjs/);
 });
 
 test("picker DryRun routes DSH to the tray and Codex to its launcher", () => {

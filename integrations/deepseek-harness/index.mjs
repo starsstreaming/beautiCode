@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { registerAgentSurfaces } from "./agent.mjs";
+import { resolvePluginBaseUrl } from "./host-apply.mjs";
 
 export const name = "beauticode-bridge";
 export const inject = ["webServer"];
@@ -183,6 +185,10 @@ export function apply(ctx, config = {}) {
   const clientStates = new Map();
   let current = null;
   const modes = { fish: false, muted: true, tone: "dark" };
+  registerAgentSurfaces(ctx, {
+    dataRoot: path.dirname(tokenFile),
+    baseUrl: resolvePluginBaseUrl(ctx),
+  });
 
   const broadcast = (payload) => {
     const frame = `data: ${JSON.stringify(payload)}\n\n`;

@@ -72,6 +72,14 @@ test("session-host starts in DSH mode without touching Codex", async (t) => {
   assert.equal(health.host.kind, "dsh");
   assert.equal(health.port, null);
 
+  const controlFile = path.join(root, "data", "dsh-control.json");
+  const advertised = JSON.parse(await fs.readFile(controlFile, "utf8"));
+  assert.equal(advertised.schema, "beauticode.dsh-control/v1");
+  assert.equal(advertised.host, "dsh");
+  assert.equal(advertised.url, `http://127.0.0.1:${ready.controlPort}`);
+  assert.equal(advertised.token, CONTROL_TOKEN);
+  assert.equal(advertised.pid, child.pid);
+
   const shutdown = await fetch(`http://127.0.0.1:${ready.controlPort}/shutdown`, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
@@ -80,4 +88,5 @@ test("session-host starts in DSH mode without touching Codex", async (t) => {
   assert.equal(shutdown.status, 200);
   await new Promise((resolve) => child.once("exit", resolve));
   assert.equal(child.exitCode, 0, stderr);
+  await assert.rejects(() => fs.readFile(controlFile), { code: "ENOENT" });
 });

@@ -5,9 +5,10 @@ beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`@beauticode/
 ## 已实现能力
 
 - 图片背景、MP4 视频背景与清除。首页（`data-phase="hero"`）壁纸保持原亮度；进入会话（`active` / `settling`）后才压暗。
+- 对话工具与斜杠命令：在 DSH 里说「把某个本机 MP4 设成背景」，或输入 `/bg`、`/bg-theme`、`/bg-clear`。插件自己完成导入，不需要托盘。若托盘已经在跑，则复用托盘，避免两套写入打架。
 - 视频默认静音；可请求开启声音。若浏览器自动播放策略阻止开启声音，会继续静音播放并返回 `blocked: true`。
 - 视频播放位置随已保存主题记录；切换主题、重新应用与页面恢复时从最近位置继续。
-- 摸鱼模式：隐藏 DSH 的 `#root`，背景舞台继续显示和播放；`Ctrl+Shift+Space` 可退出。属于实验性能力。
+- 摸鱼模式：隐藏 DSH 的 `#root`，背景舞台继续显示和播放；`Ctrl+Shift+Space` 可退出。
 - 深色、浅色、跟随系统三种背景色调。
 - 图片/视频主题的保存、切换和删除。
 - 页面刷新或稍后打开时，会恢复当前背景与模式。找不到 `#root` 时应用失败并回滚，不会静默画坏页。
@@ -30,7 +31,7 @@ dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integration
 
 ## 启用插件
 
-把下面的条目加到 profile 自己的 patch 层（`~/.dsh/cordis.patch.yml` 或 profile 目录的 `cordis.patch.yml`），然后重启 `dsh web`：
+把下面的条目加到 profile 自己的 patch 层（`~/.dsh/cordis.patch.yml` 或 profile 目录的 `cordis.patch.yml`），然后自己启动 `dsh web`：
 
 ```yaml
 - insert:
@@ -43,7 +44,7 @@ dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integration
 
 ## 控制端
 
-启动 beautiCode，在选择框里选 DeepSeek Harness（或直接 `start-tray.ps1 -TargetHost dsh`）。托盘连接你正在运行的 DSH 网页：
+启动 beautiCode，在选择框里选 DeepSeek Harness（或直接 `start-tray.ps1 -TargetHost dsh`）。托盘只连接你正在运行的 DSH 网页：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File apps\tray\start-tray.ps1 -TargetHost dsh -DshUrl http://127.0.0.1:3080
@@ -60,7 +61,23 @@ npm run bc -- clear --port 3080
 
 自定义数据目录时，控制端与插件必须使用同一个 `BEAUTICODE_DATA_ROOT`，否则令牌文件不一致。未设置时两边都默认 `%LOCALAPPDATA%\beautiCode`。
 
-> beautiCode 不会自动启动 DSH。若 `dsh web` 未运行或未加载插件，托盘会提示你先启动 DSH 网页，而不是替你拉起进程。
+> beautiCode 不会自动启动 DSH。若 `dsh web` 未运行或未加载插件，托盘会提示你先启动 DSH 网页，而不是替你拉起进程。网页已开但关掉时，「应用或重新应用」只会重新打开页面。
+
+### 对话导入与斜杠命令
+
+插件在 DSH 的 `tools` / `commands` 服务出现后注册（不把它们写成硬依赖，以免没有 agent 的 webServer 组合挂不上桥）。
+
+| 入口 | 作用 |
+|---|---|
+| `beauticode_apply_video` / `beauticode_apply_image` | 按本机绝对路径导入 |
+| `beauticode_theme_list` / `beauticode_theme_use` | 列出或切换已保存主题 |
+| `beauticode_clear` / `beauticode_status` | 清除或查看当前背景 |
+| `beauticode_set_fish` / `beauticode_set_muted` | 摸鱼、背景声音 |
+| `/bg <绝对路径>` | 按扩展名导入图片或 MP4 |
+| `/bg-theme <名称>` | 切换已保存主题 |
+| `/bg-clear` | 清除背景 |
+
+没有托盘时，插件在 DSH 进程里启动同一套 `DshSession`（校验、拷贝、媒体服务、live verify）。托盘若已在跑，则继续走 `dsh-control.json`，避免抢同一把写入锁。页面必须已打开，否则 verify 会失败并回滚。
 
 ## 安全边界
 

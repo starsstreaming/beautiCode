@@ -11,7 +11,10 @@
   },
   "files": [
     "index.mjs",
-    "client.js"
+    "client.js",
+    "agent.mjs",
+    "control-client.mjs",
+    "host-apply.mjs"
   ],
   "engines": {
     "node": ">=22"

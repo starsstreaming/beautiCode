@@ -28,7 +28,7 @@
 
 beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex**。
 
-安装包已内置兼容的 DeepSeek Harness 运行时。启动 beautiCode，选中 DeepSeek Harness或Codex，就可以把电脑里的：
+它不包含、不安装、也不启动 DSH。请先自行安装 DeepSeek Harness 并运行 `dsh web`，再启动 beautiCode，选中 DeepSeek Harness 或 Codex，就可以把电脑里的：
 
 * 图片
 * 动态壁纸
@@ -80,7 +80,7 @@ beautiCode 可以让你：
 想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v1.0.0)。
 安装包自带 Node.js，不需要另外安装 Node.js 或 npm。
 Codex Desktop 路径与原来一样：启动后选 **Codex Desktop**，托盘会按需拉起 Codex。
-DeepSeek Harness 由你自己运行：把插件装进 DSH profile，再启动 `dsh web`，然后在选择框里选 **DeepSeek Harness**。
+DeepSeek Harness 由你自己运行：把插件装进 DSH profile，再启动 `dsh web`，然后在选择框里选 **DeepSeek Harness**。beautiCode 绝不替你启动 DSH。页面打开后也可以用 `/bg`、`/bg-theme`、`/bg-clear`，或直接跟 AI 说把本机图片/视频设成背景。
 <img width="533" height="660" alt="image" src="https://github.com/user-attachments/assets/8c16eeb9-94d0-4f19-a816-b32fba8a110c" />
 
 
