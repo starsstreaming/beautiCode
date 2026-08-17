@@ -10,7 +10,7 @@
  *   GET  /health
  *   GET  /status
  *   POST /apply/image   { "imagePath": "..." }
- *   POST /apply/video   { "videoPath": "...", "imagePath"?: "..." }
+ *   POST /apply/video   { "videoPath": "...", "imagePath"?: "...", "startAt"?: number }
  *   POST /apply/clear   {}
  *   POST /reapply       {}   // republish active background into live sessions
  *   POST /theme/save    { "name": "..." }   // keep current image/video
@@ -27,6 +27,10 @@ import process from "node:process";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  removeDshControlFile,
+  writeDshControlFile,
+} from "../../integrations/deepseek-harness/control-client.mjs";
 
 if (Number(process.versions.node.split(".", 1)[0]) < 22) {
   console.error("session-host 需要 Node.js 22 或更高版本。");
@@ -186,7 +190,7 @@ function checkAuth(req) {
 }
 
 const server = http.createServer(
-  { maxHeaderSize: 16 * 1024, requestTimeout: 30_000 },
+  { maxHeaderSize: 16 * 1024, requestTimeout: 180_000 },
   async (req, res) => {
   try {
     if (!checkAuth(req)) {
@@ -226,7 +230,7 @@ const server = http.createServer(
             ? {
                 title: "连接 DeepSeek Harness",
                 steps: [
-                  "使用 integrations/deepseek-harness/cordis.patch.example.yml 启动 dsh web。",
+                  "自己运行 dsh web（需已加载 beautiCode 插件）。",
                   "在浏览器中打开 DSH Web 页面。",
                   "回到 beautiCode 托盘选择图片。",
                 ],
@@ -286,6 +290,14 @@ const server = http.createServer(
       };
       if (typeof body.imagePath === "string" && body.imagePath) {
         videoInput.imagePath = path.resolve(body.imagePath);
+      }
+      if (body.startAt != null) {
+        const startAt = Number(body.startAt);
+        if (!Number.isFinite(startAt) || startAt < 0) {
+          send(res, 400, { ok: false, error: "startAt 必须是非负数字（秒）。" });
+          return;
+        }
+        videoInput.startAt = startAt;
       }
       const result = await session.apply(videoInput);
       send(res, result.ok ? 200 : 422, result);
@@ -404,12 +416,20 @@ const server = http.createServer(
   },
 );
 server.headersTimeout = 10_000;
+server.requestTimeout = 180_000;
 server.keepAliveTimeout = 5_000;
 server.maxRequestsPerSocket = 100;
 
 async function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (hostKind === "dsh") {
+    try {
+      await removeDshControlFile({ dataRoot: session.dataRoot, pid: process.pid });
+    } catch {
+      /* ignore */
+    }
+  }
   const serverClosed = new Promise((resolve) => server.close(() => resolve()));
   server.closeIdleConnections?.();
   try {
@@ -441,6 +461,22 @@ process.on("SIGINT", () => void shutdown(0));
 process.on("SIGTERM", () => void shutdown(0));
 const addr = server.address();
 const listenPort = typeof addr === "object" && addr ? addr.port : 0;
+if (hostKind === "dsh") {
+  try {
+    await writeDshControlFile({
+      dataRoot: session.dataRoot,
+      url: `http://127.0.0.1:${listenPort}`,
+      token,
+      pid: process.pid,
+    });
+  } catch (error) {
+    console.error(
+      `session-host：无法发布 DSH 控制面，对话导入和斜杠命令将不可用：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
 // Machine-readable ready line for the tray launcher (stdout).
 console.log(
   JSON.stringify({
