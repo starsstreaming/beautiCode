@@ -13,6 +13,7 @@
 param(
   [string]$PluginRoot = "",
   [string]$DshHome = "",
+  [string]$InstallRoot = "",
   [switch]$Remove
 )
 
@@ -192,6 +193,25 @@ function Ensure-WebPackageDep {
   [IO.File]::WriteAllText($webPackage, ($text.TrimEnd() + "`n"), $utf8)
 }
 
+function Get-BcIntegrationNoteName {
+  # 集成说明.txt — built from code points so this ASCII script stays PS 5.1-safe.
+  return ((-join @(0x96C6, 0x6210, 0x8BF4, 0x660E | ForEach-Object { [char]$_ })) + ".txt")
+}
+
+function Write-IntegrationNote([string]$Root) {
+  if (-not $Root) { return }
+  $installRoot = [IO.Path]::GetFullPath($Root)
+  $pluginPath = Join-Path $installRoot "integrations\deepseek-harness"
+  $template = Join-Path $scriptDir "integration-note.zh.txt"
+  if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {
+    throw ("missing integration note template: {0}" -f $template)
+  }
+  $text = [IO.File]::ReadAllText($template)
+  $text = $text.Replace("{INSTALL_ROOT}", $installRoot).Replace("{PLUGIN_PATH}", $pluginPath)
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  [IO.File]::WriteAllText((Join-Path $installRoot (Get-BcIntegrationNoteName)), $text, $utf8)
+}
+
 if (-not (Test-Path -LiteralPath $indexFile -PathType Leaf)) {
   throw ("缺少 DSH 插件入口：{0}" -f $indexFile)
 }
@@ -210,6 +230,12 @@ if ($Remove) {
   }
   if ($removed) { Write-BcLog "Removed beautiCode DSH plugin wiring." }
   else { Write-BcLog "No beautiCode DSH plugin wiring to remove." }
+  if ($InstallRoot) {
+    $note = Join-Path ([IO.Path]::GetFullPath($InstallRoot)) (Get-BcIntegrationNoteName)
+    if (Test-Path -LiteralPath $note -PathType Leaf) {
+      Remove-Item -LiteralPath $note -Force
+    }
+  }
   exit 0
 }
 
@@ -233,6 +259,15 @@ if ($webExists) {
   }
   Write-BridgePatch $homePatch (Get-FileUriInsert $fileUri)
   Write-BcLog ("DSH web profile not found; wrote home patch $homePatch")
+}
+
+if ($InstallRoot) {
+  try {
+    Write-IntegrationNote $InstallRoot
+    Write-BcLog ("Wrote integration note to {0}" -f ([IO.Path]::GetFullPath($InstallRoot)))
+  } catch {
+    Write-BcLog ("Failed to write integration note: {0}" -f $_.Exception.Message)
+  }
 }
 
 exit 0

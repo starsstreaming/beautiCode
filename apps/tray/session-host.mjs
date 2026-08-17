@@ -28,8 +28,11 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  isPidAlive,
   removeDshControlFile,
+  removeSessionHostFile,
   writeDshControlFile,
+  writeSessionHostFile,
 } from "../../integrations/deepseek-harness/control-client.mjs";
 
 if (Number(process.versions.node.split(".", 1)[0]) < 22) {
@@ -62,6 +65,19 @@ delete process.env.BEAUTICODE_CONTROL_TOKEN;
 const portArg = argValue("--port");
 const dshUrl = argValue("--dsh-url") ?? "http://127.0.0.1:3080";
 const dataRoot = argValue("--data-root");
+const parentPidArg = argValue("--parent-pid");
+let parentPid = null;
+if (parentPidArg != null) {
+  parentPid = Number(parentPidArg);
+  if (!Number.isInteger(parentPid) || parentPid < 1) {
+    console.error("--parent-pid 必须是正整数。");
+    process.exit(1);
+  }
+  if (!isPidAlive(parentPid)) {
+    console.error("session-host：父进程已退出。");
+    process.exit(1);
+  }
+}
 const verifyMs = Number(argValue("--verify-ms") ?? "30000");
 if (!Number.isFinite(verifyMs) || verifyMs < 0 || verifyMs > 300_000) {
   console.error("--verify-ms 必须在 0 到 300000 之间。");
@@ -88,7 +104,10 @@ const sessionOpts = {
     console.error(`[session] ${msg}`);
   },
 };
-if (hostKind === "dsh") sessionOpts.baseUrl = dshUrl;
+if (hostKind === "dsh") {
+  sessionOpts.baseUrl = dshUrl;
+  sessionOpts.honorTrayHandoff = false;
+}
 if (portArg) {
   const p = Number(portArg);
   if (!Number.isInteger(p) || p < 1 || p > 65535) {
@@ -430,6 +449,11 @@ async function shutdown(code) {
       /* ignore */
     }
   }
+  try {
+    await removeSessionHostFile({ dataRoot: session.dataRoot, pid: process.pid });
+  } catch {
+    /* ignore */
+  }
   const serverClosed = new Promise((resolve) => server.close(() => resolve()));
   server.closeIdleConnections?.();
   try {
@@ -459,13 +483,35 @@ await new Promise((resolve, reject) => {
 });
 process.on("SIGINT", () => void shutdown(0));
 process.on("SIGTERM", () => void shutdown(0));
+if (parentPid != null) {
+  const parentWatch = setInterval(() => {
+    if (!isPidAlive(parentPid)) void shutdown(0);
+  }, 500);
+  parentWatch.unref?.();
+}
 const addr = server.address();
 const listenPort = typeof addr === "object" && addr ? addr.port : 0;
+const controlUrl = `http://127.0.0.1:${listenPort}`;
+try {
+  await writeSessionHostFile({
+    dataRoot: session.dataRoot,
+    host: hostKind,
+    url: controlUrl,
+    token,
+    pid: process.pid,
+  });
+} catch (error) {
+  console.error(
+    `session-host：无法发布控制面文件：${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+}
 if (hostKind === "dsh") {
   try {
     await writeDshControlFile({
       dataRoot: session.dataRoot,
-      url: `http://127.0.0.1:${listenPort}`,
+      url: controlUrl,
       token,
       pid: process.pid,
     });

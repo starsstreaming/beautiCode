@@ -10,19 +10,26 @@ import {
   registerAgentSurfaces,
   runBgCommand,
 } from "../agent.mjs";
-import { stopInProcessSession } from "../host-apply.mjs";
+import { resolveApplyBackend, stopInProcessSession } from "../host-apply.mjs";
 import {
   CONTROL_FILE,
   CONTROL_SCHEMA,
   TRAY_MISSING_MESSAGE,
+  TRAY_STARTING_MESSAGE,
   callDshControl,
   inspectLocalMedia,
   isLoopbackControlUrl,
   matchSavedTheme,
   readDshControlFile,
+  readSessionHostFile,
+  readTrayClaim,
   removeDshControlFile,
+  removeSessionHostFile,
+  removeTrayClaim,
   stripPathQuotes,
   writeDshControlFile,
+  writeSessionHostFile,
+  writeTrayClaim,
 } from "../control-client.mjs";
 
 const TOKEN = "control-token-for-agent-tests-123456";
@@ -417,4 +424,65 @@ test("page bridge still loads when inject is absent", async (t) => {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   assert.ok(routes.has("/__beauticode/apply"));
   assert.ok(routes.has("/__beauticode/version"));
+});
+
+test("tray claim and session-host files ignore dead pids", async (t) => {
+  const root = await createTempRoot();
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await writeTrayClaim({ dataRoot: root, pid: process.pid });
+  const liveClaim = await readTrayClaim(root);
+  assert.equal(liveClaim.pid, process.pid);
+  await writeSessionHostFile({
+    dataRoot: root,
+    host: "dsh",
+    url: "http://127.0.0.1:9",
+    token: TOKEN,
+    pid: process.pid,
+  });
+  const liveHost = await readSessionHostFile(root);
+  assert.equal(liveHost.host, "dsh");
+  assert.equal(liveHost.pid, process.pid);
+  assert.equal(await removeTrayClaim({ dataRoot: root, pid: process.pid }), true);
+  assert.equal(await readTrayClaim(root), null);
+  assert.equal(await removeSessionHostFile({ dataRoot: root, pid: process.pid }), true);
+  assert.equal(await readSessionHostFile(root), null);
+});
+
+test("resolveApplyBackend waits for a tray claim to become a live tray", async (t) => {
+  const root = await createTempRoot();
+  const tray = await startFakeTray(async ({ url }, res) => {
+    if (url === "/health") {
+      json(res, 200, { ok: true });
+      return;
+    }
+    json(res, 404, { ok: false });
+  });
+  t.after(async () => {
+    await tray.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await writeTrayClaim({ dataRoot: root, pid: process.pid });
+  setTimeout(() => {
+    void writeControl(root, tray.url);
+  }, 150);
+  const backend = await resolveApplyBackend({
+    dataRoot: root,
+    baseUrl: "http://127.0.0.1:1",
+  });
+  assert.equal(backend.kind, "tray");
+});
+
+test("resolveApplyBackend refuses in-process start while a live tray claim remains", async (t) => {
+  const root = await createTempRoot();
+  t.after(async () => {
+    await stopInProcessSession(root);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await writeTrayClaim({ dataRoot: root, pid: process.pid });
+  await assert.rejects(
+    () => resolveApplyBackend({ dataRoot: root, baseUrl: "http://127.0.0.1:1" }),
+    (error) => error.message === TRAY_STARTING_MESSAGE && error.code === "TRAY_CLAIMED",
+  );
 });

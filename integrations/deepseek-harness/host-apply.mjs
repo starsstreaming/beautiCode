@@ -1,5 +1,10 @@
 import path from "node:path";
-import { callDshControl, readDshControlFile } from "./control-client.mjs";
+import {
+  TRAY_STARTING_MESSAGE,
+  callDshControl,
+  readDshControlFile,
+  readTrayClaim,
+} from "./control-client.mjs";
 
 const sessions = new Map();
 
@@ -54,13 +59,32 @@ export async function hasLiveTray(dataRoot) {
   }
 }
 
+export async function hasLiveTrayClaim(dataRoot) {
+  return Boolean(await readTrayClaim(dataRoot));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function ensureInProcessSession(options) {
   const dataRoot = path.resolve(options.dataRoot);
   const baseUrl = options.baseUrl || "http://127.0.0.1:3080";
   const key = sessionKey(dataRoot);
   const current = sessions.get(key);
-  if (current?.session?.isOpen) return current.session;
-  if (current?.promise) return current.promise;
+  if (current?.session && !current.session.isOpen) {
+    sessions.delete(key);
+  } else if (current?.session?.isOpen) {
+    return current.session;
+  } else if (current?.promise) {
+    return current.promise;
+  }
+
+  if (await hasLiveTray(dataRoot) || await hasLiveTrayClaim(dataRoot)) {
+    const error = new Error(TRAY_STARTING_MESSAGE);
+    error.code = "TRAY_CLAIMED";
+    throw error;
+  }
 
   const promise = (async () => {
     const adapter = await loadAdapter();
@@ -110,6 +134,20 @@ export async function stopInProcessSession(dataRoot) {
 export async function resolveApplyBackend(options) {
   if (await hasLiveTray(options.dataRoot)) {
     return { kind: "tray" };
+  }
+  if (await hasLiveTrayClaim(options.dataRoot)) {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      if (await hasLiveTray(options.dataRoot)) {
+        return { kind: "tray" };
+      }
+      await sleep(100);
+    }
+    if (await hasLiveTrayClaim(options.dataRoot)) {
+      const error = new Error(TRAY_STARTING_MESSAGE);
+      error.code = "TRAY_CLAIMED";
+      throw error;
+    }
   }
   try {
     const session = await ensureInProcessSession(options);

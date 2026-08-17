@@ -280,6 +280,41 @@ test("DSH watch loop does not republish a matching generation while render ack i
   assert.equal(bridge.applyCount, applyCount);
 });
 
+test("DSH session yields the injector lock when the tray claims it", async (t) => {
+  const bridge = await mockBridge(null);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-dsh-yield-"));
+  const dataRoot = path.join(root, "data");
+  const session = new DshSession({
+    baseUrl: bridge.url,
+    dataRoot,
+    verifyDeadlineMs: 50,
+    pollMs: 60_000,
+  });
+  t.after(async () => {
+    await session.stop();
+    await bridge.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await session.start();
+  assert.equal(session.isOpen, true);
+  await fs.writeFile(
+    path.join(dataRoot, "tray-claim.json"),
+    `${JSON.stringify({
+      schema: "beauticode.tray-claim/v1",
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+    })}\n`,
+  );
+  const deadline = Date.now() + 3_000;
+  while (session.isOpen && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(session.isOpen, false);
+  await assert.rejects(() => fs.readFile(path.join(dataRoot, "injector.lock")), {
+    code: "ENOENT",
+  });
+});
+
 test("DSH session rolls disk state back when the bridge disappears", async (t) => {
   const bridge = await mockBridge(null);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-dsh-rollback-"));

@@ -58,8 +58,8 @@ Name: "{autodesktop}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powers
 Name: "{userstartup}\beautiCode"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode-engine.ps1"" -NoLaunchCodex"; WorkingDir: "{app}"; IconFilename: "{app}\beauticode.ico"; Tasks: autostart
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install-dsh-plugin.ps1"" -PluginRoot ""{app}\integrations\deepseek-harness"""; WorkingDir: "{app}"; StatusMsg: "正在把 beautiCode 插件写入 DeepSeek Harness…"; Flags: postinstall runhidden
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install-dsh-plugin.ps1"" -PluginRoot ""{app}\integrations\deepseek-harness"" -InstallRoot ""{app}"""; WorkingDir: "{app}"; StatusMsg: "正在把 beautiCode 插件写入 DeepSeek Harness…"; Flags: postinstall runhidden
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\scripts\start-beauticode.ps1"""; WorkingDir: "{app}"; Description: "启动 beautiCode"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install-dsh-plugin.ps1"" -PluginRoot ""{app}\integrations\deepseek-harness"" -Remove"; WorkingDir: "{app}"; Flags: runhidden
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install-dsh-plugin.ps1"" -PluginRoot ""{app}\integrations\deepseek-harness"" -InstallRoot ""{app}"" -Remove"; WorkingDir: "{app}"; Flags: runhidden

@@ -94,6 +94,10 @@ export async function ensureDataLayout(paths: DataPaths): Promise<void> {
       entry === "engine-launcher.log" ||
       entry === "injector.lock" ||
       entry === "store.lock" ||
+      entry === "dsh-control.json" ||
+      entry === "session-host.json" ||
+      entry === "tray-claim.json" ||
+      entry === "dsh-bridge.token" ||
       entry === ".beauticode-commit.json" ||
       entry === ".beauticode-commit-in-progress" ||
       entry.startsWith("active-backup-");
