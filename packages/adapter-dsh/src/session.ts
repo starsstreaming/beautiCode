@@ -16,6 +16,7 @@ import { DshHostApplier, normalizeDshBaseUrl } from "./bridge.js";
 import { DSH_HOST_DESCRIPTOR } from "./host-descriptor.js";
 import { acquireDshInjectorLock } from "./injector-lock.js";
 import { ensureBridgeToken } from "./token.js";
+import { trayHandoffRequested } from "./tray-handoff.js";
 
 export interface DshSessionOptions {
   baseUrl?: string;
@@ -24,6 +25,11 @@ export interface DshSessionOptions {
   pollMs?: number;
   onError?: (err: Error) => void;
   onStatus?: (msg: string) => void;
+  /**
+   * When true (plugin in-process session), stop if the tray claims the data
+   * root. The tray session-host must leave this false — it writes the claim.
+   */
+  honorTrayHandoff?: boolean;
 }
 
 export class DshSession implements HostSession {
@@ -32,6 +38,7 @@ export class DshSession implements HostSession {
   readonly dataRoot: string;
   readonly verifyDeadlineMs: number;
   readonly pollMs: number;
+  readonly honorTrayHandoff: boolean;
   readonly baseUrl: URL;
 
   private store: BackgroundStore;
@@ -39,6 +46,7 @@ export class DshSession implements HostSession {
   private host: DshHostApplier | null = null;
   private releaseLock: (() => Promise<void>) | null = null;
   private watchTimer: ReturnType<typeof setInterval> | null = null;
+  private handoffTimer: ReturnType<typeof setInterval> | null = null;
   private watchTask: Promise<void> | null = null;
   private stopTask: Promise<void> | null = null;
   private activeOperations = new Set<Promise<unknown>>();
@@ -59,6 +67,7 @@ export class DshSession implements HostSession {
     this.dataRoot = opts.dataRoot ?? defaultDataRoot();
     this.verifyDeadlineMs = opts.verifyDeadlineMs ?? 30_000;
     this.pollMs = opts.pollMs ?? 2_000;
+    this.honorTrayHandoff = opts.honorTrayHandoff !== false;
     this.baseUrl = normalizeDshBaseUrl(opts.baseUrl ?? "http://127.0.0.1:3080");
     this.store = new BackgroundStore({ root: this.dataRoot });
     this.media = new MediaServerController({
@@ -99,6 +108,10 @@ export class DshSession implements HostSession {
       throw error;
     }
     this.startWatchLoop();
+    if (this.honorTrayHandoff) {
+      this.startHandoffLoop();
+      void this.yieldToTrayIfRequested();
+    }
     void this.watchOnce();
     return { port: this.bridgePort() };
   }
@@ -416,6 +429,8 @@ export class DshSession implements HostSession {
     this.closed = true;
     if (this.watchTimer) clearInterval(this.watchTimer);
     this.watchTimer = null;
+    if (this.handoffTimer) clearInterval(this.handoffTimer);
+    this.handoffTimer = null;
     await Promise.allSettled(
       [this.watchTask, ...this.activeOperations].filter(
         (value): value is Promise<unknown> => Boolean(value),
@@ -445,6 +460,18 @@ export class DshSession implements HostSession {
   private startWatchLoop(): void {
     this.watchTimer = setInterval(() => void this.watchOnce(), this.pollMs);
     this.watchTimer.unref?.();
+  }
+
+  private startHandoffLoop(): void {
+    this.handoffTimer = setInterval(() => void this.yieldToTrayIfRequested(), 250);
+    this.handoffTimer.unref?.();
+  }
+
+  private async yieldToTrayIfRequested(): Promise<void> {
+    if (this.closed || this.stopTask) return;
+    if (!(await trayHandoffRequested(this.dataRoot))) return;
+    this.onStatus?.("beautiCode 托盘正在接管，正在释放本机会话。");
+    await this.stop();
   }
 
   private async watchOnce(): Promise<void> {

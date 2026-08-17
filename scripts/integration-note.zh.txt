@@ -1,0 +1,22 @@
+beautiCode 集成说明
+
+安装目录：
+{INSTALL_ROOT}
+
+安装包已经自动把插件写入 DeepSeek Harness。
+一般不需要再执行 dsh plugin add，也不需要安装 pnpm。
+
+自己启动 DeepSeek Harness：
+  dsh web
+  或 npx @deepseek-ai/dsh web
+
+若自动写入失败，再手动安装插件（路径已按本次安装目录填好）：
+
+已全局安装 dsh：
+  dsh plugin --profile web add file:{PLUGIN_PATH}
+
+只用 npx：
+  npx @deepseek-ai/dsh plugin --profile web add file:{PLUGIN_PATH}
+
+dsh plugin add 需要本机有 pnpm。安装包自动写入不需要 pnpm。
+若安装时改过目录，请使用上面的实际路径，不要照抄 %LOCALAPPDATA%\Programs\beautiCode。

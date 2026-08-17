@@ -5,8 +5,13 @@ import path from "node:path";
 
 export const CONTROL_SCHEMA = "beauticode.dsh-control/v1";
 export const CONTROL_FILE = "dsh-control.json";
+export const SESSION_HOST_SCHEMA = "beauticode.session-host/v1";
+export const SESSION_HOST_FILE = "session-host.json";
+export const TRAY_CLAIM_SCHEMA = "beauticode.tray-claim/v1";
+export const TRAY_CLAIM_FILE = "tray-claim.json";
 export const TRAY_MISSING_MESSAGE =
   "未找到正在运行的 beautiCode 托盘。请先启动 beautiCode，再导入背景。";
+export const TRAY_STARTING_MESSAGE = "beautiCode 托盘正在启动，请稍后再试。";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".avif"]);
 const TOKEN_MIN_LENGTH = 24;
@@ -24,6 +29,37 @@ export function defaultBeauticodeDataRoot() {
 
 export function controlFilePath(dataRoot) {
   return path.join(path.resolve(dataRoot), CONTROL_FILE);
+}
+
+export function sessionHostFilePath(dataRoot) {
+  return path.join(path.resolve(dataRoot), SESSION_HOST_FILE);
+}
+
+export function trayClaimFilePath(dataRoot) {
+  return path.join(path.resolve(dataRoot), TRAY_CLAIM_FILE);
+}
+
+async function writeAtomicJson(dataRoot, fileName, payload) {
+  await fs.mkdir(dataRoot, { recursive: true });
+  const file = path.join(dataRoot, fileName);
+  const tmp = path.join(
+    dataRoot,
+    `.${fileName}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`,
+  );
+  const handle = await fs.open(tmp, "w", 0o600);
+  try {
+    await handle.writeFile(`${JSON.stringify(payload)}\n`, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await fs.unlink(file);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code !== "ENOENT") throw error;
+  }
+  await fs.rename(tmp, file);
+  return file;
 }
 
 export function isLoopbackControlUrl(value) {
@@ -153,33 +189,50 @@ export async function writeDshControlFile(opts) {
   if (!Number.isInteger(pid) || pid <= 0) {
     throw new Error("DSH control pid is invalid.");
   }
-  await fs.mkdir(dataRoot, { recursive: true });
-  const file = controlFilePath(dataRoot);
-  const payload = `${JSON.stringify({
+  return writeAtomicJson(dataRoot, CONTROL_FILE, {
     schema: CONTROL_SCHEMA,
     host: "dsh",
     pid,
     url: new URL(url).origin,
     token,
-  })}\n`;
-  const tmp = path.join(
-    dataRoot,
-    `.${CONTROL_FILE}.${pid}.${crypto.randomBytes(8).toString("hex")}.tmp`,
-  );
-  const handle = await fs.open(tmp, "w", 0o600);
-  try {
-    await handle.writeFile(payload, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
+  });
+}
+
+export async function writeSessionHostFile(opts) {
+  const dataRoot = path.resolve(opts.dataRoot);
+  const url = opts.url;
+  const token = opts.token;
+  const pid = opts.pid ?? process.pid;
+  const host = opts.host === "codex" ? "codex" : "dsh";
+  if (!isLoopbackControlUrl(url)) {
+    throw new Error("session-host URL must be loopback HTTP.");
   }
-  try {
-    await fs.unlink(file);
-  } catch (error) {
-    if (error && typeof error === "object" && error.code !== "ENOENT") throw error;
+  if (typeof token !== "string" || token.length < TOKEN_MIN_LENGTH) {
+    throw new Error("session-host token is too short.");
   }
-  await fs.rename(tmp, file);
-  return file;
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error("session-host pid is invalid.");
+  }
+  return writeAtomicJson(dataRoot, SESSION_HOST_FILE, {
+    schema: SESSION_HOST_SCHEMA,
+    host,
+    pid,
+    url: new URL(url).origin,
+    token,
+  });
+}
+
+export async function writeTrayClaim(opts) {
+  const dataRoot = path.resolve(opts.dataRoot);
+  const pid = opts.pid ?? process.pid;
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error("tray claim pid is invalid.");
+  }
+  return writeAtomicJson(dataRoot, TRAY_CLAIM_FILE, {
+    schema: TRAY_CLAIM_SCHEMA,
+    pid,
+    startedAt: new Date().toISOString(),
+  });
 }
 
 export async function removeDshControlFile(opts) {
@@ -232,6 +285,104 @@ export async function readDshControlFile(dataRoot, opts = {}) {
     url: new URL(parsed.url).origin,
     token: parsed.token,
   };
+}
+
+export async function removeSessionHostFile(opts) {
+  const dataRoot = path.resolve(opts.dataRoot);
+  const pid = opts.pid ?? process.pid;
+  const file = sessionHostFilePath(dataRoot);
+  try {
+    const current = await readSessionHostFile(dataRoot, { allowDead: true });
+    if (!current || current.pid !== pid) return false;
+    await fs.unlink(file);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+export async function readSessionHostFile(dataRoot, opts = {}) {
+  const file = sessionHostFilePath(dataRoot);
+  let raw;
+  try {
+    raw = await fs.readFile(file, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return null;
+    throw error;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (
+    !parsed ||
+    parsed.schema !== SESSION_HOST_SCHEMA ||
+    (parsed.host !== "dsh" && parsed.host !== "codex") ||
+    typeof parsed.token !== "string" ||
+    parsed.token.length < TOKEN_MIN_LENGTH ||
+    !isLoopbackControlUrl(parsed.url) ||
+    !Number.isInteger(parsed.pid) ||
+    parsed.pid <= 0
+  ) {
+    return null;
+  }
+  if (!opts.allowDead && !isPidAlive(parsed.pid)) return null;
+  return {
+    schema: SESSION_HOST_SCHEMA,
+    host: parsed.host,
+    pid: parsed.pid,
+    url: new URL(parsed.url).origin,
+    token: parsed.token,
+  };
+}
+
+export async function readTrayClaim(dataRoot, opts = {}) {
+  const file = trayClaimFilePath(dataRoot);
+  let raw;
+  try {
+    raw = await fs.readFile(file, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return null;
+    throw error;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (
+    !parsed ||
+    parsed.schema !== TRAY_CLAIM_SCHEMA ||
+    !Number.isInteger(parsed.pid) ||
+    parsed.pid <= 0
+  ) {
+    return null;
+  }
+  if (!opts.allowDead && !isPidAlive(parsed.pid)) return null;
+  return {
+    schema: TRAY_CLAIM_SCHEMA,
+    pid: parsed.pid,
+    startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : null,
+  };
+}
+
+export async function removeTrayClaim(opts) {
+  const dataRoot = path.resolve(opts.dataRoot);
+  const pid = opts.pid ?? process.pid;
+  const file = trayClaimFilePath(dataRoot);
+  try {
+    const current = await readTrayClaim(dataRoot, { allowDead: true });
+    if (!current || current.pid !== pid) return false;
+    await fs.unlink(file);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 function mergeSignals(userSignal, timeoutMs) {

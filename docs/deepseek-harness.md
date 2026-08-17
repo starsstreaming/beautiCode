@@ -17,17 +17,23 @@ beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`@beauticode/
 
 ## 安装插件
 
-Windows 安装包会在安装结束时（以及选择 DeepSeek Harness 时）自动写入你的 DSH profile。没有 DSH 也不影响安装；第一次运行 `dsh web` 会走 home 层补丁。也可手动：
+Windows 安装包会在安装结束时（以及选择 DeepSeek Harness 时）自动写入你的 DSH profile，**不需要 pnpm，也不需要再跑 `dsh plugin add`**。没有 DSH 也不影响安装；第一次运行 `dsh web` 会走 home 层补丁。
+
+若改过安装目录，看安装文件夹里的 `集成说明.txt`，不要照抄默认路径。
+
+也可手动（`dsh plugin add` 需要本机有 pnpm）：
 
 ```sh
 # 源码目录
 dsh plugin --profile web add file:<beautiCode 路径>/integrations/deepseek-harness
+npx @deepseek-ai/dsh plugin --profile web add file:<beautiCode 路径>/integrations/deepseek-harness
 
-# Windows 安装包
+# Windows 安装包（默认目录；自定义安装时请替换路径）
 dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
+npx @deepseek-ai/dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
 ```
 
-包尚未发布到 npm，请按路径安装。
+包尚未发布到 npm，请按路径安装。未把 `dsh` 装到 PATH 时，用上面的 `npx @deepseek-ai/dsh` 写法。
 
 ## 启用插件
 

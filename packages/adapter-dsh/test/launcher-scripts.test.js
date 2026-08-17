@@ -55,6 +55,90 @@ test("DSH runtime launcher and installer are gone", () => {
   );
 });
 
+test("tray lifecycle owns leftover session-host and second-click show-panel", () => {
+  const tray = fs.readFileSync(
+    path.join(repoRoot, "apps/tray/start-tray.ps1"),
+    "utf8",
+  );
+  const host = fs.readFileSync(
+    path.join(repoRoot, "apps/tray/session-host.mjs"),
+    "utf8",
+  );
+  assert.match(tray, /BeautiCodeJob/);
+  assert.match(tray, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(tray, /Stop-BcSessionHost/);
+  assert.match(tray, /Write-BcTrayClaim/);
+  assert.match(tray, /Use-BcAdoptedControl/);
+  assert.match(tray, /existing tray signaled to show panel/);
+  assert.match(tray, /--parent-pid/);
+  assert.doesNotMatch(tray, /\$pid\s*=/);
+  assert.match(host, /--parent-pid/);
+  assert.match(host, /writeSessionHostFile/);
+});
+
+test("README documents installer auto-wiring, npx, and custom install paths", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+  assert.match(readme, /不需要安装 pnpm|也不需要安装 pnpm/);
+  assert.match(readme, /npx @deepseek-ai\/dsh web/);
+  assert.match(readme, /npx @deepseek-ai\/dsh plugin/);
+  assert.match(readme, /集成说明\.txt/);
+  assert.match(readme, /一般不需要再执行 `dsh plugin add`/);
+});
+
+test("install-dsh-plugin writes an integration note for the actual install root", () => {
+  const script = path.join(repoRoot, "scripts/install-dsh-plugin.ps1");
+  const pluginRoot = path.join(repoRoot, "integrations/deepseek-harness");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-home-"));
+  const installRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bc-install-"));
+  try {
+    const add = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        script,
+        "-PluginRoot",
+        pluginRoot,
+        "-DshHome",
+        home,
+        "-InstallRoot",
+        installRoot,
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+    assert.equal(add.status, 0, add.stderr || add.stdout);
+    const note = fs.readFileSync(path.join(installRoot, "集成说明.txt"), "utf8");
+    assert.match(note, /不需要安装 pnpm/);
+    assert.match(note, /npx @deepseek-ai\/dsh web/);
+    assert.match(note, new RegExp(installRoot.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")));
+    const remove = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        script,
+        "-PluginRoot",
+        pluginRoot,
+        "-DshHome",
+        home,
+        "-InstallRoot",
+        installRoot,
+        "-Remove",
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+    assert.equal(remove.status, 0, remove.stderr || remove.stdout);
+    assert.equal(fs.existsSync(path.join(installRoot, "集成说明.txt")), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(installRoot, { recursive: true, force: true });
+  }
+});
+
 test("picker and tray never spawn a DSH process", () => {
   const picker = fs.readFileSync(
     path.join(repoRoot, "scripts/start-beauticode.ps1"),
@@ -79,6 +163,7 @@ test("picker and tray never spawn a DSH process", () => {
   assert.match(installer, /agent\.mjs/);
   assert.match(installer, /control-client\.mjs/);
   assert.match(installer, /host-apply\.mjs/);
+  assert.match(installer, /integration-note\.zh\.txt/);
 });
 
 test("picker DryRun routes DSH to the tray and Codex to its launcher", () => {

@@ -6,11 +6,13 @@
 
 beautiCode **不启动** DeepSeek Harness。请先自己运行 `dsh web`，再打开 beautiCode 选择 DeepSeek Harness。
 
-安装包和托盘会把插件写入你的 DSH profile。源码环境也可以手动：
+安装包和托盘会把插件写入你的 DSH profile，不需要 pnpm。源码环境也可以手动（`dsh plugin add` 需要 pnpm）：
 
 ```sh
 dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
-dsh web
+# 或
+npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
+npx @deepseek-ai/dsh web
 ```
 
 手动接入时：

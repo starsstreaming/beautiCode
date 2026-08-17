@@ -17,8 +17,11 @@ yourself. Codex Desktop is optional and remains a separate prerequisite if you
 choose that host; the tray still launches Codex as before.
 
 The installer creates a Start menu shortcut. Desktop and login-start shortcuts
-are optional installer tasks. Uninstall removes program files and shortcuts but
-preserves `%LOCALAPPDATA%\beautiCode`, which contains user media and themes.
+are optional installer tasks. After install it writes `集成说明.txt` into `{app}`
+with the actual plugin path, `dsh` / `npx` commands, and a note that pnpm is
+not required for the automatic wiring. Uninstall removes program files and
+shortcuts but preserves `%LOCALAPPDATA%\beautiCode`, which contains user media
+and themes.
 Quit the beautiCode tray before an upgrade or uninstall so the bundled runtime
 is not in use.
 

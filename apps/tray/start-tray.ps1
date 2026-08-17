@@ -35,6 +35,19 @@ trap {
   $message = if ($_.Exception) { $_.Exception.Message } else { [string]$_ }
   Write-BcTrayLog ("tray failed: {0}" -f $message)
   try {
+    if (Get-Command Stop-BcSessionHost -ErrorAction SilentlyContinue) {
+      Stop-BcSessionHost
+    }
+  } catch { }
+  try {
+    if (Get-Command Remove-BcTrayClaim -ErrorAction SilentlyContinue) {
+      Remove-BcTrayClaim
+    }
+  } catch { }
+  try {
+    if ("BeautiCodeJob" -as [type]) { [BeautiCodeJob]::Close() }
+  } catch { }
+  try {
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
     [System.Windows.Forms.MessageBox]::Show(
       ("beautiCode 托盘启动失败：`n{0}`n`n日志：{1}" -f $message, $script:TrayLogPath),
@@ -46,6 +59,14 @@ trap {
   exit 1
 }
 Write-BcTrayLog "tray starting"
+
+$script:resolvedDataRoot = $null
+$script:sessionHostProc = $null
+$script:sessionHostAdopted = $false
+$script:trayClaimWritten = $false
+$script:Token = $null
+$script:BaseUrl = $null
+$script:controlPort = 0
 
 $script:trayInstanceMutex = $null
 $script:trayInstanceMutexOwned = $false
@@ -62,6 +83,21 @@ $script:trayInstanceMutex = [System.Threading.Mutex]::new(
 )
 if (-not $createdNew) {
   $script:trayInstanceMutex.Dispose()
+  $panelDeadline = [datetime]::UtcNow.AddSeconds(3)
+  while ([datetime]::UtcNow -lt $panelDeadline) {
+    try {
+      $existingPanel = [System.Threading.EventWaitHandle]::OpenExisting(
+        "Local\beautiCode.Engine.ShowPanel.v1"
+      )
+      [void]$existingPanel.Set()
+      $existingPanel.Dispose()
+      Write-BcTrayLog "existing tray signaled to show panel"
+      exit 0
+    } catch [System.Threading.WaitHandleCannotBeOpenedException] {
+      Start-Sleep -Milliseconds 80
+    }
+  }
+  Write-BcTrayLog "existing tray mutex held but show-panel event missing"
   exit 0
 }
 $script:trayInstanceMutexOwned = $true
@@ -127,6 +163,116 @@ public static class BeautiCodeDpiNative {
 '@
 Add-Type -TypeDefinition $dpiNativeCode -ErrorAction Stop
 [void][BeautiCodeDpiNative]::Enable()
+
+$jobNativeCode = @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class BeautiCodeJob {
+  private static IntPtr handle = IntPtr.Zero;
+  private const int JobObjectExtendedLimitInformation = 9;
+  private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+  private const uint PROCESS_TERMINATE = 0x0001;
+  private const uint PROCESS_SET_QUOTA = 0x0100;
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool SetInformationJobObject(
+    IntPtr job,
+    int infoClass,
+    IntPtr info,
+    uint infoLength
+  );
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool CloseHandle(IntPtr value);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+    public long PerProcessUserTimeLimit;
+    public long PerJobUserTimeLimit;
+    public uint LimitFlags;
+    public UIntPtr MinimumWorkingSetSize;
+    public UIntPtr MaximumWorkingSetSize;
+    public uint ActiveProcessLimit;
+    public UIntPtr Affinity;
+    public uint PriorityClass;
+    public uint SchedulingClass;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct IO_COUNTERS {
+    public ulong ReadOperationCount;
+    public ulong WriteOperationCount;
+    public ulong OtherOperationCount;
+    public ulong ReadTransferCount;
+    public ulong WriteTransferCount;
+    public ulong OtherTransferCount;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+    public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+    public IO_COUNTERS IoInfo;
+    public UIntPtr ProcessMemoryLimit;
+    public UIntPtr JobMemoryLimit;
+    public UIntPtr PeakProcessMemoryUsed;
+    public UIntPtr PeakJobMemoryUsed;
+  }
+
+  public static bool Create() {
+    if (handle != IntPtr.Zero) return true;
+    handle = CreateJobObject(IntPtr.Zero, null);
+    if (handle == IntPtr.Zero) return false;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+    IntPtr buffer = Marshal.AllocHGlobal(length);
+    try {
+      Marshal.StructureToPtr(info, buffer, false);
+      if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, buffer, (uint)length)) {
+        CloseHandle(handle);
+        handle = IntPtr.Zero;
+        return false;
+      }
+      return true;
+    } finally {
+      Marshal.FreeHGlobal(buffer);
+    }
+  }
+
+  public static bool Assign(int processId) {
+    if (handle == IntPtr.Zero || processId <= 0) return false;
+    IntPtr process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, processId);
+    if (process == IntPtr.Zero) return false;
+    try {
+      return AssignProcessToJobObject(handle, process);
+    } finally {
+      CloseHandle(process);
+    }
+  }
+
+  public static void Close() {
+    if (handle == IntPtr.Zero) return;
+    CloseHandle(handle);
+    handle = IntPtr.Zero;
+  }
+}
+'@
+if (-not ("BeautiCodeJob" -as [type])) {
+  Add-Type -TypeDefinition $jobNativeCode -ErrorAction Stop
+}
+if (-not [BeautiCodeJob]::Create()) {
+  Write-BcTrayLog "job object create failed; parent-pid watch remains as fallback"
+}
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -347,119 +493,360 @@ if ($script:targetHost -eq "dsh") {
   }
 }
 
-# Cryptographically strong token for the local control plane.
-$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-try {
-  $TokenBytes = New-Object byte[] 32
-  $rng.GetBytes($TokenBytes)
-} finally {
-  $rng.Dispose()
-}
-$Token = -join ($TokenBytes | ForEach-Object { $_.ToString("x2") })
-
 function ConvertTo-PsLiteral([string]$Value) {
   return "'" + ($Value -replace "'", "''") + "'"
 }
 
-$nodeInvocationParts = @(
-  (ConvertTo-PsLiteral $Node),
-  (ConvertTo-PsLiteral $HostScript),
-  "--host",
-  $TargetHost
-)
-if ($TargetHost -eq "dsh") {
-  $nodeInvocationParts += @("--dsh-url", (ConvertTo-PsLiteral $DshUrl))
-}
-if ($Port -gt 0) {
-  $nodeInvocationParts += @("--port", "$Port")
-}
-if ($DataRoot) {
-  $nodeInvocationParts += @("--data-root", (ConvertTo-PsLiteral $DataRoot))
+function Get-BcTrayDataRoot {
+  if ($script:resolvedDataRoot) { return $script:resolvedDataRoot }
+  $root = $null
+  if ($DataRoot) { $root = $DataRoot }
+  elseif ($env:BEAUTICODE_DATA_ROOT) { $root = $env:BEAUTICODE_DATA_ROOT }
+  elseif ($env:LOCALAPPDATA) { $root = Join-Path $env:LOCALAPPDATA "beautiCode" }
+  else { $root = Join-Path $env:USERPROFILE ".beauticode" }
+  $script:resolvedDataRoot = [IO.Path]::GetFullPath($root)
+  return $script:resolvedDataRoot
 }
 
-# Windows PowerShell 5.1 can throw while reading ProcessStartInfo.EnvironmentVariables
-# when the inherited process has both Path and PATH. Start a tiny PowerShell bridge,
-# pass the token through stdin, and let that bridge set the child-only environment.
-$nodeInvocation = [string]::Join(" ", $nodeInvocationParts)
-$bridgeScript = @"
+function Read-BcJsonFile([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+  try {
+    return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json)
+  } catch {
+    return $null
+  }
+}
+
+function Test-BcPidAlive([int]$ProcId) {
+  if ($ProcId -le 0) { return $false }
+  try {
+    Get-Process -Id $ProcId -ErrorAction Stop | Out-Null
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Test-BcSessionHostPid([int]$ProcId) {
+  if ($ProcId -le 0) { return $false }
+  try {
+    $info = Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f $ProcId) -ErrorAction Stop
+    return ($info.CommandLine -and ($info.CommandLine -match 'session-host\.mjs'))
+  } catch {
+    return $false
+  }
+}
+
+function Get-BcInjectorLockPid {
+  $lockFile = Join-Path (Get-BcTrayDataRoot) "injector.lock"
+  $json = Read-BcJsonFile $lockFile
+  if (-not $json) { return 0 }
+  try { return [int]$json.pid } catch { return 0 }
+}
+
+function Get-BcExistingControl {
+  $root = Get-BcTrayDataRoot
+  foreach ($name in @("session-host.json", "dsh-control.json")) {
+    $json = Read-BcJsonFile (Join-Path $root $name)
+    if (-not $json) { continue }
+    if (-not $json.url -or -not $json.token) { continue }
+    $ownerPid = 0
+    try { $ownerPid = [int]$json.pid } catch { continue }
+    if (-not (Test-BcPidAlive $ownerPid)) { continue }
+    return $json
+  }
+  return $null
+}
+
+function Test-BcControlHealth([string]$Url, [string]$ControlToken) {
+  if (-not $Url -or -not $ControlToken) { return $false }
+  try {
+    $headers = @{ Authorization = ("Bearer {0}" -f $ControlToken) }
+    $response = Invoke-RestMethod -Uri ("{0}/health" -f $Url.TrimEnd("/")) -Headers $headers -TimeoutSec 2
+    return ($response.ok -eq $true)
+  } catch {
+    return $false
+  }
+}
+
+function Use-BcAdoptedControl($Control) {
+  $origin = [string]$Control.url
+  try {
+    $uri = [Uri]$Control.url
+    $origin = $uri.GetLeftPart([System.UriPartial]::Authority)
+    $script:controlPort = [int]$uri.Port
+  } catch {
+    $script:controlPort = 0
+  }
+  $script:sessionHostAdopted = $true
+  $script:Token = [string]$Control.token
+  $script:BaseUrl = $origin.TrimEnd("/")
+  $script:cdpPort = 0
+  $ownerPid = 0
+  try { $ownerPid = [int]$Control.pid } catch { $ownerPid = 0 }
+  if ($ownerPid -gt 0) {
+    if (-not [BeautiCodeJob]::Assign($ownerPid)) {
+      Write-BcTrayLog ("adopted session-host job assign failed pid={0}" -f $ownerPid)
+    }
+  }
+  Write-BcTrayLog ("adopted existing session-host url={0} pid={1}" -f $script:BaseUrl, $ownerPid)
+}
+
+function Stop-BcLeftoverEngine([int]$ProcId) {
+  if ($ProcId -le 0) { return }
+  if (-not (Test-BcSessionHostPid $ProcId)) { return }
+  Write-BcTrayLog ("stopping leftover session-host pid={0}" -f $ProcId)
+  try { Stop-Process -Id $ProcId -Force -ErrorAction Stop } catch { }
+  $deadline = [datetime]::UtcNow.AddSeconds(3)
+  while ([datetime]::UtcNow -lt $deadline) {
+    if (-not (Test-BcPidAlive $ProcId)) { return }
+    Start-Sleep -Milliseconds 80
+  }
+}
+
+function Write-BcTrayClaim {
+  $root = Get-BcTrayDataRoot
+  if (-not (Test-Path -LiteralPath $root)) {
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+  }
+  $payload = @{
+    schema = "beauticode.tray-claim/v1"
+    pid = [int]$PID
+    startedAt = [datetime]::UtcNow.ToString("o")
+  } | ConvertTo-Json -Compress
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  [IO.File]::WriteAllText((Join-Path $root "tray-claim.json"), ($payload + "`n"), $utf8)
+  $script:trayClaimWritten = $true
+}
+
+function Remove-BcTrayClaim {
+  $root = $script:resolvedDataRoot
+  if (-not $root) { return }
+  $file = Join-Path $root "tray-claim.json"
+  try {
+    if (Test-Path -LiteralPath $file -PathType Leaf) {
+      $json = Read-BcJsonFile $file
+      if (-not $json -or [int]$json.pid -eq [int]$PID) {
+        Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+      }
+    }
+  } catch { }
+  $script:trayClaimWritten = $false
+}
+
+function Stop-BcSessionHost {
+  if ($script:BaseUrl -and $script:Token) {
+    try {
+      $headers = @{ Authorization = ("Bearer {0}" -f $script:Token) }
+      $utf8 = New-Object System.Text.UTF8Encoding $false
+      $bytes = $utf8.GetBytes("{}")
+      Invoke-RestMethod -Uri ("{0}/shutdown" -f $script:BaseUrl.TrimEnd("/")) `
+        -Method Post -Headers $headers -ContentType "application/json; charset=utf-8" `
+        -Body $bytes -TimeoutSec 2 | Out-Null
+    } catch { }
+    Start-Sleep -Milliseconds 250
+  }
+  if ($null -ne $script:sessionHostProc) {
+    try {
+      if (-not $script:sessionHostProc.HasExited) { $script:sessionHostProc.Kill() }
+    } catch { }
+  }
+}
+
+function Test-BcCanAdopt($Control) {
+  if (-not $Control) { return $false }
+  $controlHost = [string]$Control.host
+  if ($controlHost -and $controlHost -ne $TargetHost) { return $false }
+  return (Test-BcControlHealth -Url ([string]$Control.url) -ControlToken ([string]$Control.token))
+}
+
+function Resolve-BcSessionHost {
+  Write-BcTrayClaim
+  $deadline = [datetime]::UtcNow.AddSeconds(15)
+  while ([datetime]::UtcNow -lt $deadline) {
+    $existing = Get-BcExistingControl
+    if (Test-BcCanAdopt $existing) {
+      Use-BcAdoptedControl $existing
+      return
+    }
+    if ($existing -and $existing.host -and ([string]$existing.host -ne $TargetHost)) {
+      try { Stop-BcLeftoverEngine ([int]$existing.pid) } catch { }
+    }
+    $lockPid = Get-BcInjectorLockPid
+    if ($lockPid -gt 0 -and (Test-BcSessionHostPid $lockPid)) {
+      $lockControl = Get-BcExistingControl
+      if (-not (Test-BcCanAdopt $lockControl)) {
+        Stop-BcLeftoverEngine $lockPid
+      }
+    }
+    if ($lockPid -le 0 -or -not (Test-BcPidAlive $lockPid)) { break }
+    Start-Sleep -Milliseconds 200
+  }
+}
+
+function New-BcControlToken {
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $tokenBytes = New-Object byte[] 32
+    $rng.GetBytes($tokenBytes)
+  } finally {
+    $rng.Dispose()
+  }
+  return -join ($tokenBytes | ForEach-Object { $_.ToString("x2") })
+}
+
+function Start-BcSessionHostProcess([string]$ControlToken) {
+  $resolvedRoot = Get-BcTrayDataRoot
+  $nodeInvocationParts = @(
+    (ConvertTo-PsLiteral $Node),
+    (ConvertTo-PsLiteral $HostScript),
+    "--host",
+    $TargetHost,
+    "--parent-pid",
+    "$PID",
+    "--data-root",
+    (ConvertTo-PsLiteral $resolvedRoot)
+  )
+  if ($TargetHost -eq "dsh") {
+    $nodeInvocationParts += @("--dsh-url", (ConvertTo-PsLiteral $DshUrl))
+  }
+  if ($Port -gt 0) {
+    $nodeInvocationParts += @("--port", "$Port")
+  }
+
+  # Windows PowerShell 5.1 can throw while reading ProcessStartInfo.EnvironmentVariables
+  # when the inherited process has both Path and PATH. Start a tiny PowerShell bridge,
+  # pass the token through stdin, and let that bridge set the child-only environment.
+  $nodeInvocation = [string]::Join(" ", $nodeInvocationParts)
+  $bridgeScript = @"
 `$token = [Console]::In.ReadToEnd()
 if ([string]::IsNullOrWhiteSpace(`$token)) { throw "缺少 beautiCode 控制令牌。" }
 `$env:BEAUTICODE_CONTROL_TOKEN = `$token.Trim()
 & $nodeInvocation
 exit `$LASTEXITCODE
 "@
-$bridgeBytes = [System.Text.Encoding]::Unicode.GetBytes($bridgeScript)
-$bridgeCommand = [Convert]::ToBase64String($bridgeBytes)
-$powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+  $bridgeBytes = [System.Text.Encoding]::Unicode.GetBytes($bridgeScript)
+  $bridgeCommand = [Convert]::ToBase64String($bridgeBytes)
+  $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $powershell
-$psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $bridgeCommand"
-$psi.WorkingDirectory = $RepoRoot
-$psi.UseShellExecute = $false
-$psi.RedirectStandardInput = $true
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
-$psi.CreateNoWindow = $true
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $powershell
+  $psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $bridgeCommand"
+  $psi.WorkingDirectory = $RepoRoot
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardInput = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.CreateNoWindow = $true
 
-$proc = New-Object System.Diagnostics.Process
-$proc.StartInfo = $psi
-
-$stdoutSync = [hashtable]::Synchronized(@{ Lines = New-Object System.Collections.ArrayList })
-$stderrSync = [hashtable]::Synchronized(@{ Lines = New-Object System.Collections.ArrayList })
-
-$outEvent = Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -MessageData $stdoutSync -Action {
-  $line = $EventArgs.Data
-  if (-not [string]::IsNullOrEmpty($line)) {
-    [void]$Event.MessageData.Lines.Add($line)
-  }
-}
-$errEvent = Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -MessageData $stderrSync -Action {
-  $line = $EventArgs.Data
-  if (-not [string]::IsNullOrEmpty($line)) {
-    [void]$Event.MessageData.Lines.Add($line)
-  }
-}
-
-[void]$proc.Start()
-$proc.BeginOutputReadLine()
-$proc.BeginErrorReadLine()
-$proc.StandardInput.WriteLine($Token)
-$proc.StandardInput.Close()
-
-$ready = $null
-$deadline = [datetime]::UtcNow.AddSeconds(20)
-while ([datetime]::UtcNow -lt $deadline) {
-  if ($proc.HasExited) {
-    $errDump = [string]::Join([Environment]::NewLine, @($stderrSync.Lines))
-    $msg = "session-host exited early ({0}).{1}{2}" -f $proc.ExitCode, [Environment]::NewLine, $errDump
-    throw $msg
-  }
-  foreach ($line in @($stdoutSync.Lines)) {
-    if (($line -match '^\s*\{') -and ($line -match '"ready"')) {
-      try {
-        $ready = $line | ConvertFrom-Json
-        break
-      } catch {
-        # keep waiting
-      }
+  $child = New-Object System.Diagnostics.Process
+  $child.StartInfo = $psi
+  $stdoutSync = [hashtable]::Synchronized(@{ Lines = New-Object System.Collections.ArrayList })
+  $stderrSync = [hashtable]::Synchronized(@{ Lines = New-Object System.Collections.ArrayList })
+  $outEvent = Register-ObjectEvent -InputObject $child -EventName OutputDataReceived -MessageData $stdoutSync -Action {
+    $line = $EventArgs.Data
+    if (-not [string]::IsNullOrEmpty($line)) {
+      [void]$Event.MessageData.Lines.Add($line)
     }
   }
-  if ($ready -and $ready.ready) { break }
-  Start-Sleep -Milliseconds 40
+  $errEvent = Register-ObjectEvent -InputObject $child -EventName ErrorDataReceived -MessageData $stderrSync -Action {
+    $line = $EventArgs.Data
+    if (-not [string]::IsNullOrEmpty($line)) {
+      [void]$Event.MessageData.Lines.Add($line)
+    }
+  }
+
+  [void]$child.Start()
+  $script:sessionHostProc = $child
+  if (-not [BeautiCodeJob]::Assign($child.Id)) {
+    Write-BcTrayLog ("job assign failed pid={0}" -f $child.Id)
+  }
+  $child.BeginOutputReadLine()
+  $child.BeginErrorReadLine()
+  $child.StandardInput.WriteLine($ControlToken)
+  $child.StandardInput.Close()
+
+  $ready = $null
+  $waitUntil = [datetime]::UtcNow.AddSeconds(20)
+  while ([datetime]::UtcNow -lt $waitUntil) {
+    if ($child.HasExited) {
+      $errDump = [string]::Join([Environment]::NewLine, @($stderrSync.Lines))
+      throw ("session-host exited early ({0}).{1}{2}" -f $child.ExitCode, [Environment]::NewLine, $errDump)
+    }
+    foreach ($line in @($stdoutSync.Lines)) {
+      if (($line -match '^\s*\{') -and ($line -match '"ready"')) {
+        try {
+          $ready = $line | ConvertFrom-Json
+          break
+        } catch { }
+      }
+    }
+    if ($ready -and $ready.ready) { break }
+    Start-Sleep -Milliseconds 40
+  }
+
+  if (-not $ready -or -not $ready.ready) {
+    try { if (-not $child.HasExited) { $child.Kill() } } catch { }
+    throw "等待 session-host 就绪超时。"
+  }
+  return @{
+    Ready = $ready
+    Process = $child
+    OutEvent = $outEvent
+    ErrEvent = $errEvent
+  }
 }
 
-if (-not $ready -or -not $ready.ready) {
-  try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
-  throw "等待 session-host 就绪超时。"
+Resolve-BcSessionHost
+
+$proc = $null
+$outEvent = $null
+$errEvent = $null
+$ready = $null
+
+if (-not $script:sessionHostAdopted) {
+  $Token = New-BcControlToken
+  $script:Token = $Token
+  $started = $null
+  try {
+    $started = Start-BcSessionHostProcess -ControlToken $Token
+  } catch {
+    $firstError = $_
+    Write-BcTrayLog ("session-host start failed: {0}" -f $firstError.Exception.Message)
+    $existing = Get-BcExistingControl
+    if (Test-BcCanAdopt $existing) {
+      Use-BcAdoptedControl $existing
+    } else {
+      Stop-BcLeftoverEngine (Get-BcInjectorLockPid)
+      $started = Start-BcSessionHostProcess -ControlToken $Token
+    }
+  }
+  if (-not $script:sessionHostAdopted) {
+    $ready = $started.Ready
+    $proc = $started.Process
+    $outEvent = $started.OutEvent
+    $errEvent = $started.ErrEvent
+    $script:sessionHostProc = $proc
+  }
 }
 
-$controlPort = [int]$ready.controlPort
-$cdpPort = if ($null -ne $ready.cdpPort) { [int]$ready.cdpPort } else { 0 }
-$script:cdpPort = $cdpPort
-$BaseUrl = "http://127.0.0.1:$controlPort"
+if ($script:sessionHostAdopted) {
+  $Token = $script:Token
+  $BaseUrl = $script:BaseUrl
+  $controlPort = [int]$script:controlPort
+  $cdpPort = 0
+  $script:cdpPort = 0
+} else {
+  $controlPort = [int]$ready.controlPort
+  $cdpPort = if ($null -ne $ready.cdpPort) { [int]$ready.cdpPort } else { 0 }
+  $script:cdpPort = $cdpPort
+  $BaseUrl = "http://127.0.0.1:$controlPort"
+  $script:BaseUrl = $BaseUrl
+  $script:Token = $Token
+  $script:controlPort = $controlPort
+}
 Write-Host ("Tray control plane {0} (host: {1})" -f $BaseUrl, $TargetHost)
-Write-BcTrayLog ("session-host ready host={0} controlPort={1} cdpPort={2}" -f $TargetHost, $controlPort, $cdpPort)
+Write-BcTrayLog ("session-host ready host={0} controlPort={1} cdpPort={2} adopted={3}" -f $TargetHost, $controlPort, $cdpPort, [bool]$script:sessionHostAdopted)
 
 function Invoke-BcApi {
   param(
@@ -1008,8 +1395,8 @@ $L = @{
   RestartConfirm = (U "0043 0068 0061 0074 0047 0050 0054 002F 0043 006F 0064 0065 0078 0020 6B63 5728 8FD0 884C 3002 91CD 542F 53EF 80FD 4E22 5931 672A 4FDD 5B58 5185 5BB9 3002 662F 5426 7EE7 7EED FF1F")
   ForceCloseConfirm = (U "5E94 7528 672A 5728 0020 0035 0020 79D2 5185 9000 51FA 3002 662F 5426 5F3A 5236 7ED3 675F 5269 4F59 8FDB 7A0B FF1F")
   RestartCancelled = (U "5DF2 53D6 6D88 91CD 542F 3002")
-  RunningTip     = (U "6258 76D8 5DF2 542F 52A8 3002 0043 0074 0072 006C 002B 0053 0068 0069 0066 0074 002B 0053 0070 0061 0063 0065 0020 6478 9C7C 3002") # 托盘已启动。Ctrl+Shift+Space 摸鱼。
-  RunningTipDsh  = (U "6258 76D8 5DF2 542F 52A8 3002 8BF7 5148 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 3002") # 托盘已启动。请先打开 DeepSeek Harness 网页。
+  RunningTip     = (U "6258 76D8 5DF2 542F 52A8 3002 56FE 6807 5728 53F3 4E0B 89D2 FF0C 0057 0069 006E 0031 0031 0020 53EF 80FD 5728 0020 005E 0020 91CC 3002 0043 0074 0072 006C 002B 0053 0068 0069 0066 0074 002B 0053 0070 0061 0063 0065 0020 6478 9C7C 3002") # 托盘已启动。图标在右下角，Win11 可能在 ^ 里。Ctrl+Shift+Space 摸鱼。
+  RunningTipDsh  = (U "6258 76D8 5DF2 542F 52A8 3002 56FE 6807 5728 53F3 4E0B 89D2 FF08 0057 0069 006E 0031 0031 0020 53EF 80FD 5728 0020 005E 0020 91CC FF09 3002 8BF7 5148 6253 5F00 0020 0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7F51 9875 3002") # 托盘已启动。图标在右下角（Win11 可能在 ^ 里）。请先打开 DeepSeek Harness 网页。
   HostCodex      = "Codex Desktop"
   HostDsh        = "DeepSeek Harness"
   DshPhaseOne    = (U "0044 0065 0065 0070 0053 0065 0065 006B 0020 0048 0061 0072 006E 0065 0073 0073 0020 7B2C 4E00 9636 6BB5 4EC5 652F 6301 56FE 7247 80CC 666F 3001 6E05 9664 548C 91CD 65B0 5E94 7528 3002") # DeepSeek Harness 第一阶段仅支持图片背景、清除和重新应用。
@@ -2530,29 +2917,18 @@ try {
 } finally {
   Unregister-BcFishHotkey
   try {
-    if (-not $proc.HasExited) {
-      # Best-effort leave fish before shutdown (session.stop also restores).
+    if ($script:BaseUrl -and $script:Token -and $script:fishMode) {
       try {
-        if ($script:fishMode) {
-          Invoke-BcApi -Method Post -Path "/mode/fish" -Body @{ enabled = $false } | Out-Null
-          $script:fishMode = $false
-        }
-      } catch {
-        # ignore
-      }
-      try {
-        Invoke-BcApi -Method Post -Path "/shutdown" -Body @{} | Out-Null
-      } catch {
-        # ignore
-      }
-      Start-Sleep -Milliseconds 300
-      if (-not $proc.HasExited) {
-        try { $proc.Kill() } catch { }
-      }
+        Invoke-BcApi -Method Post -Path "/mode/fish" -Body @{ enabled = $false } | Out-Null
+        $script:fishMode = $false
+      } catch { }
     }
+    Stop-BcSessionHost
   } catch {
     # ignore
   }
+  try { Remove-BcTrayClaim } catch { }
+  try { [BeautiCodeJob]::Close() } catch { }
   try {
     $notify.Visible = $false
     $notify.Dispose()
