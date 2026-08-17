@@ -17,7 +17,7 @@
   <strong>工作不一定只能盯着灰色界面。</strong>
 </p>
 
-              [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v1.0.0)
+[Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v1.0.0)
 ---
 
 
