@@ -102,6 +102,7 @@ dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
 # 或
 npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
 ```
+<img width="471" height="450" alt="aa80cb6fa224ff3bd45a2c43e3f9a7b6" src="https://github.com/user-attachments/assets/44ed8608-6a89-4308-b4a8-e721d33f4184" />
 
 ### Windows 安装包
 
