@@ -90,79 +90,9 @@ Ctrl + Shift + Space
 * 视频保持正常播放
 * 再按一次快捷键即可回到工作界面
 
-适合这些时刻：
-
-* 模型正在执行一个较长的任务
-* 项目正在编译
-* 下载或测试还没结束
-* 想暂停几分钟看看番
-* 想把工作页临时变成一个小播放器
-
-不用退出 DeepSeek Harness，也不用在多个窗口之间来回切换。
-
-工作和摸鱼，只差一次快捷键。
-
----
-
-
-## 保存喜欢的背景
-
-遇到喜欢的图片或视频，可以保存成一个主题。
-
-例如：
-
-```text
-雨夜写代码
-进击的巨人
-赛博城市
-海边下午
-电影摸鱼
-深夜电台
-```
-
-保存后，可以从 DSH 侧栏「背景」或托盘菜单切换。
-
-对于视频主题，beautiCode 还会记录播放进度。
-
-下次重新打开这个主题时，可以从上次看到的位置继续播放。
-
-不是每一次打开，都必须从片头重新开始。
-
----
-
-## 工作时不会太抢眼
-
-首页可以完整展示背景，让画面更有氛围。
-
-进入项目或会话后，工作区域会自动变暗一些，避免视频影响文字阅读。
-
-侧栏、输入框和主要按钮仍然可以正常操作。
-
-背景不会抢走鼠标，也不会挡住点击。
-
-它更像一层安静的环境，而不是盖在 DeepSeek Harness 上面的播放器。
-
-
-
-
----
-
-### v1.0.1 安装包
-
-想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/latest)。
-安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm。
-Codex Desktop 路径与原来一样：启动后选 **Codex Desktop**，托盘会按需拉起 Codex。
-DeepSeek Harness 由你自己运行：把插件装进 DSH profile，再启动 `dsh web`。beautiCode 绝不替你启动 DSH。页面打开后，用侧栏「背景」从文件夹选图片或 MP4；也可以用 `/bg`、`/bg-theme`、`/bg-clear`，或直接跟 AI 说把本机图片/视频设成背景。下次打开 DSH 会恢复上次的背景。
-
-<p align="center">
-  <img width="320" alt="Windows 安装包" src="https://github.com/user-attachments/assets/8c16eeb9-94d0-4f19-a816-b32fba8a110c" />
-</p>
-
----
-
 ## 使用方式
 
-### Windows 安装包（推荐）
+### Windows 安装包
 
 运行：
 
@@ -207,49 +137,6 @@ npx @deepseek-ai/dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beaut
 当前安装包尚未进行商业代码签名，Windows 可能显示 SmartScreen 提示。
 用户导入的图片、视频和已保存主题位于
 `%LOCALAPPDATA%\beautiCode`，卸载程序默认保留这些数据。
-
-### 从源码运行
-
-源码开发需要 Node.js 22 或更高版本。在项目目录执行：
-
-```bash
-npm install
-# 选 DeepSeek Harness 启动托盘时会自动写入插件，不需要 pnpm。
-# 若要手动安装（dsh plugin add 需要 pnpm）：
-#   npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
-npx @deepseek-ai/dsh web
-# DSH 侧栏「背景」即可换图换视频。托盘只在要用 Codex 或摸鱼热键时再开：
-# npm run tray
-```
-
-或打开宿主选择器：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-beauticode.ps1
-```
-
-构建 Windows 安装包：
-
-```powershell
-npm run installer:windows
-```
-
-输出位于：
-
-```text
-artifacts\windows\installer\
-```
-
-通过托盘菜单可以：
-
-* 更换图片
-* 更换视频
-* 清除背景
-* 打开或关闭视频声音
-* 进入摸鱼模式
-* 保存当前主题
-* 切换已保存主题
-* 删除主题
 
 
 ## 当前支持情况
