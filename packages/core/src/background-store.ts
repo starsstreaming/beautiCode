@@ -31,6 +31,11 @@ import type {
   BackgroundManifest,
   BackgroundMedia,
 } from "./types.js";
+import { normalizeBackgroundEffects } from "./types.js";
+import {
+  BUNDLED_GALLERY_THEME_ID,
+  type BundledThemeSpec,
+} from "./bundled-gallery.js";
 import { acquireFileLock } from "./file-lock.js";
 
 export interface BackgroundSnapshot {
@@ -44,6 +49,8 @@ export interface BackgroundStoreOptions {
   commitMarkerStaleMs?: number;
   maxSavedThemes?: number;
   maxSavedBytes?: number;
+  /** Always-visible built-in themes (plugin-shipped 画窗, etc.). */
+  bundledThemes?: BundledThemeSpec[];
 }
 
 /** 1×1 transparent PNG — poster when video apply has no prior image. */
@@ -87,6 +94,7 @@ function isManifest(value: unknown): value is BackgroundManifest {
   if (b.type !== "image" && b.type !== "video") return false;
   if (typeof b.image !== "string") return false;
   if (b.type === "video" && typeof b.video !== "string") return false;
+  if (b.effects != null && !normalizeBackgroundEffects(b.effects)) return false;
   return true;
 }
 
@@ -95,6 +103,7 @@ export class BackgroundStore {
   readonly commitMarkerStaleMs: number;
   readonly maxSavedThemes: number;
   readonly maxSavedBytes: number;
+  readonly bundledThemes: BundledThemeSpec[];
   readonly #runtimeSessionName = `session-${process.pid}-${crypto.randomUUID()}`;
   #runtimeVideoCache = new Map<number, string>();
   #writeChain: Promise<unknown> = Promise.resolve();
@@ -105,6 +114,7 @@ export class BackgroundStore {
     this.commitMarkerStaleMs = opts.commitMarkerStaleMs ?? COMMIT_MARKER_STALE_MS;
     this.maxSavedThemes = opts.maxSavedThemes ?? 20;
     this.maxSavedBytes = opts.maxSavedBytes ?? 2 * 1024 * 1024 * 1024;
+    this.bundledThemes = normalizeBundledThemes(opts.bundledThemes);
   }
 
   async init(): Promise<void> {
@@ -520,11 +530,7 @@ export class BackgroundStore {
    * Import user media into a fresh staging tree and atomically promote it to
    * active. Returns the new manifest.
    */
-  async commitImport(input:
-    | { type: "image"; imagePath: string }
-    | { type: "video"; imagePath?: string; videoPath: string }
-    | { type: "clear" },
-  ): Promise<BackgroundManifest> {
+  async commitImport(input: ApplyInput): Promise<BackgroundManifest> {
     return this.#withWriteLock(async () => {
       await this.init();
       const previous = await this.readActiveManifest();
@@ -541,6 +547,8 @@ export class BackgroundStore {
           assertSafeBasename(basename, "image");
           await copyFileAtomic(image.filePath, path.join(stagingDir, basename));
           background = { type: "image", image: basename };
+          const effects = normalizeBackgroundEffects(input.effects);
+          if (effects) background.effects = effects;
         } else if (input.type === "video") {
           const video = await validateVideoFile(input.videoPath);
           assertSafeBasename(DEFAULT_VIDEO_BASENAME, "video");
@@ -859,8 +867,16 @@ export class BackgroundStore {
         /* skip broken entries */
       }
     }
-    out.sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0));
-    return out;
+    const bundledIds = new Set(this.bundledThemes.map((spec) => spec.id));
+    const disk = out.filter((theme) => !bundledIds.has(theme.id));
+    const bundled = await this.#bundledThemeInfos();
+    const listed = [...bundled, ...disk];
+    listed.sort((a, b) => {
+      const bundledRank = Number(Boolean(b.bundled)) - Number(Boolean(a.bundled));
+      if (bundledRank !== 0) return bundledRank;
+      return a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0;
+    });
+    return listed;
   }
 
   async deleteSavedTheme(themeId: string): Promise<boolean> {
@@ -869,6 +885,9 @@ export class BackgroundStore {
       const id = String(themeId ?? "").trim();
       if (!isSafeThemeId(id)) {
         throw new MediaValidationError("Invalid saved theme id.");
+      }
+      if (this.#isBundledThemeId(id)) {
+        throw new MediaValidationError("Built-in theme cannot be deleted.");
       }
       const dir = await this.#resolveSavedThemeDir(id);
       if (!dir) return false;
@@ -970,6 +989,21 @@ export class BackgroundStore {
     if (!isSafeThemeId(id)) {
       throw new MediaValidationError("Invalid saved theme id.");
     }
+    const bundled = this.#bundledThemeSpec(id);
+    if (bundled) {
+      await validateImageFile(bundled.imagePath);
+      const input: Extract<ApplyInput, { type: "image" }> = {
+        type: "image",
+        imagePath: bundled.imagePath,
+      };
+      const effects = normalizeBackgroundEffects(bundled.effects);
+      if (effects) input.effects = effects;
+      return {
+        input,
+        videoPositionSec: null,
+        themeId: id,
+      };
+    }
     const dir = await this.#resolveSavedThemeDir(id);
     if (!dir) {
       throw new MediaValidationError("Saved theme not found.");
@@ -984,8 +1018,14 @@ export class BackgroundStore {
 
     const imagePath = path.join(dir, parsed.background.image);
     if (parsed.background.type === "image") {
+      const input: Extract<ApplyInput, { type: "image" }> = {
+        type: "image",
+        imagePath,
+      };
+      const effects = normalizeBackgroundEffects(parsed.background.effects);
+      if (effects) input.effects = effects;
       return {
-        input: { type: "image", imagePath },
+        input,
         videoPositionSec: null,
         themeId: id,
       };
@@ -1025,6 +1065,17 @@ export class BackgroundStore {
       const id = String(themeId ?? "").trim();
       if (!isSafeThemeId(id)) {
         throw new MediaValidationError("Invalid saved theme id.");
+      }
+      const bundled = this.#bundledThemeSpec(id);
+      if (bundled) {
+        const input: Extract<ApplyInput, { type: "image" }> = {
+          type: "image",
+          imagePath: bundled.imagePath,
+        };
+        const effects = normalizeBackgroundEffects(bundled.effects);
+        if (effects) input.effects = effects;
+        const manifest = await this.commitImport(input);
+        return { manifest, videoPositionSec: null };
       }
       const dir = await this.#resolveSavedThemeDir(id);
       if (!dir) {
@@ -1138,10 +1189,45 @@ export class BackgroundStore {
     }
   }
 
+  #bundledThemeSpec(themeId: string): BundledThemeSpec | null {
+    return this.bundledThemes.find((spec) => spec.id === themeId) ?? null;
+  }
+
+  #isBundledThemeId(themeId: string): boolean {
+    return (
+      themeId === BUNDLED_GALLERY_THEME_ID ||
+      this.#bundledThemeSpec(themeId) != null
+    );
+  }
+
+  async #bundledThemeInfos(): Promise<SavedThemeInfo[]> {
+    const out: SavedThemeInfo[] = [];
+    for (const spec of this.bundledThemes) {
+      try {
+        const st = await fs.stat(spec.imagePath);
+        if (!st.isFile() || st.size <= 0) continue;
+        out.push({
+          id: spec.id,
+          name: spec.name,
+          type: "image",
+          path: spec.imagePath,
+          savedAt: "",
+          bundled: true,
+        });
+      } catch {
+        /* shipped asset missing in this checkout / install */
+      }
+    }
+    return out;
+  }
+
   async #savedThemeUsage(): Promise<{ count: number; bytes: number }> {
     const themes = await this.listSavedThemes();
+    let count = 0;
     let bytes = 0;
     for (const theme of themes) {
+      if (theme.bundled || this.#isBundledThemeId(theme.id)) continue;
+      count += 1;
       try {
         await this.#assertSafeSavedThemeDir(theme.path);
         const raw = await fs.readFile(
@@ -1162,7 +1248,7 @@ export class BackgroundStore {
         /* broken entries do not count as valid themes */
       }
     }
-    return { count: themes.length, bytes };
+    return { count, bytes };
   }
 }
 
@@ -1185,6 +1271,8 @@ export interface SavedThemeInfo {
   savedAt: string;
   /** Last known playback position in seconds (video themes only). */
   videoPositionSec?: number;
+  /** Plugin-shipped theme that cannot be deleted. */
+  bundled?: boolean;
 }
 
 /** Normalize a playback position for theme meta. Invalid → null (caller treats as 0). */
@@ -1206,6 +1294,28 @@ function slugThemeId(_name: string): string {
   const stamp = Date.now().toString(36);
   const rand = crypto.randomUUID().replaceAll("-", "");
   return `theme-${stamp}-${rand}`.slice(0, 80);
+}
+
+function normalizeBundledThemes(value: unknown): BundledThemeSpec[] {
+  if (!Array.isArray(value)) return [];
+  const out: BundledThemeSpec[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const raw = item as Partial<BundledThemeSpec>;
+    const id = String(raw.id ?? "").trim();
+    const name = String(raw.name ?? "").trim();
+    const imagePath = String(raw.imagePath ?? "").trim();
+    if (!isSafeThemeId(id) || seen.has(id) || !name || name.length > 80 || !imagePath) {
+      continue;
+    }
+    seen.add(id);
+    const spec: BundledThemeSpec = { id, name, imagePath };
+    const effects = normalizeBackgroundEffects(raw.effects);
+    if (effects) spec.effects = effects;
+    out.push(spec);
+  }
+  return out;
 }
 
 /** Path-segment safe theme id (no traversal). Allows legacy non-ASCII dirs. */

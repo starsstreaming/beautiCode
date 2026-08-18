@@ -1936,15 +1936,13 @@ function Rebuild-BcTrayMenu {
           })
         [void]$savedMenu.DropDownItems.Add($item)
       }
-      [void]$savedMenu.DropDownItems.Add(
-        (New-Object System.Windows.Forms.ToolStripSeparator)
-      )
       $deleteMenu = New-Object System.Windows.Forms.ToolStripMenuItem
       $deleteMenu.Text = $L.DeleteTheme
       foreach ($theme in $themes) {
         $deleteId = [string]$theme.id
         $deleteName = [string]$theme.name
         if (-not $deleteId) { continue }
+        if ($theme.bundled -eq $true) { continue }
         $deleteItem = New-Object System.Windows.Forms.ToolStripMenuItem
         $deleteItem.Text = $deleteName
         $deleteItem.Tag = $deleteId
@@ -1973,7 +1971,12 @@ function Rebuild-BcTrayMenu {
           })
         [void]$deleteMenu.DropDownItems.Add($deleteItem)
       }
-      [void]$savedMenu.DropDownItems.Add($deleteMenu)
+      if ($deleteMenu.DropDownItems.Count -gt 0) {
+        [void]$savedMenu.DropDownItems.Add(
+          (New-Object System.Windows.Forms.ToolStripSeparator)
+        )
+        [void]$savedMenu.DropDownItems.Add($deleteMenu)
+      }
     }
   } catch {
     $empty = New-Object System.Windows.Forms.ToolStripMenuItem

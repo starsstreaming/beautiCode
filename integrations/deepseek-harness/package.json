@@ -13,6 +13,8 @@
     "index.mjs",
     "client.js",
     "console.js",
+    "atmosphere.js",
+    "presets.mjs",
     "agent.mjs",
     "control-client.mjs",
     "host-apply.mjs",

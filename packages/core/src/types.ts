@@ -22,12 +22,42 @@ export interface HostDescriptor {
   capabilities: HostCapabilities;
 }
 
+export type AtmospherePreset = "internal" | "infernal" | "gallery";
+
+export interface BackgroundEffects {
+  preset: AtmospherePreset;
+  rain: true;
+  overlay: true;
+  water: true;
+}
+
+export function normalizeBackgroundEffects(
+  value: unknown,
+): BackgroundEffects | null {
+  if (!value || typeof value !== "object") return null;
+  const preset = (value as { preset?: unknown }).preset;
+  if (
+    preset !== "internal" &&
+    preset !== "infernal" &&
+    preset !== "gallery"
+  ) {
+    return null;
+  }
+  return { preset, rain: true, overlay: true, water: true };
+}
+
+export function effectsForPreset(preset: AtmospherePreset): BackgroundEffects {
+  return { preset, rain: true, overlay: true, water: true };
+}
+
 export interface BackgroundMedia {
   type: "image" | "video";
   /** Basename only, inside the active/staging directory. */
   image: string;
   /** Basename only; required when type === "video". */
   video?: string;
+  /** Optional live wallpaper (rain / overlay / water). Image themes only. */
+  effects?: BackgroundEffects;
 }
 
 export interface BackgroundManifest {
@@ -62,7 +92,7 @@ export interface ValidatedVideo {
 }
 
 export type ApplyInput =
-  | { type: "image"; imagePath: string }
+  | { type: "image"; imagePath: string; effects?: BackgroundEffects }
   | {
       type: "video";
       /** Optional poster. When omitted, active poster is reused or a tiny PNG is staged. */
@@ -140,6 +170,8 @@ export interface HostApplyPayload {
     startAt?: number;
   };
   cssText: string;
+  /** Live wallpaper layers for Internal / Infernal presets. */
+  atmosphere?: BackgroundEffects | null;
 }
 
 export type ApplyResult =

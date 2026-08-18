@@ -1,10 +1,12 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ApplyTransaction,
   BackgroundStore,
   MediaServerController,
   defaultDataRoot,
   buildHostApplyPayload,
+  resolveSessionBundledThemes,
   type ApplyInput,
   type ApplyResult,
   type BackgroundTone,
@@ -37,6 +39,9 @@ export interface BeautiSessionOptions {
   deferHostConnect?: boolean;
   onError?: (err: Error) => void;
   onStatus?: (msg: string) => void;
+  /** Pin the shipped 画窗 theme in 已保存主题. Default true. */
+  bundledGallery?: boolean;
+  bundledGalleryImagePath?: string;
 }
 
 /**
@@ -115,7 +120,17 @@ export class BeautiSession implements HostSession {
     this.deferHostConnect = opts.deferHostConnect ?? true;
     this.onError = opts.onError ?? null;
     this.onStatus = opts.onStatus ?? null;
-    this.store = new BackgroundStore({ root: this.dataRoot });
+    this.store = new BackgroundStore({
+      root: this.dataRoot,
+      bundledThemes: resolveSessionBundledThemes({
+        enabled: opts.bundledGallery,
+        imagePath: opts.bundledGalleryImagePath,
+        searchRoots: [
+          path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+          process.cwd(),
+        ],
+      }),
+    });
   }
 
   get cdpPort(): number | null {

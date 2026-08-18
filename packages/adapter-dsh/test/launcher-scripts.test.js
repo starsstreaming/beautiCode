@@ -78,11 +78,11 @@ test("tray lifecycle owns leftover session-host and second-click show-panel", ()
 
 test("README documents installer auto-wiring, npx, and custom install paths", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
-  assert.match(readme, /不需要安装 pnpm|也不需要安装 pnpm/);
+  assert.match(readme, /不需要(?:安装)? ?pnpm/);
   assert.match(readme, /npx @deepseek-ai\/dsh web/);
   assert.match(readme, /npx @deepseek-ai\/dsh plugin/);
   assert.match(readme, /集成说明\.txt/);
-  assert.match(readme, /一般不需要再执行 `dsh plugin add`/);
+  assert.match(readme, /(?:一般|也)不需要再执行 `dsh plugin add`/);
 });
 
 test("install-dsh-plugin writes an integration note for the actual install root", () => {

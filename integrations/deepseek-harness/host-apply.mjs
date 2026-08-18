@@ -5,6 +5,7 @@ import {
   readDshControlFile,
   readTrayClaim,
 } from "./control-client.mjs";
+import { canvasImagePath } from "./presets.mjs";
 
 const sessions = new Map();
 
@@ -91,6 +92,7 @@ export async function ensureInProcessSession(options) {
       dataRoot,
       baseUrl,
       verifyDeadlineMs: 30_000,
+      bundledGalleryImagePath: canvasImagePath() || undefined,
     });
     try {
       await session.start();

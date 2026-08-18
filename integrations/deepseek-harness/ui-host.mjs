@@ -57,6 +57,7 @@ function publicThemes(list) {
     id: theme.id,
     name: theme.name,
     type: theme.type ?? null,
+    ...(theme.bundled ? { bundled: true } : {}),
   }));
 }
 
@@ -140,6 +141,7 @@ export function createBeauticodeUi({ dataRoot, baseUrl, getBaseUrl, sendJson, is
           ok: true,
           media: background?.type ?? null,
           muted: status.muted !== false,
+          atmosphere: background?.effects?.preset ?? null,
           themes: publicThemes(listed.themes),
           message: status.message,
         });
@@ -255,6 +257,30 @@ export function createBeauticodeUi({ dataRoot, baseUrl, getBaseUrl, sendJson, is
       }
       try {
         sendJson(res, 200, await actions.useTheme(body.id.trim()));
+      } catch (error) {
+        sendJson(res, 422, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+
+    async applyPreset(req, res) {
+      if (req.method !== "POST") {
+        res.writeHead(405).end();
+        return;
+      }
+      if (!isSameOrigin(req)) {
+        res.writeHead(403).end();
+        return;
+      }
+      const body = await readJson(req);
+      if (body.id !== "internal" && body.id !== "infernal") {
+        sendJson(res, 400, { ok: false, error: "未知的内置主题。" });
+        return;
+      }
+      try {
+        sendJson(res, 200, await actions.applyPreset(body.id));
       } catch (error) {
         sendJson(res, 422, {
           ok: false,
