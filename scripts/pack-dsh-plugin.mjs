@@ -118,6 +118,20 @@ export async function stageEngineInto(destRoot) {
   }
 }
 
+export async function applyPublishName(destRoot, publishName) {
+  const pkgPath = path.join(destRoot, "package.json");
+  const pkg = JSON.parse(await fsp.readFile(pkgPath, "utf8"));
+  const previous = pkg.name;
+  pkg.name = publishName;
+  await fsp.writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
+  for (const relative of ["cordis.patch.yml", "cli.js", "bin/beauticode-dsh"]) {
+    const filePath = path.join(destRoot, relative);
+    if (!fs.existsSync(filePath)) continue;
+    const text = await fsp.readFile(filePath, "utf8");
+    await fsp.writeFile(filePath, text.replaceAll(previous, publishName), "utf8");
+  }
+}
+
 export async function stageDshPlugin(destRoot = defaultStageDir(), opts = {}) {
   if (opts.build !== false) runBuild();
   await fsp.rm(destRoot, { recursive: true, force: true });
@@ -132,26 +146,32 @@ export async function stageDshPlugin(destRoot = defaultStageDir(), opts = {}) {
     await fsp.copyFile(source, dest);
   }
   await stageEngineInto(destRoot);
+  if (opts.publishName) await applyPublishName(destRoot, opts.publishName);
   return destRoot;
 }
 
 function parseArgs(argv) {
+  const otpIdx = argv.indexOf("--otp");
+  const nameIdx = argv.indexOf("--name");
   return {
     publish: argv.includes("--publish"),
     dryRun: argv.includes("--dry-run"),
     build: !argv.includes("--no-build"),
+    otp: otpIdx === -1 ? null : argv[otpIdx + 1] ?? null,
+    publishName: nameIdx === -1 ? "beauticode-dsh" : argv[nameIdx + 1] ?? "beauticode-dsh",
   };
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const dest = defaultStageDir();
-  await stageDshPlugin(dest, { build: args.build });
+  await stageDshPlugin(dest, { build: args.build, publishName: args.publishName });
   const pkg = JSON.parse(await fsp.readFile(path.join(dest, "package.json"), "utf8"));
   process.stdout.write(`Staged ${pkg.name}@${pkg.version} at ${dest}\n`);
   if (!args.publish && !args.dryRun) return;
   const npmArgs = ["publish", "--access", "public"];
   if (args.dryRun) npmArgs.push("--dry-run");
+  if (args.otp) npmArgs.push("--otp", args.otp);
   const published = spawnSync(
     process.platform === "win32" ? "npm.cmd" : "npm",
     npmArgs,

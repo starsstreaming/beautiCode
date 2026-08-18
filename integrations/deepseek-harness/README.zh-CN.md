@@ -8,17 +8,17 @@
 
 beautiCode **不启动** DeepSeek Harness。请先自己运行 `dsh web`。
 
-不需要 fork 仓库。发布到 npm 之后，一行安装：
+不需要 fork 仓库。一行安装：
 
 ```sh
-npx @beauticode/dsh-plugin
+npx beauticode-dsh
 npx @deepseek-ai/dsh web
 ```
 
 已有 pnpm 时也可以：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add @beauticode/dsh-plugin
+npx @deepseek-ai/dsh plugin --profile web add beauticode-dsh
 npx @deepseek-ai/dsh web
 ```
 

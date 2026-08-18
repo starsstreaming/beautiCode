@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-line installer: npx @beauticode/dsh-plugin
+ * One-line installer: npx beauticode-dsh
  *
  * Copies this package to a stable local folder and writes the DSH patch so
  * `dsh web` loads beautiCode. Does not start DeepSeek Harness.
@@ -138,7 +138,7 @@ async function ensureEngine(dest) {
   if (fs.existsSync(vendor)) return;
   const packPath = path.resolve(here, "../../scripts/pack-dsh-plugin.mjs");
   if (!fs.existsSync(packPath)) {
-    throw new Error("插件包不完整：缺少本机导入引擎。请重新执行 npx @beauticode/dsh-plugin。");
+    throw new Error("插件包不完整：缺少本机导入引擎。请重新执行 npx beauticode-dsh。");
   }
   const { stageEngineInto } = await import(pathToFileURL(packPath).href);
   await stageEngineInto(dest);
@@ -161,7 +161,7 @@ async function install(opts) {
   }
 
   if (fs.existsSync(webPackage)) {
-    await writePatch(webPatch, packageInsert());
+    await writePatch(webPatch, fileUriInsert(toFileUri(indexFile)));
     if (fs.existsSync(homePatch)) {
       const homeRaw = await fsp.readFile(homePatch, "utf8");
       if (hasBridge(homeRaw)) await removePatch(homePatch);

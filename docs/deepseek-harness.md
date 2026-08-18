@@ -22,17 +22,17 @@ Windows 安装包会在安装结束时（以及选择 DeepSeek Harness 时）自
 
 若改过安装目录，看安装文件夹里的 `集成说明.txt`，不要照抄默认路径。
 
-不需要 fork 仓库。发布到 npm 之后，一行安装（不需要 pnpm）：
+不需要 fork 仓库。一行安装（不需要 pnpm）：
 
 ```sh
-npx @beauticode/dsh-plugin
+npx beauticode-dsh
 npx @deepseek-ai/dsh web
 ```
 
 已有 pnpm 时也可以：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add @beauticode/dsh-plugin
+npx @deepseek-ai/dsh plugin --profile web add beauticode-dsh
 npx @deepseek-ai/dsh web
 ```
 

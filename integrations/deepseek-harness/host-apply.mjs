@@ -10,7 +10,7 @@ import { canvasImagePath } from "./presets.mjs";
 const sessions = new Map();
 
 export const ENGINE_MISSING_MESSAGE =
-  "beautiCode 插件未能加载本机导入引擎。请执行 npx @beauticode/dsh-plugin，或从完整安装目录加载桥接。";
+  "beautiCode 插件未能加载本机导入引擎。请执行 npx beauticode-dsh，或从完整安装目录加载桥接。";
 
 export function resolvePluginBaseUrl(ctx) {
   const port = ctx?.webServer?.port;
