@@ -203,6 +203,8 @@ beautiCode 的部分媒体处理思路与实现经验参考并改编自：
 * Codex Dream Skin
 L站的支持：
 https://linux.do/
+画窗参考：
+https://github.com/Sui-IB/InternalBeyond
 相关开源许可、代码来源和修改说明见：
 
 ```text
