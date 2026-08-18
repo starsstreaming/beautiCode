@@ -13,15 +13,7 @@
   可以是一张壁纸，也可以是一部番剧、一个壁纸，或者一段陪你度过漫长工作的风景。
 </p>
 
-<p align="center">
-  <strong>工作不一定只能盯着灰色界面。</strong>
-</p>
-
-[Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/tag/v1.0.0)
 ---
-
-
-
 
 
 ## 它是什么？
@@ -34,9 +26,6 @@ beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex
 * 动态壁纸
 * MP4 视频
 * 番剧
-* 电影
-* MV
-* 风景延时摄影
 
 直接设成 DeepSeek Harness 网页背后的背景。
 
@@ -44,30 +33,8 @@ beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex
 
 代码、输入框和按钮仍然可以正常使用。
 
-<img width="1812" height="1164" alt="QQ20260816-110858-HD" src="https://github.com/user-attachments/assets/fbc7ae4a-2e68-4df6-be0d-29c63d65ab68" />
+<img width="1280" height="714" alt="QQ20260818-205802" src="https://github.com/user-attachments/assets/a9a18412-4c62-4083-ab49-d127f05e61c3" />
 
----
-
-## 一边工作，一边看点喜欢的
-
-有时候并不是想认真看完一整部电影。
-
-只是希望写代码、等 AI 回复、跑构建或者排查 Bug 时，屏幕上不那么单调。
-
-beautiCode 可以让你：
-
-* 把番剧放在 DeepSeek Harness 背景中循环播放
-* 导入本地电影，边工作边慢慢看
-* 使用动漫场景作为动态背景
-* 播放演唱会、MV 或直播录像
-* 放一段雨夜、海边、城市航拍作为工作氛围
-* 在等待模型执行任务时随手摸一会儿鱼
-
-视频默认静音，不会突然打断工作。
-
-需要声音时，也可以随时打开。
-
-> 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
 
 ## 使用方式
 
