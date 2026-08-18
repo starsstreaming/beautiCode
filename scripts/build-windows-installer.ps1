@@ -240,6 +240,8 @@ foreach ($relativeFile in @(
     "integrations\deepseek-harness\agent.mjs",
     "integrations\deepseek-harness\control-client.mjs",
     "integrations\deepseek-harness\host-apply.mjs",
+    "integrations\deepseek-harness\cli.js",
+    "integrations\deepseek-harness\cordis.patch.yml",
     "integrations\deepseek-harness\package.json",
     "assets\themes\internal-beyond\bg-internal.jpg",
     "assets\themes\internal-beyond\bg-infernal.jpg",

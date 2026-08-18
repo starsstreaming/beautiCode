@@ -73,34 +73,30 @@ beautiCode 可以让你：
 
 ### 一键安装插件（推荐）
 
-只要给 DeepSeek Harness 加背景，装插件即可，不必下 Windows 安装包，也不必开托盘。请先自己装好 DSH。
-
-在项目目录执行：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-dsh-plugin.ps1
-```
-
-这条脚本会把插件写进你的 DSH profile，**不需要 pnpm，也不需要再执行 `dsh plugin add`**。
-
-然后自己启动：
+只要给 DeepSeek Harness 加背景，装插件即可，不必 fork 仓库、不必下 Windows 安装包，也不必开托盘。请先自己装好 DSH 和 Node.js。
 
 ```sh
-dsh web
-# 未把 dsh 装到 PATH 时：
+npx beauticode-dsh
 npx @deepseek-ai/dsh web
 ```
 
-打开网页后，侧栏「设置」上方有「背景」：可从文件夹选图片或 MP4、清除、开关声音、切换已保存主题。网页控制台没有摸鱼。外观浅色/深色仍用 DSH 自己的设置。下次启动会恢复上次背景。
+`npx beauticode-dsh` 会从 npm 下载插件并写入你的 DSH profile，**不需要 pnpm，也不需要再执行 `dsh plugin add`**。已把 `dsh` 装到 PATH 时，第二行也可以写成 `dsh web`。
+
+打开网页后，侧栏「设置」上方有「背景」：可从文件夹选图片或 MP4、清除、开关声音、切换已保存主题。已保存主题里自带「画窗」。网页控制台没有摸鱼。外观浅色/深色仍用 DSH 自己的设置。下次启动会恢复上次背景。
 
 也可以用 `/bg`、`/bg-theme`、`/bg-clear`，或直接跟 AI 说把本机图片/视频设成背景。
 
-若一键脚本不可用，再手动装（`dsh plugin add` 需要本机有 pnpm）：
+已有 pnpm 时，也可以让 DSH 自己装这个 npm 包：
 
 ```sh
-dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
-# 或
-npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
+npx @deepseek-ai/dsh plugin --profile web add beauticode-dsh
+npx @deepseek-ai/dsh web
+```
+
+卸载：
+
+```sh
+npx beauticode-dsh --remove
 ```
 <img width="471" height="450" alt="aa80cb6fa224ff3bd45a2c43e3f9a7b6" src="https://github.com/user-attachments/assets/44ed8608-6a89-4308-b4a8-e721d33f4184" />
 
@@ -153,6 +149,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-dsh-plugin
 npx @deepseek-ai/dsh web
 # 托盘只在要用 Codex 或摸鱼热键时再开：
 # npm run tray
+```
+
+或手动把本地插件目录加进 DSH（需要 pnpm）：
+
+```sh
+npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
+npx @deepseek-ai/dsh web
 ```
 
 或打开宿主选择器：
