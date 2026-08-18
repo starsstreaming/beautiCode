@@ -69,84 +69,6 @@ beautiCode 可以让你：
 
 > 不是逃离工作，而是给漫长的工作过程，留一点属于自己的空间。
 
-<img width="1280" height="808" alt="QQ20260816-201114" src="https://github.com/user-attachments/assets/2faef226-c493-49ef-815b-daec8593a329" />
-
----
-
-## 摸鱼模式
-
-按下快捷键：
-
-```text
-Ctrl + Shift + Space
-```
-
-即可进入摸鱼模式。
-
-进入后：
-
-* DeepSeek Harness 的主要内容暂时隐藏
-* 图片或视频完整显示
-* 视频保持正常播放
-* 再按一次快捷键即可回到工作界面
-
-适合这些时刻：
-
-* 模型正在执行一个较长的任务
-* 项目正在编译
-* 下载或测试还没结束
-* 想暂停几分钟看看番
-* 想把工作页临时变成一个小播放器
-
-不用退出 DeepSeek Harness，也不用在多个窗口之间来回切换。
-
-工作和摸鱼，只差一次快捷键。
-
----
-
-
-## 保存喜欢的背景
-
-遇到喜欢的图片或视频，可以保存成一个主题。
-
-例如：
-
-```text
-雨夜写代码
-进击的巨人
-赛博城市
-海边下午
-电影摸鱼
-深夜电台
-```
-
-保存后，可以从 DSH 侧栏「背景」或托盘菜单切换。
-
-对于视频主题，beautiCode 还会记录播放进度。
-
-下次重新打开这个主题时，可以从上次看到的位置继续播放。
-
-不是每一次打开，都必须从片头重新开始。
-
----
-
-## 工作时不会太抢眼
-
-首页可以完整展示背景，让画面更有氛围。
-
-进入项目或会话后，工作区域会自动变暗一些，避免视频影响文字阅读。
-
-侧栏、输入框和主要按钮仍然可以正常操作。
-
-背景不会抢走鼠标，也不会挡住点击。
-
-它更像一层安静的环境，而不是盖在 DeepSeek Harness 上面的播放器。
-
-
-
-
----
-
 ## 使用方式
 
 ### 一键安装插件（推荐）
@@ -180,15 +102,18 @@ dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
 # 或
 npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
 ```
+<img width="471" height="450" alt="aa80cb6fa224ff3bd45a2c43e3f9a7b6" src="https://github.com/user-attachments/assets/44ed8608-6a89-4308-b4a8-e721d33f4184" />
 
 ### Windows 安装包
 
 需要 Codex Desktop、系统托盘或懒得留源码时，再下 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/latest)。
 
-运行：
+然后自己启动：
 
-```text
-beautiCode-Setup-1.0.1-win-x64.exe
+```sh
+dsh web
+# 未把 dsh 装到 PATH 时：
+npx @deepseek-ai/dsh web
 ```
 
 安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm。安装结束时会自动写入 DSH 插件。若你改过安装目录，以安装文件夹里的 `集成说明.txt` 为准。
