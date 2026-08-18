@@ -90,21 +90,78 @@ Ctrl + Shift + Space
 * 视频保持正常播放
 * 再按一次快捷键即可回到工作界面
 
-## 使用方式
+适合这些时刻：
 
-### Windows 安装包
+* 模型正在执行一个较长的任务
+* 项目正在编译
+* 下载或测试还没结束
+* 想暂停几分钟看看番
+* 想把工作页临时变成一个小播放器
 
-运行：
+不用退出 DeepSeek Harness，也不用在多个窗口之间来回切换。
+
+工作和摸鱼，只差一次快捷键。
+
+---
+
+
+## 保存喜欢的背景
+
+遇到喜欢的图片或视频，可以保存成一个主题。
+
+例如：
 
 ```text
-beautiCode-Setup-1.0.1-win-x64.exe
+雨夜写代码
+进击的巨人
+赛博城市
+海边下午
+电影摸鱼
+深夜电台
 ```
 
-安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm，也不需要保留项目源码。
+保存后，可以从 DSH 侧栏「背景」或托盘菜单切换。
 
-安装结束时会自动把 beautiCode 插件写入你的 DeepSeek Harness profile。**一般不需要再执行 `dsh plugin add`，也不需要安装 pnpm。** 若你改过安装目录，以安装文件夹里的 `集成说明.txt` 为准。
+对于视频主题，beautiCode 还会记录播放进度。
 
-然后自己启动 DeepSeek Harness：
+下次重新打开这个主题时，可以从上次看到的位置继续播放。
+
+不是每一次打开，都必须从片头重新开始。
+
+---
+
+## 工作时不会太抢眼
+
+首页可以完整展示背景，让画面更有氛围。
+
+进入项目或会话后，工作区域会自动变暗一些，避免视频影响文字阅读。
+
+侧栏、输入框和主要按钮仍然可以正常操作。
+
+背景不会抢走鼠标，也不会挡住点击。
+
+它更像一层安静的环境，而不是盖在 DeepSeek Harness 上面的播放器。
+
+
+
+
+---
+
+## 使用方式
+
+### 一键安装插件（推荐）
+
+只要给 DeepSeek Harness 加背景，装插件即可，不必下 Windows 安装包，也不必开托盘。请先自己装好 DSH。
+
+在项目目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-dsh-plugin.ps1
+```
+
+这条脚本会把插件写进你的 DSH profile，**不需要 pnpm，也不需要再执行 `dsh plugin add`**。
+
+然后自己启动：
 
 ```sh
 dsh web
@@ -112,17 +169,36 @@ dsh web
 npx @deepseek-ai/dsh web
 ```
 
-打开 DSH 网页后，侧栏「设置」上方有「背景」：可从文件夹选图片或 MP4、清除、开关声音、切换已保存主题。网页控制台没有摸鱼。外观浅色/深色仍用 DSH 自己的设置。下次启动会恢复上次背景。
+打开网页后，侧栏「设置」上方有「背景」：可从文件夹选图片或 MP4、清除、开关声音、切换已保存主题。网页控制台没有摸鱼。外观浅色/深色仍用 DSH 自己的设置。下次启动会恢复上次背景。
 
-Codex Desktop 仍要开 beautiCode 托盘。选 **DeepSeek Harness** 时托盘只连接你已经启动的 DSH 网页，不会替你启动 DSH。
+也可以用 `/bg`、`/bg-theme`、`/bg-clear`，或直接跟 AI 说把本机图片/视频设成背景。
 
-若自动写入失败，才需要手动安装插件。把路径换成实际安装目录（默认是 `%LOCALAPPDATA%\Programs\beautiCode`）：
+若一键脚本不可用，再手动装（`dsh plugin add` 需要本机有 pnpm）：
 
 ```sh
-# 已全局安装 dsh。这条命令本身会调用 pnpm。
-dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
+dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
+# 或
+npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
+```
 
-# 只用 npx，不需要全局 dsh：
+### Windows 安装包
+
+需要 Codex Desktop、系统托盘或懒得留源码时，再下 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/latest)。
+
+运行：
+
+```text
+beautiCode-Setup-1.0.1-win-x64.exe
+```
+
+安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm。安装结束时会自动写入 DSH 插件。若你改过安装目录，以安装文件夹里的 `集成说明.txt` 为准。
+
+自己启动 `dsh web` 后，侧栏「背景」即可使用。Codex Desktop 仍要开 beautiCode 托盘：选 **Codex Desktop** 会按需拉起 Codex；选 **DeepSeek Harness** 只连接你已经启动的 DSH 网页，不会替你启动 DSH。
+
+若自动写入失败，把路径换成实际安装目录（默认是 `%LOCALAPPDATA%\Programs\beautiCode`）：
+
+```sh
+dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
 npx @deepseek-ai/dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
 ```
 
@@ -137,6 +213,51 @@ npx @deepseek-ai/dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beaut
 当前安装包尚未进行商业代码签名，Windows 可能显示 SmartScreen 提示。
 用户导入的图片、视频和已保存主题位于
 `%LOCALAPPDATA%\beautiCode`，卸载程序默认保留这些数据。
+
+<p align="center">
+  <img width="320" alt="Windows 安装包" src="https://github.com/user-attachments/assets/8c16eeb9-94d0-4f19-a816-b32fba8a110c" />
+</p>
+
+### 从源码运行
+
+源码开发需要 Node.js 22 或更高版本。在项目目录执行：
+
+```bash
+npm install
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-dsh-plugin.ps1
+npx @deepseek-ai/dsh web
+# 托盘只在要用 Codex 或摸鱼热键时再开：
+# npm run tray
+```
+
+或打开宿主选择器：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-beauticode.ps1
+```
+
+构建 Windows 安装包：
+
+```powershell
+npm run installer:windows
+```
+
+输出位于：
+
+```text
+artifacts\windows\installer\
+```
+
+通过托盘菜单可以：
+
+* 更换图片
+* 更换视频
+* 清除背景
+* 打开或关闭视频声音
+* 进入摸鱼模式
+* 保存当前主题
+* 切换已保存主题
+* 删除主题
 
 
 ## 当前支持情况
