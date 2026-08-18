@@ -88,6 +88,7 @@ test("plugin injects its client script exactly once", async (t) => {
   const once = tap("<html><body></body></html>");
   const twice = tap(once);
   assert.equal((twice.match(/data-beauticode-bridge/g) || []).length, 1);
+  assert.match(once, /__beauticode\/console\.js/);
   const response = await fetch(`${plugin.origin}/__beauticode/client.js`);
   assert.equal(response.status, 200);
   const source = await response.text();
@@ -96,8 +97,10 @@ test("plugin injects its client script exactly once", async (t) => {
   assert.match(source, /:has\(#root \[data-phase="settling"\]\)/);
   assert.doesNotMatch(source, /:has\(#root \[data-phase="hero"\]\)/);
   assert.match(source, /#beauticode-bg-stage::after\{background:rgba\(0,0,0,\.42\)\}/);
+  assert.match(source, /\[class\*=\"_fade\"\]\{display:none!important\}/);
   assert.match(source, /data-bc-resolved-tone/);
-  assert.match(source, /toggleAttribute\("data-ds-dark-theme"/);
+  assert.match(source, /data-ds-dark-theme/);
+  assert.doesNotMatch(source, /toggleAttribute\("data-ds-dark-theme"/);
   assert.match(source, /prefers-color-scheme: dark/);
   assert.match(source, /new MutationObserver\(scheduleDshThemeSync\)/);
   assert.match(source, /function dshStructureIssue\(\)/);
@@ -119,7 +122,7 @@ test("plugin injects its client script exactly once", async (t) => {
   );
 });
 
-test("browser client keeps the DSH palette synchronized with beautiCode tone", async () => {
+test("browser client follows DSH appearance and does not overwrite it", async () => {
   const source = await fs.readFile(new URL("../client.js", import.meta.url), "utf8");
   const attributes = new Set();
   const body = {
@@ -132,13 +135,13 @@ test("browser client keeps the DSH palette synchronized with beautiCode tone", a
   };
   const documentElement = {
     dataset: {},
-    style: { colorScheme: "" },
+    style: { colorScheme: "light" },
     removeAttribute(name) {
       if (name === "data-bc-fish") delete this.dataset.bcFish;
     },
   };
   const media = {
-    matches: false,
+    matches: true,
     listener: null,
     addEventListener(_name, listener) {
       this.listener = listener;
@@ -179,37 +182,27 @@ test("browser client keeps the DSH palette synchronized with beautiCode tone", a
   context.globalThis = context;
   vm.runInNewContext(source, context);
 
-  const applyTone = async (tone) => {
-    events.onmessage({
-      data: JSON.stringify({ type: "mode", fish: false, muted: true, tone }),
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-  };
-
-  await applyTone("light");
   assert.equal(documentElement.dataset.bcResolvedTone, "light");
   assert.equal(documentElement.style.colorScheme, "light");
   assert.equal(body.hasAttribute("data-ds-dark-theme"), false);
 
-  await applyTone("dark");
+  attributes.add("data-ds-dark-theme");
+  documentElement.style.colorScheme = "dark";
+  observerCallback();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(documentElement.dataset.bcResolvedTone, "dark");
   assert.equal(documentElement.style.colorScheme, "dark");
   assert.equal(body.hasAttribute("data-ds-dark-theme"), true);
 
   attributes.delete("data-ds-dark-theme");
   documentElement.style.colorScheme = "light";
-  observerCallback();
-  assert.equal(documentElement.style.colorScheme, "dark");
-  assert.equal(body.hasAttribute("data-ds-dark-theme"), true);
-
-  await applyTone("auto");
+  events.onmessage({
+    data: JSON.stringify({ type: "mode", fish: false, muted: true, tone: "dark" }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(documentElement.dataset.bcResolvedTone, "light");
+  assert.equal(documentElement.style.colorScheme, "light");
   assert.equal(body.hasAttribute("data-ds-dark-theme"), false);
-  media.matches = true;
-  media.listener();
-  assert.equal(documentElement.dataset.bcResolvedTone, "dark");
-  assert.equal(documentElement.style.colorScheme, "dark");
-  assert.equal(body.hasAttribute("data-ds-dark-theme"), true);
 });
 
 test("authenticated apply reaches SSE client and same-origin ack becomes ready", async (t) => {
@@ -266,7 +259,7 @@ test("authenticated apply reaches SSE client and same-origin ack becomes ready",
     modeReadyClients: 0,
     blockedClients: 0,
     resolvedTone: null,
-    modes: { fish: false, muted: true, tone: "dark" },
+    modes: { fish: false, muted: true, tone: "auto" },
     playback: null,
   });
 });

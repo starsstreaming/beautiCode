@@ -80,13 +80,12 @@ export async function ensureInProcessSession(options) {
     return current.promise;
   }
 
-  if (await hasLiveTray(dataRoot) || await hasLiveTrayClaim(dataRoot)) {
-    const error = new Error(TRAY_STARTING_MESSAGE);
-    error.code = "TRAY_CLAIMED";
-    throw error;
-  }
-
   const promise = (async () => {
+    if (await hasLiveTray(dataRoot) || await hasLiveTrayClaim(dataRoot)) {
+      const error = new Error(TRAY_STARTING_MESSAGE);
+      error.code = "TRAY_CLAIMED";
+      throw error;
+    }
     const adapter = await loadAdapter();
     const session = new adapter.DshSession({
       dataRoot,

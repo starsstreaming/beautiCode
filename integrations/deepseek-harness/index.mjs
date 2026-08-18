@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerAgentSurfaces } from "./agent.mjs";
 import { resolvePluginBaseUrl } from "./host-apply.mjs";
+import { createBeauticodeUi } from "./ui-host.mjs";
 
 export const name = "beauticode-bridge";
 export const inject = ["webServer"];
@@ -184,10 +185,16 @@ export function apply(ctx, config = {}) {
   const clients = new Map();
   const clientStates = new Map();
   let current = null;
-  const modes = { fish: false, muted: true, tone: "dark" };
-  registerAgentSurfaces(ctx, {
-    dataRoot: path.dirname(tokenFile),
-    baseUrl: resolvePluginBaseUrl(ctx),
+  const modes = { fish: false, muted: true, tone: "auto" };
+  const dataRoot = path.dirname(tokenFile);
+  const baseUrl = resolvePluginBaseUrl(ctx);
+  registerAgentSurfaces(ctx, { dataRoot, baseUrl });
+  const ui = createBeauticodeUi({
+    dataRoot,
+    getBaseUrl: () => resolvePluginBaseUrl(ctx),
+    sendJson,
+    isSameOrigin,
+    readJson,
   });
 
   const broadcast = (payload) => {
@@ -198,7 +205,9 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => {
     const disposeTap = ctx.webServer.tapIndex((html) => {
       if (html.includes("data-beauticode-bridge")) return html;
-      const script = '<script defer src="/__beauticode/client.js" data-beauticode-bridge></script>';
+      const script =
+        '<script defer src="/__beauticode/client.js" data-beauticode-bridge></script>' +
+        '<script defer src="/__beauticode/console.js"></script>';
       return html.includes("</body>")
         ? html.replace("</body>", `${script}</body>`)
         : `${html}${script}`;
@@ -240,6 +249,48 @@ export function apply(ctx, config = {}) {
       }),
       ctx.webServer.register({
         kind: "exact",
+        path: "/__beauticode/console.js",
+        handler: async (req, res) => {
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            res.writeHead(405).end();
+            return;
+          }
+          const source = await fs.readFile(path.join(here, "console.js"));
+          res.writeHead(200, {
+            "content-type": "text/javascript; charset=utf-8",
+            "cache-control": "no-store",
+            "content-length": source.length,
+          });
+          res.end(req.method === "HEAD" ? undefined : source);
+        },
+      }),
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/ui/status",
+        handler: (req, res) => ui.status(req, res),
+      }),
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/ui/import",
+        handler: (req, res) => ui.importFile(req, res),
+      }),
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/ui/clear",
+        handler: (req, res) => ui.clear(req, res),
+      }),
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/ui/mode",
+        handler: (req, res) => ui.mode(req, res),
+      }),
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/ui/theme/use",
+        handler: (req, res) => ui.useTheme(req, res),
+      }),
+      ctx.webServer.register({
+        kind: "exact",
         path: "/__beauticode/events",
         handler: (req, res) => {
           if (req.method !== "GET" || !isSameOrigin(req)) {
@@ -265,6 +316,7 @@ export function apply(ctx, config = {}) {
             res.write(`data: ${JSON.stringify({ type: "apply", ...current })}\n\n`);
           }
           res.write(`data: ${JSON.stringify({ type: "mode", ...modes })}\n\n`);
+          ui.scheduleRestore();
           res.on("close", () => {
             if (clients.get(clientId) === res) {
               clients.delete(clientId);
@@ -440,6 +492,7 @@ export function apply(ctx, config = {}) {
       for (const response of clients.values()) response.destroy();
       clients.clear();
       clientStates.clear();
+      void ui.dispose();
     };
   }, "beauticode-bridge: routes and browser injection");
 }

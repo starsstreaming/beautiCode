@@ -5,13 +5,14 @@ beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`@beauticode/
 ## 已实现能力
 
 - 图片背景、MP4 视频背景与清除。首页（`data-phase="hero"`）壁纸保持原亮度；进入会话（`active` / `settling`）后才压暗。
+- 网页控制台：插件装好后，DSH 侧栏「设置」上方出现「背景」。可从系统文件夹选择图片或 MP4、清除、开关声音、切换已保存主题。不需要托盘。网页控制台没有摸鱼。
 - 对话工具与斜杠命令：在 DSH 里说「把某个本机 MP4 设成背景」，或输入 `/bg`、`/bg-theme`、`/bg-clear`。插件自己完成导入，不需要托盘。若托盘已经在跑，则复用托盘，避免两套写入打架。
 - 视频默认静音；可请求开启声音。若浏览器自动播放策略阻止开启声音，会继续静音播放并返回 `blocked: true`。
 - 视频播放位置随已保存主题记录；切换主题、重新应用与页面恢复时从最近位置继续。
-- 摸鱼模式：隐藏 DSH 的 `#root`，背景舞台继续显示和播放；`Ctrl+Shift+Space` 可退出。
-- 深色、浅色、跟随系统三种背景色调。
+- 摸鱼模式：隐藏 DSH 的 `#root`，背景舞台继续显示和播放；`Ctrl+Shift+Space` 可退出（托盘全局热键）。网页控制台不提供摸鱼。
+- 外观浅色 / 深色跟随 DSH 自己的设置，插件不再改写 DSH 主题 DOM。
 - 图片/视频主题的保存、切换和删除。
-- 页面刷新或稍后打开时，会恢复当前背景与模式。找不到 `#root` 时应用失败并回滚，不会静默画坏页。
+- 页面刷新或稍后打开时，会恢复当前背景。找不到 `#root` 时应用失败并回滚，不会静默画坏页。
 
 同一个 beautiCode 数据目录一次只能运行一个宿主会话，避免 Codex 与 DSH 同时写入造成状态损坏。
 
@@ -48,9 +49,13 @@ npx @deepseek-ai/dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beaut
 
 也可以参考 [`integrations/deepseek-harness/cordis.patch.example.yml`](../integrations/deepseek-harness/cordis.patch.example.yml)。
 
+## 网页控制台
+
+插件注入 `console.js`，把「背景」插在侧栏「设置」同一格里（`display: contents`，不另铺底色）。点开后的面板挂在 `document.body` 上，用实色，避免吃半透明壁纸 token。同源 `POST /__beauticode/ui/*` 转到已有的 `createBeauticodeActions()`。页面连上 SSE 后会 `reapply` 上次背景。DSH 会话列表底部的 fade 在有壁纸时关掉，避免叠出一条暗影。
+
 ## 控制端
 
-启动 beautiCode，在选择框里选 DeepSeek Harness（或直接 `start-tray.ps1 -TargetHost dsh`）。托盘只连接你正在运行的 DSH 网页：
+托盘可选。启动 beautiCode，在选择框里选 DeepSeek Harness（或直接 `start-tray.ps1 -TargetHost dsh`）。托盘只连接你正在运行的 DSH 网页：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File apps\tray\start-tray.ps1 -TargetHost dsh -DshUrl http://127.0.0.1:3080

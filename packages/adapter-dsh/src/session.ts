@@ -57,7 +57,7 @@ export class DshSession implements HostSession {
   private lastWatchError = "";
   private fishMode = false;
   private videoMuted = true;
-  private backgroundTone: BackgroundTone = "dark";
+  private backgroundTone: BackgroundTone = "auto";
   private activeThemeId: string | null = null;
   private lastProgressWriteAt = 0;
   private lastProgressWriteSec = -1;
