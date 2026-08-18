@@ -10,7 +10,7 @@ import { canvasImagePath } from "./presets.mjs";
 const sessions = new Map();
 
 export const ENGINE_MISSING_MESSAGE =
-  "beautiCode 插件未能加载本机导入引擎。请先自己运行 dsh web，并从完整安装目录加载桥接。";
+  "beautiCode 插件未能加载本机导入引擎。请执行 npx @beauticode/dsh-plugin，或从完整安装目录加载桥接。";
 
 export function resolvePluginBaseUrl(ctx) {
   const port = ctx?.webServer?.port;
@@ -28,9 +28,10 @@ function sessionKey(dataRoot) {
   return path.resolve(dataRoot);
 }
 
-async function loadAdapter() {
+export async function loadAdapter() {
   const errors = [];
   for (const specifier of [
+    new URL("./vendor/adapter-dsh/index.js", import.meta.url).href,
     "@beauticode/adapter-dsh",
     new URL("../../packages/adapter-dsh/dist/index.js", import.meta.url).href,
   ]) {

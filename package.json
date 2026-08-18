@@ -16,7 +16,9 @@
     "bc": "node scripts/beauticode.mjs",
     "smoke:live": "npm run build && node scripts/live-smoke.mjs",
     "tray": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File apps/tray/start-tray.ps1 -SkipBuild",
-    "installer:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-installer.ps1"
+    "installer:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-installer.ps1",
+    "plugin:pack": "node scripts/pack-dsh-plugin.mjs",
+    "plugin:publish": "node scripts/pack-dsh-plugin.mjs --publish"
   },
   "engines": {
     "node": ">=22"

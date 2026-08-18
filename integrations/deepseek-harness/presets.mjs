@@ -41,7 +41,13 @@ export function themeAssetsDir() {
     path.join(here, "..", "..", "assets", "themes", "internal-beyond"),
   ];
   for (const dir of candidates) {
-    if (fs.existsSync(path.join(dir, "bg-internal.jpg"))) return dir;
+    if (
+      fs.existsSync(path.join(dir, "bg-canvas-4k.png")) ||
+      fs.existsSync(path.join(dir, "bg-canvas.png")) ||
+      fs.existsSync(path.join(dir, "bg-internal.jpg"))
+    ) {
+      return dir;
+    }
   }
   return candidates[candidates.length - 1];
 }

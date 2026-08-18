@@ -4,6 +4,9 @@
   "description": "Cordis plugin: image/video backgrounds for DeepSeek Harness web.",
   "type": "module",
   "main": "./index.mjs",
+  "bin": {
+    "beauticode-dsh": "bin/beauticode-dsh"
+  },
   "exports": {
     ".": {
       "import": "./index.mjs"
@@ -18,8 +21,34 @@
     "agent.mjs",
     "control-client.mjs",
     "host-apply.mjs",
-    "ui-host.mjs"
+    "ui-host.mjs",
+    "cli.js",
+    "bin/beauticode-dsh",
+    "cordis.patch.yml",
+    "vendor",
+    "themes"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "background",
+    "wallpaper"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/starsstreaming/beautiCode.git",
+    "directory": "integrations/deepseek-harness"
+  },
   "engines": {
     "node": ">=22"
   },
