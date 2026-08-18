@@ -30,4 +30,8 @@ test("user-facing DeepSeek Harness errors are localized", () => {
     toChineseErrorMessage("No DeepSeek Harness browser client is connected."),
     /页面尚未连接/,
   );
+  assert.equal(
+    toChineseErrorMessage("Built-in theme cannot be deleted."),
+    "内置主题不能删除。",
+  );
 });

@@ -127,6 +127,7 @@ export function toChineseErrorMessage(value: unknown): string {
     [/No active background to save\.?/i, "当前没有可保存的背景。"],
     [/Saved theme limit reached \((\d+)\)\. Delete one before saving\.?/i, (match) => `已达到保存主题数量上限（${match[1]}），请先删除一个主题。`],
     [/Saved theme storage limit exceeded \((\d+) bytes\)\. Delete a theme before saving\.?/i, (match) => `已超过保存主题的存储上限（${match[1]} 字节），请先删除一个主题。`],
+    [/Built-in theme cannot be deleted\.?/i, "内置主题不能删除。"],
     [/Invalid saved theme id\.?/i, "已保存主题 ID 无效。"],
     [/Saved theme not found\.?/i, "未找到已保存的主题。"],
     [/Invalid video position\.?/i, "视频位置无效。"],

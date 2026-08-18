@@ -6,6 +6,7 @@ import {
   stripPathQuotes,
 } from "./control-client.mjs";
 import { resolveApplyBackend, stopInProcessSession } from "./host-apply.mjs";
+import { ATMOSPHERE_PRESETS, effectsForPreset, presetImagePath } from "./presets.mjs";
 
 const APPLY_TIMEOUT_MS = 180_000;
 const QUICK_TIMEOUT_MS = 15_000;
@@ -98,30 +99,66 @@ export function createBeauticodeActions(dataRootOrOptions) {
   }
 
   return {
-    async applyImage(imagePath, signal) {
+    async applyImage(imagePath, signal, options) {
       const inspected = await inspectLocalMedia(imagePath);
       if (!inspected.ok) fail(inspected.error);
       if (inspected.kind !== "image") {
         fail("beauticode_apply_image 只接受图片文件。");
       }
+      const effects = effectsForPreset(options?.effects?.preset) || options?.effects || null;
+      const input = { type: "image", imagePath: inspected.path };
+      if (effects) input.effects = effects;
       const resolved = await backend();
       if (resolved.kind === "tray") {
+        const body = { imagePath: inspected.path };
+        if (effects) body.effects = effects;
         return unwrapApply(
           await request({
             method: "POST",
             path: "/apply/image",
-            body: { imagePath: inspected.path },
+            body,
             signal,
           }),
           "image",
           "已将图片设为背景。",
         );
       }
-      return unwrapApply(
-        await resolved.session.apply({ type: "image", imagePath: inspected.path }),
-        "image",
-        "已将图片设为背景。",
-      );
+      return unwrapApply(await resolved.session.apply(input), "image", "已将图片设为背景。");
+    },
+
+    async applyPreset(id, signal) {
+      const preset = ATMOSPHERE_PRESETS[id];
+      const imagePath = presetImagePath(id);
+      if (!preset || !imagePath) fail("未找到内置主题文件。");
+      const result = await this.applyImage(imagePath, signal, {
+        effects: effectsForPreset(id),
+      });
+      try {
+        await this.setTone(preset.tone, signal);
+      } catch {
+        /* tone is best-effort; the wallpaper still applied */
+      }
+      return {
+        ...result,
+        atmosphere: id,
+        message: `已应用 ${preset.name} 活壁纸。`,
+      };
+    },
+
+    async setTone(tone, signal) {
+      const resolved = await backend();
+      const result =
+        resolved.kind === "tray"
+          ? await request({
+              method: "POST",
+              path: "/mode/tone",
+              body: { tone },
+              signal,
+              timeoutMs: QUICK_TIMEOUT_MS,
+            })
+          : await resolved.session.setBackgroundTone(tone);
+      if (result.ok === false) fail(result.error || "无法切换背景色调。");
+      return { ok: true, tone: result.tone ?? tone };
     },
 
     async applyVideo(input, signal) {

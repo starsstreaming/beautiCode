@@ -108,10 +108,12 @@ npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-ha
 
 需要 Codex Desktop、系统托盘或懒得留源码时，再下 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/latest)。
 
-运行：
+然后自己启动：
 
-```text
-beautiCode-Setup-1.0.1-win-x64.exe
+```sh
+dsh web
+# 未把 dsh 装到 PATH 时：
+npx @deepseek-ai/dsh web
 ```
 
 安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm。安装结束时会自动写入 DSH 插件。若你改过安装目录，以安装文件夹里的 `集成说明.txt` 为准。

@@ -293,6 +293,7 @@ export async function buildHostApplyPayload(
       imageUrl,
       video: null,
       cssText,
+      atmosphere: manifest.background.effects ?? null,
     };
   }
   if (!manifest.background.video) {

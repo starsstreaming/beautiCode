@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { registerAgentSurfaces } from "./agent.mjs";
 import { resolvePluginBaseUrl } from "./host-apply.mjs";
 import { createBeauticodeUi } from "./ui-host.mjs";
+import { canvasImagePath, iceFrostImagePath, normalizeAtmosphere } from "./presets.mjs";
 
 export const name = "beauticode-bridge";
 export const inject = ["webServer"];
@@ -127,13 +128,15 @@ function validLoopbackMediaUrl(value) {
 function validApplyPayload(body) {
   if (!Number.isSafeInteger(body.generation) || body.generation < 0) return false;
   if (!["image", "video", "clear"].includes(body.media)) return false;
+  if (body.atmosphere != null && !normalizeAtmosphere(body.atmosphere)) return false;
   if (body.media === "clear") {
-    return body.imageUrl == null && body.videoUrl == null && body.startAt == null;
+    return body.imageUrl == null && body.videoUrl == null && body.startAt == null && body.atmosphere == null;
   }
   if (!validLoopbackMediaUrl(body.imageUrl)) return false;
   if (body.media === "image") return body.videoUrl == null && body.startAt == null;
   return (
     validLoopbackMediaUrl(body.videoUrl) &&
+    body.atmosphere == null &&
     (body.startAt == null || (Number.isFinite(body.startAt) && body.startAt >= 0))
   );
 }
@@ -206,6 +209,7 @@ export function apply(ctx, config = {}) {
     const disposeTap = ctx.webServer.tapIndex((html) => {
       if (html.includes("data-beauticode-bridge")) return html;
       const script =
+        '<script defer src="/__beauticode/atmosphere.js"></script>' +
         '<script defer src="/__beauticode/client.js" data-beauticode-bridge></script>' +
         '<script defer src="/__beauticode/console.js"></script>';
       return html.includes("</body>")
@@ -228,6 +232,67 @@ export function apply(ctx, config = {}) {
             return;
           }
           sendJson(res, 200, { ok: true, ...identity });
+        },
+      }),
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/atmosphere.js",
+        handler: async (req, res) => {
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            res.writeHead(405).end();
+            return;
+          }
+          const source = await fs.readFile(path.join(here, "atmosphere.js"));
+          res.writeHead(200, {
+            "content-type": "text/javascript; charset=utf-8",
+            "cache-control": "no-store",
+            "content-length": source.length,
+          });
+          res.end(req.method === "HEAD" ? undefined : source);
+        },
+      }),
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/themes/bg-canvas.png",
+        handler: async (req, res) => {
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            res.writeHead(405).end();
+            return;
+          }
+          const filePath = canvasImagePath();
+          if (!filePath) {
+            res.writeHead(404).end();
+            return;
+          }
+          const source = await fs.readFile(filePath);
+          res.writeHead(200, {
+            "content-type": "image/png",
+            "cache-control": "public, max-age=86400",
+            "content-length": source.length,
+          });
+          res.end(req.method === "HEAD" ? undefined : source);
+        },
+      }),
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/themes/ice-frost.png",
+        handler: async (req, res) => {
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            res.writeHead(405).end();
+            return;
+          }
+          const filePath = iceFrostImagePath();
+          if (!filePath) {
+            res.writeHead(404).end();
+            return;
+          }
+          const source = await fs.readFile(filePath);
+          res.writeHead(200, {
+            "content-type": "image/png",
+            "cache-control": "public, max-age=86400",
+            "content-length": source.length,
+          });
+          res.end(req.method === "HEAD" ? undefined : source);
         },
       }),
       ctx.webServer.register({
@@ -291,6 +356,11 @@ export function apply(ctx, config = {}) {
       }),
       ctx.webServer.register({
         kind: "exact",
+        path: "/__beauticode/ui/preset",
+        handler: (req, res) => ui.applyPreset(req, res),
+      }),
+      ctx.webServer.register({
+        kind: "exact",
         path: "/__beauticode/events",
         handler: (req, res) => {
           if (req.method !== "GET" || !isSameOrigin(req)) {
@@ -349,6 +419,8 @@ export function apply(ctx, config = {}) {
             videoUrl: body.media === "video" ? body.videoUrl : null,
             startAt: body.media === "video" ? body.startAt ?? null : null,
           };
+          const atmosphere = normalizeAtmosphere(body.atmosphere);
+          if (atmosphere) current.atmosphere = atmosphere;
           if (body.media === "clear") modes.fish = false;
           for (const state of clientStates.values()) state.render = null;
           broadcast({ type: "apply", ...current });

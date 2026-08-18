@@ -148,6 +148,16 @@ test("host applier sends a minimal image payload and waits for browser ack", asy
   );
   assert.equal(verified.status, "pass");
   assert.equal(host.activeSessionCount, 1);
+  await host.apply({
+    generation: 71,
+    media: "image",
+    imageDataUrl: "data:image/png;base64,should-not-cross-bridge",
+    imageUrl: "http://127.0.0.1:45678/media/image?t=secret",
+    video: null,
+    cssText: "",
+    atmosphere: { preset: "infernal", rain: true, overlay: true, water: true },
+  });
+  assert.equal(bridge.received.atmosphere.preset, "infernal");
 });
 
 test("host applier sends loopback MP4 only and controls browser modes", async (t) => {

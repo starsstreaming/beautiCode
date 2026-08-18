@@ -99,18 +99,20 @@ export class DshHostApplier implements HostApplier {
     if (payload.media === "video" && !payload.video?.srcUrl) {
       throw new Error("DeepSeek Harness video apply requires a loopback MP4 URL.");
     }
+    const body: Record<string, unknown> = {
+      generation: payload.generation,
+      media: payload.media,
+      imageUrl: payload.media === "clear" ? null : payload.imageUrl,
+      videoUrl: payload.media === "video" ? payload.video?.srcUrl : null,
+      startAt:
+        payload.media === "video" && Number.isFinite(payload.video?.startAt)
+          ? Math.max(0, Number(payload.video?.startAt))
+          : null,
+    };
+    if (payload.atmosphere?.preset) body.atmosphere = payload.atmosphere;
     await this.#request("apply", {
       method: "POST",
-      body: JSON.stringify({
-        generation: payload.generation,
-        media: payload.media,
-        imageUrl: payload.media === "clear" ? null : payload.imageUrl,
-        videoUrl: payload.media === "video" ? payload.video?.srcUrl : null,
-        startAt:
-          payload.media === "video" && Number.isFinite(payload.video?.startAt)
-            ? Math.max(0, Number(payload.video?.startAt))
-            : null,
-      }),
+      body: JSON.stringify(body),
     });
   }
 

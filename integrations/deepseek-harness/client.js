@@ -247,10 +247,16 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     }
   }
 
+  function syncGallery(payload) {
+    const on = payload?.atmosphere?.preset === "gallery";
+    globalThis.BeauticodeAtmosphere?.setWindowMode?.(on ? "on" : "closed");
+  }
+
   async function applyBackground(payload) {
     if (!Number.isSafeInteger(payload?.generation)) return;
     activePayload = payload;
     document.documentElement.dataset.bcGeneration = String(payload.generation);
+    syncGallery(payload);
     if (payload.media === "clear") {
       desiredModes.fish = false;
       playbackBlocked = false;
@@ -258,6 +264,9 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       document.documentElement.removeAttribute("data-bc-media");
       document.documentElement.removeAttribute("data-bc-fish");
       document.getElementById("beauticode-bg-stage")?.remove();
+      if (document.documentElement.dataset.bcGallery === "true") {
+        document.documentElement.dataset.bcActive = "true";
+      }
       await acknowledgeRender(payload, true, false);
       await acknowledgeMode();
       return;

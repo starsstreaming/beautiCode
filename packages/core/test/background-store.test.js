@@ -81,6 +81,52 @@ test("background store atomic image/video/clear + generation", async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+test("image import keeps Internal atmosphere and restores it from a saved theme", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-atmosphere-"));
+  const fixtures = path.join(root, "fixtures");
+  await fs.mkdir(fixtures);
+  const { imagePath } = await writeFixtures(fixtures);
+  const store = new BackgroundStore({ root: path.join(root, "data") });
+  await store.init();
+
+  const applied = await store.commitImport({
+    type: "image",
+    imagePath,
+    effects: { preset: "internal", rain: true, overlay: true, water: true },
+  });
+  assert.deepEqual(applied.background?.effects, {
+    preset: "internal",
+    rain: true,
+    overlay: true,
+    water: true,
+  });
+
+  const saved = await store.saveCurrentTheme("Internal 雨");
+  await store.commitImport({ type: "image", imagePath });
+  assert.equal((await store.readActiveManifest()).background?.effects, undefined);
+
+  const loaded = await store.loadSavedTheme(saved.id);
+  assert.equal(loaded.input.type, "image");
+  assert.deepEqual(loaded.input.effects, {
+    preset: "internal",
+    rain: true,
+    overlay: true,
+    water: true,
+  });
+
+  const restored = await store.useSavedTheme(saved.id);
+  assert.equal(restored.manifest.background?.effects?.preset, "internal");
+
+  const clearedEffects = await store.commitImport({
+    type: "image",
+    imagePath,
+    effects: { preset: "nope" },
+  });
+  assert.equal(clearedEffects.background?.effects, undefined);
+
+  await fs.rm(root, { recursive: true, force: true });
+});
+
 test("fresh commit marker blocks reads; stale marker is ignored", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-marker-"));
   const store = new BackgroundStore({
@@ -634,6 +680,54 @@ test("saved theme quota and deletion are enforced", async () => {
     () => store.deleteSavedTheme("../active"),
     /invalid saved theme id/i,
   );
+
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test("bundled 画窗 stays in the saved list and cannot be deleted", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-bundled-theme-"));
+  const fixtures = path.join(root, "fixtures");
+  await fs.mkdir(fixtures);
+  const { imagePath } = await writeFixtures(fixtures);
+  const store = new BackgroundStore({
+    root: path.join(root, "data"),
+    maxSavedThemes: 1,
+    bundledThemes: [
+      {
+        id: "builtin-gallery",
+        name: "画窗",
+        imagePath,
+        effects: { preset: "gallery", rain: true, overlay: true, water: true },
+      },
+    ],
+  });
+  await store.init();
+
+  const listed = await store.listSavedThemes();
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, "builtin-gallery");
+  assert.equal(listed[0].name, "画窗");
+  assert.equal(listed[0].bundled, true);
+
+  const loaded = await store.loadSavedTheme("builtin-gallery");
+  assert.equal(loaded.input.type, "image");
+  assert.equal(loaded.input.imagePath, imagePath);
+  assert.equal(loaded.input.effects?.preset, "gallery");
+
+  await assert.rejects(
+    () => store.deleteSavedTheme("builtin-gallery"),
+    /cannot be deleted/i,
+  );
+  assert.equal((await store.listSavedThemes())[0].id, "builtin-gallery");
+
+  await store.commitImport({ type: "image", imagePath });
+  const userTheme = await store.saveCurrentTheme("用户图");
+  await assert.rejects(() => store.saveCurrentTheme("再来一张"), /limit reached/i);
+
+  const listed2 = await store.listSavedThemes();
+  assert.equal(listed2.length, 2);
+  assert.equal(listed2[0].id, "builtin-gallery");
+  assert.equal(listed2[1].id, userTheme.id);
 
   await fs.rm(root, { recursive: true, force: true });
 });

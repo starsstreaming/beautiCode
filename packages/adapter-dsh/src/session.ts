@@ -1,10 +1,12 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ApplyTransaction,
   BackgroundStore,
   MediaServerController,
   buildHostApplyPayload,
   defaultDataRoot,
+  resolveSessionBundledThemes,
   type ApplyInput,
   type ApplyResult,
   type BackgroundTone,
@@ -30,6 +32,9 @@ export interface DshSessionOptions {
    * root. The tray session-host must leave this false — it writes the claim.
    */
   honorTrayHandoff?: boolean;
+  /** Pin the shipped 画窗 theme in 已保存主题. Default true. */
+  bundledGallery?: boolean;
+  bundledGalleryImagePath?: string;
 }
 
 export class DshSession implements HostSession {
@@ -69,7 +74,17 @@ export class DshSession implements HostSession {
     this.pollMs = opts.pollMs ?? 2_000;
     this.honorTrayHandoff = opts.honorTrayHandoff !== false;
     this.baseUrl = normalizeDshBaseUrl(opts.baseUrl ?? "http://127.0.0.1:3080");
-    this.store = new BackgroundStore({ root: this.dataRoot });
+    this.store = new BackgroundStore({
+      root: this.dataRoot,
+      bundledThemes: resolveSessionBundledThemes({
+        enabled: opts.bundledGallery,
+        imagePath: opts.bundledGalleryImagePath,
+        searchRoots: [
+          path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+          process.cwd(),
+        ],
+      }),
+    });
     this.media = new MediaServerController({
       enabled: true,
       trustedOrigins: [this.baseUrl.origin],
@@ -151,6 +166,11 @@ export class DshSession implements HostSession {
         }
         if (!this.videoMuted || input.type === "video") {
           await this.host.setMuted(this.videoMuted).catch(() => null);
+        }
+        if (input.type === "image" && input.effects?.preset === "infernal") {
+          this.backgroundTone = "dark";
+        } else if (input.type === "image" && input.effects?.preset === "internal") {
+          this.backgroundTone = "light";
         }
         await this.host.setBackgroundTone(this.backgroundTone).catch(() => null);
       }

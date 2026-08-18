@@ -88,7 +88,12 @@ test("plugin injects its client script exactly once", async (t) => {
   const once = tap("<html><body></body></html>");
   const twice = tap(once);
   assert.equal((twice.match(/data-beauticode-bridge/g) || []).length, 1);
+  assert.match(once, /__beauticode\/atmosphere\.js/);
   assert.match(once, /__beauticode\/console\.js/);
+  const atmosphere = await fetch(`${plugin.origin}/__beauticode/atmosphere.js`);
+  assert.equal(atmosphere.status, 200);
+  const atmosphereSource = await atmosphere.text();
+  assert.doesNotThrow(() => new Function(atmosphereSource));
   const response = await fetch(`${plugin.origin}/__beauticode/client.js`);
   assert.equal(response.status, 200);
   const source = await response.text();
@@ -104,6 +109,8 @@ test("plugin injects its client script exactly once", async (t) => {
   assert.match(source, /prefers-color-scheme: dark/);
   assert.match(source, /new MutationObserver\(scheduleDshThemeSync\)/);
   assert.match(source, /function dshStructureIssue\(\)/);
+  assert.match(source, /function syncGallery\(/);
+  assert.match(source, /preset === "gallery"/);
   assert.match(source, /未找到 #root/);
 
   const version = await fetch(`${plugin.origin}/__beauticode/version`);
@@ -262,6 +269,59 @@ test("authenticated apply reaches SSE client and same-origin ack becomes ready",
     modes: { fish: false, muted: true, tone: "auto" },
     playback: null,
   });
+});
+
+test("apply payload can carry Internal atmosphere to the browser client", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-dsh-plugin-"));
+  const tokenFile = path.join(root, "token");
+  await fs.writeFile(tokenFile, TOKEN);
+  const plugin = await createPluginServer(tokenFile);
+  const events = await openEvents(plugin.origin, "client-atmosphere-01");
+  t.after(async () => {
+    events.request.destroy();
+    events.response.destroy();
+    await plugin.dispose();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const payload = {
+    generation: 21,
+    media: "image",
+    imageUrl: "http://127.0.0.1:45678/media/image?t=internal",
+    atmosphere: { preset: "internal", rain: true, overlay: true, water: true },
+  };
+  const applied = await fetch(`${plugin.origin}/__beauticode/apply`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(applied.status, 200);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.match(events.read(), /"preset":"internal"/);
+
+  const gallery = await fetch(`${plugin.origin}/__beauticode/apply`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      generation: 23,
+      media: "image",
+      imageUrl: "http://127.0.0.1:45678/media/image?t=gallery",
+      atmosphere: { preset: "gallery", rain: true, overlay: true, water: true },
+    }),
+  });
+  assert.equal(gallery.status, 200);
+
+  const rejected = await fetch(`${plugin.origin}/__beauticode/apply`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      generation: 22,
+      media: "image",
+      imageUrl: "http://127.0.0.1:45678/media/image?t=internal",
+      atmosphere: { preset: "night" },
+    }),
+  });
+  assert.equal(rejected.status, 400);
 });
 
 test("video apply and display modes are broadcast and acknowledged", async (t) => {

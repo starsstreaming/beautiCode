@@ -142,8 +142,16 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop .bc-theme-item:hover{back
       statusEl.textContent = data?.error || "未就绪";
       return;
     }
-    const label = data.media === "video" ? "视频" : data.media === "image" ? "图片" : "无背景";
+    const label =
+      data.atmosphere === "gallery"
+        ? "画窗"
+        : data.media === "video"
+          ? "视频"
+          : data.media === "image"
+            ? "图片"
+            : "无背景";
     statusEl.textContent = label;
+    if (data.atmosphere === "gallery") currentThemeId = "builtin-gallery";
     muted = data.muted !== false;
     soundBtn.classList.toggle("on", !muted);
     soundBtn.textContent = muted ? "声音" : "声音开";
@@ -229,6 +237,7 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop .bc-theme-item:hover{back
     fileInput.click();
   });
   pop.querySelector('[data-act="clear"]').addEventListener("click", () => {
+    currentThemeId = "";
     void run(() => request("/__beauticode/ui/clear", { method: "POST" }));
   });
   soundBtn.addEventListener("click", () => {
@@ -252,6 +261,9 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop .bc-theme-item:hover{back
     currentThemeId = item.getAttribute("data-theme-id") || "";
     themeList.hidden = true;
     themeToggle.setAttribute("aria-expanded", "false");
+    globalThis.BeauticodeAtmosphere?.setWindowMode?.(
+      currentThemeId === "builtin-gallery" ? "on" : "closed",
+    );
     void run(() =>
       request("/__beauticode/ui/theme/use", {
         method: "POST",
@@ -264,6 +276,7 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop .bc-theme-item:hover{back
     const file = fileInput.files?.[0];
     fileInput.value = "";
     if (!file) return;
+    currentThemeId = "";
     void run(() =>
       request("/__beauticode/ui/import", {
         method: "POST",

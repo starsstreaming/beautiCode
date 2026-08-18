@@ -96,6 +96,10 @@ test("plugin injects a compact sidebar console script", async (t) => {
   assert.doesNotMatch(source, /<select/);
   assert.match(source, /display:contents/);
   assert.match(source, /bc-theme-list/);
+  assert.doesNotMatch(source, /data-act="internal"/);
+  assert.doesNotMatch(source, /data-act="infernal"/);
+  assert.doesNotMatch(source, /data-act="gallery"/);
+  assert.match(source, /builtin-gallery/);
   assert.match(source, /insertBefore/);
   assert.match(source, /fileInput\.type = "file"/);
   assert.doesNotMatch(source, /#beauticode-console\{[^}]*color-scheme/);
@@ -110,6 +114,14 @@ test("console UI routes require same-origin and reject bad files", async (t) => 
     await plugin.dispose();
     await fs.rm(root, { recursive: true, force: true });
   });
+
+  assert.equal((await fetch(`${plugin.origin}/__beauticode/ui/preset`, { method: "POST" })).status, 403);
+  const badPreset = await fetch(`${plugin.origin}/__beauticode/ui/preset`, {
+    method: "POST",
+    headers: { Origin: plugin.origin, "content-type": "application/json" },
+    body: JSON.stringify({ id: "night" }),
+  });
+  assert.equal(badPreset.status, 400);
 
   assert.equal((await fetch(`${plugin.origin}/__beauticode/ui/status`)).status, 403);
   const status = await fetch(`${plugin.origin}/__beauticode/ui/status`, {
@@ -218,3 +230,5 @@ test("console import reuses a live tray control plane", async (t) => {
   assert.equal(applied.authorization, `Bearer ${TOKEN}`);
   assert.match(applied.body.imagePath, /\.png$/);
 });
+
+

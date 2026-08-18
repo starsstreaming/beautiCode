@@ -22,6 +22,7 @@
  *   POST /discover      {}
  *   POST /shutdown      {}
  */
+import fs from "node:fs";
 import http from "node:http";
 import process from "node:process";
 import path from "node:path";
@@ -118,6 +119,25 @@ if (portArg) {
   sessionOpts.autoDiscover = false;
 }
 if (dataRoot) sessionOpts.dataRoot = path.resolve(dataRoot);
+const bundledGalleryHi = path.join(
+  repoRoot,
+  "assets",
+  "themes",
+  "internal-beyond",
+  "bg-canvas-4k.png",
+);
+const bundledGalleryLo = path.join(
+  repoRoot,
+  "assets",
+  "themes",
+  "internal-beyond",
+  "bg-canvas.png",
+);
+if (fs.existsSync(bundledGalleryHi)) {
+  sessionOpts.bundledGalleryImagePath = bundledGalleryHi;
+} else if (fs.existsSync(bundledGalleryLo)) {
+  sessionOpts.bundledGalleryImagePath = bundledGalleryLo;
+}
 
 const SessionClass = hostKind === "dsh" ? adapter.DshSession : adapter.BeautiSession;
 const session = new SessionClass(sessionOpts);
@@ -172,6 +192,7 @@ function publicTheme(theme) {
     name: theme.name,
     type: theme.type,
     savedAt: theme.savedAt,
+    ...(theme.bundled ? { bundled: true } : {}),
     ...(typeof theme.videoPositionSec === "number"
       ? { videoPositionSec: theme.videoPositionSec }
       : {}),
@@ -287,10 +308,14 @@ const server = http.createServer(
         send(res, 400, { ok: false, error: "必须提供 imagePath。" });
         return;
       }
-      const result = await session.apply({
+      const imageInput = {
         type: "image",
         imagePath: path.resolve(body.imagePath),
-      });
+      };
+      if (body.effects && typeof body.effects === "object") {
+        imageInput.effects = body.effects;
+      }
+      const result = await session.apply(imageInput);
       send(res, result.ok ? 200 : 422, result);
       return;
     }
