@@ -7,7 +7,7 @@
   const clientId =
     globalThis.crypto?.randomUUID?.() ||
     `bc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  const desiredModes = { fish: false, muted: true, tone: "dark" };
+  const desiredModes = { fish: false, muted: true, tone: "auto" };
   let activePayload = null;
   let playbackBlocked = false;
   const systemDarkMedia = globalThis.matchMedia?.("(prefers-color-scheme: dark)") ?? null;
@@ -59,31 +59,30 @@ html[data-bc-fish="true"] #beauticode-bg-stage::after{background:transparent!imp
 #beauticode-bg-stage img{z-index:0}
 #beauticode-bg-stage video{z-index:1}
 html[data-bc-active="true"] #root{position:relative;z-index:1;background:transparent!important}
+html[data-bc-active="true"] [class*="_fade"]{display:none!important}
 html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
 `;
   document.head.append(style);
 
-  function resolvedTone() {
-    if (desiredModes.tone !== "auto") return desiredModes.tone;
+  function dshAppearance() {
+    const body = document.body;
+    if (body?.hasAttribute("data-ds-dark-theme")) return "dark";
+    const scheme = document.documentElement.style.colorScheme;
+    if (scheme === "dark" || scheme === "light") return scheme;
     return systemDarkMedia?.matches ? "dark" : "light";
   }
 
+  function resolvedTone() {
+    return dshAppearance();
+  }
+
   function isDshThemeSynced(tone = resolvedTone()) {
-    const body = document.body;
-    if (!body) return false;
-    return (
-      body.hasAttribute("data-ds-dark-theme") === (tone === "dark") &&
-      document.documentElement.style.colorScheme === tone
-    );
+    return document.documentElement.dataset.bcResolvedTone === tone;
   }
 
   function syncDshTheme() {
     const tone = resolvedTone();
-    const root = document.documentElement;
-    const body = document.body;
-    root.dataset.bcResolvedTone = tone;
-    if (root.style.colorScheme !== tone) root.style.colorScheme = tone;
-    if (body) body.toggleAttribute("data-ds-dark-theme", tone === "dark");
+    document.documentElement.dataset.bcResolvedTone = tone;
     return isDshThemeSynced(tone);
   }
 

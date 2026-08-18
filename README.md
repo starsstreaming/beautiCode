@@ -28,7 +28,7 @@
 
 beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex**。
 
-它不包含、不安装、也不启动 DSH。请先自行安装 DeepSeek Harness 并运行 `dsh web`，再启动 beautiCode，选中 DeepSeek Harness 或 Codex，就可以把电脑里的：
+它不包含、不安装、也不启动 DSH。请先自行安装 DeepSeek Harness 并运行 `dsh web`。插件装好后，DSH 侧栏「设置」上方会出现「背景」，不必再开托盘。Codex Desktop 仍走 beautiCode 托盘。可以把电脑里的：
 
 * 图片
 * 动态壁纸
@@ -120,7 +120,7 @@ Ctrl + Shift + Space
 深夜电台
 ```
 
-保存后，可以直接从托盘菜单切换。
+保存后，可以从 DSH 侧栏「背景」或托盘菜单切换。
 
 对于视频主题，beautiCode 还会记录播放进度。
 
@@ -152,7 +152,7 @@ Ctrl + Shift + Space
 想直接使用 beautiCode，可以下载 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/latest)。
 安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm。
 Codex Desktop 路径与原来一样：启动后选 **Codex Desktop**，托盘会按需拉起 Codex。
-DeepSeek Harness 由你自己运行：把插件装进 DSH profile，再启动 `dsh web`，然后在选择框里选 **DeepSeek Harness**。beautiCode 绝不替你启动 DSH。页面打开后可以用 `/bg`、`/bg-theme`、`/bg-clear`，或直接跟 AI 说把本机图片/视频设成背景。
+DeepSeek Harness 由你自己运行：把插件装进 DSH profile，再启动 `dsh web`。beautiCode 绝不替你启动 DSH。页面打开后，用侧栏「背景」从文件夹选图片或 MP4；也可以用 `/bg`、`/bg-theme`、`/bg-clear`，或直接跟 AI 说把本机图片/视频设成背景。下次打开 DSH 会恢复上次的背景。
 
 <p align="center">
   <img width="320" alt="Windows 安装包" src="https://github.com/user-attachments/assets/8c16eeb9-94d0-4f19-a816-b32fba8a110c" />
@@ -182,7 +182,9 @@ dsh web
 npx @deepseek-ai/dsh web
 ```
 
-再启动 beautiCode：选 **Codex Desktop** 仍由托盘拉起 Codex；选 **DeepSeek Harness** 则连接你已经启动的 DSH 网页。
+打开 DSH 网页后，侧栏「设置」上方有「背景」：可从文件夹选图片或 MP4、清除、开关声音、切换已保存主题。网页控制台没有摸鱼。外观浅色/深色仍用 DSH 自己的设置。下次启动会恢复上次背景。
+
+Codex Desktop 仍要开 beautiCode 托盘。选 **DeepSeek Harness** 时托盘只连接你已经启动的 DSH 网页，不会替你启动 DSH。
 
 若自动写入失败，才需要手动安装插件。把路径换成实际安装目录（默认是 `%LOCALAPPDATA%\Programs\beautiCode`）：
 
@@ -216,7 +218,8 @@ npm install
 # 若要手动安装（dsh plugin add 需要 pnpm）：
 #   npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
 npx @deepseek-ai/dsh web
-npm run tray
+# DSH 侧栏「背景」即可换图换视频。托盘只在要用 Codex 或摸鱼热键时再开：
+# npm run tray
 ```
 
 或打开宿主选择器：
