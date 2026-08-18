@@ -77,7 +77,6 @@ beautiCode 可以让你：
 
 ```sh
 npx beauticode-dsh
-npx @deepseek-ai/dsh web
 ```
 
 `npx beauticode-dsh` 会从 npm 下载插件并写入你的 DSH profile，**不需要 pnpm，也不需要再执行 `dsh plugin add`**。已把 `dsh` 装到 PATH 时，第二行也可以写成 `dsh web`。
