@@ -1,0 +1,56 @@
+name: Publish GitHub npm package
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-github-package.yml
+  workflow_dispatch:
+    inputs:
+      version:
+        description: npmjs version to mirror
+        required: true
+        default: "1.0.5"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+
+      - name: Download the verified npmjs package
+        env:
+          VERSION: ${{ inputs.version || '1.0.5' }}
+        run: |
+          mkdir -p publish-source
+          npm pack "beauticode-dsh@${VERSION}"             --registry=https://registry.npmjs.org             --pack-destination publish-source
+          tar -xzf publish-source/*.tgz             -C publish-source             --strip-components=1
+
+      - name: Scope the package for GitHub Packages
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const file = "publish-source/package.json";
+          const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+          pkg.name = "@starsstreaming/beauticode-dsh";
+          pkg.publishConfig = {
+            ...(pkg.publishConfig || {}),
+            access: "public",
+            registry: "https://npm.pkg.github.com",
+          };
+          fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
+          NODE
+
+      - name: Publish to GitHub Packages
+        run: npm publish ./publish-source --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
