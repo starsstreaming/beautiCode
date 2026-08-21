@@ -17,6 +17,12 @@ const powerShellAvailable =
 const requiresPowerShell = {
   skip: powerShellAvailable ? false : "PowerShell is not available on this runner.",
 };
+const requiresWindowsPowerShell = {
+  skip:
+    process.platform === "win32" && powerShellAvailable
+      ? false
+      : "This installer integration requires Windows PowerShell and junctions.",
+};
 
 const scripts = [
   "scripts/start-beauticode.ps1",
@@ -200,7 +206,7 @@ test("picker DryRun routes DSH to the tray and Codex to its launcher", requiresP
   }
 });
 
-test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresPowerShell, () => {
+test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresWindowsPowerShell, () => {
   const script = path.join(repoRoot, "scripts/install-dsh-plugin.ps1");
   const pluginRoot = path.join(repoRoot, "integrations/deepseek-harness");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-home-"));
