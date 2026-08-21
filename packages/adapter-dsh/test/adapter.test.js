@@ -401,7 +401,18 @@ test("DSH session yields the injector lock when the tray claims it", async (t) =
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(session.isOpen, false);
-  await assert.rejects(() => fs.readFile(path.join(dataRoot, "injector.lock")), {
+  const lockPath = path.join(dataRoot, "injector.lock");
+  const lockDeadline = Date.now() + 3_000;
+  while (Date.now() < lockDeadline) {
+    try {
+      await fs.access(lockPath);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } catch (error) {
+      if (error?.code === "ENOENT") break;
+      throw error;
+    }
+  }
+  await assert.rejects(() => fs.readFile(lockPath), {
     code: "ENOENT",
   });
 });
