@@ -3,6 +3,17 @@ import { SCHEMA_ID } from "./constants.js";
 export type BackgroundType = "image" | "video" | "clear";
 export type BackgroundTone = "dark" | "light" | "auto";
 export type HostKind = "codex" | "dsh";
+export type MediaImportMode = "managed" | "local";
+export type AppliedSourceMode = MediaImportMode | "clear";
+
+export interface ApplyTimings {
+  totalMs: number;
+  phases: Record<string, number>;
+}
+
+export type MediaSource =
+  | { kind: "managed"; file: string }
+  | { kind: "local"; path: string };
 
 export interface HostCapabilities {
   image: boolean;
@@ -52,10 +63,12 @@ export function effectsForPreset(preset: AtmospherePreset): BackgroundEffects {
 
 export interface BackgroundMedia {
   type: "image" | "video";
-  /** Basename only, inside the active/staging directory. */
-  image: string;
-  /** Basename only; required when type === "video". */
+  /** Managed poster basename; required for video backgrounds. */
+  image?: string;
+  /** Legacy managed primary basename; required for managed videos. */
   video?: string;
+  /** Primary source. Omitted means the legacy managed image/video fields apply. */
+  source?: MediaSource;
   /** Optional live wallpaper (rain / overlay / water). Image themes only. */
   effects?: BackgroundEffects;
 }
@@ -92,12 +105,20 @@ export interface ValidatedVideo {
 }
 
 export type ApplyInput =
-  | { type: "image"; imagePath: string; effects?: BackgroundEffects }
+  | {
+      type: "image";
+      imagePath: string;
+      /** local avoids browser/upload and active-media copies; managed is legacy behavior. */
+      source?: MediaImportMode;
+      effects?: BackgroundEffects;
+    }
   | {
       type: "video";
       /** Optional poster. When omitted, active poster is reused or a tiny PNG is staged. */
       imagePath?: string;
       videoPath: string;
+      /** local references the source; managed copies it into the media store. */
+      source?: MediaImportMode;
       /** Optional initial seek used by transactional saved-theme restore. */
       startAt?: number;
     }
@@ -179,9 +200,15 @@ export type ApplyResult =
       ok: true;
       generation: number;
       mode: BackgroundType;
+      /** Truthful source contract for UI/API callers. */
+      sourceMode?: AppliedSourceMode;
+      /** Monotonic phase durations collected by ApplyTransaction. */
+      timings?: ApplyTimings;
     }
   | {
       ok: false;
       error: string;
       rolledBack: boolean;
+      sourceMode?: AppliedSourceMode;
+      timings?: ApplyTimings;
     };

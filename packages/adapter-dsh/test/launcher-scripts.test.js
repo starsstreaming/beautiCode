@@ -8,6 +8,21 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
+const powerShellExecutable = process.platform === "win32" ? "powershell.exe" : "pwsh";
+const powerShellAvailable =
+  spawnSync(powerShellExecutable, ["-NoProfile", "-Command", "exit 0"], {
+    encoding: "utf8",
+    windowsHide: true,
+  }).status === 0;
+const requiresPowerShell = {
+  skip: powerShellAvailable ? false : "PowerShell is not available on this runner.",
+};
+const requiresWindowsPowerShell = {
+  skip:
+    process.platform === "win32" && powerShellAvailable
+      ? false
+      : "This installer integration requires Windows PowerShell and junctions.",
+};
 
 const scripts = [
   "scripts/start-beauticode.ps1",
@@ -17,7 +32,7 @@ const scripts = [
   "apps/tray/start-tray.ps1",
 ];
 
-test("host scripts parse", () => {
+test("host scripts parse", requiresPowerShell, () => {
   for (const relative of scripts) {
     const full = path.join(repoRoot, relative);
     const command = [
@@ -26,7 +41,7 @@ test("host scripts parse", () => {
       "if ($errors -and $errors.Count) { $errors | ForEach-Object { $_.ToString() }; exit 1 }",
     ].join("; ");
     const result = spawnSync(
-      "powershell.exe",
+      powerShellExecutable,
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
       { encoding: "utf8", windowsHide: true },
     );
@@ -85,14 +100,14 @@ test("README documents installer auto-wiring, npx, and custom install paths", ()
   assert.match(readme, /(?:一般|也)不需要再执行 `dsh plugin add`/);
 });
 
-test("install-dsh-plugin writes an integration note for the actual install root", () => {
+test("install-dsh-plugin writes an integration note for the actual install root", requiresPowerShell, () => {
   const script = path.join(repoRoot, "scripts/install-dsh-plugin.ps1");
   const pluginRoot = path.join(repoRoot, "integrations/deepseek-harness");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-home-"));
   const installRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bc-install-"));
   try {
     const add = spawnSync(
-      "powershell.exe",
+      powerShellExecutable,
       [
         "-NoProfile",
         "-ExecutionPolicy",
@@ -114,7 +129,7 @@ test("install-dsh-plugin writes an integration note for the actual install root"
     assert.match(note, /npx @deepseek-ai\/dsh web/);
     assert.match(note, new RegExp(installRoot.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")));
     const remove = spawnSync(
-      "powershell.exe",
+      powerShellExecutable,
       [
         "-NoProfile",
         "-ExecutionPolicy",
@@ -166,14 +181,14 @@ test("picker and tray never spawn a DSH process", () => {
   assert.match(installer, /integration-note\.zh\.txt/);
 });
 
-test("picker DryRun routes DSH to the tray and Codex to its launcher", () => {
+test("picker DryRun routes DSH to the tray and Codex to its launcher", requiresPowerShell, () => {
   const script = path.join(repoRoot, "scripts/start-beauticode.ps1");
   for (const [host, needle] of [
     ["dsh", "start-tray.ps1"],
     ["codex", "start-beauticode-engine.ps1"],
   ]) {
     const result = spawnSync(
-      "powershell.exe",
+      powerShellExecutable,
       [
         "-NoProfile",
         "-ExecutionPolicy",
@@ -191,13 +206,13 @@ test("picker DryRun routes DSH to the tray and Codex to its launcher", () => {
   }
 });
 
-test("install-dsh-plugin wires a missing DSH home and can uninstall", () => {
+test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresWindowsPowerShell, () => {
   const script = path.join(repoRoot, "scripts/install-dsh-plugin.ps1");
   const pluginRoot = path.join(repoRoot, "integrations/deepseek-harness");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-home-"));
   try {
     const add = spawnSync(
-      "powershell.exe",
+      powerShellExecutable,
       [
         "-NoProfile",
         "-ExecutionPolicy",
@@ -230,7 +245,7 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", () => {
     );
     fs.writeFileSync(path.join(web, "cordis.patch.yml"), "[]\n", "utf8");
     const migrate = spawnSync(
-      "powershell.exe",
+      powerShellExecutable,
       [
         "-NoProfile",
         "-ExecutionPolicy",
@@ -258,7 +273,7 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", () => {
     );
 
     const remove = spawnSync(
-      "powershell.exe",
+      powerShellExecutable,
       [
         "-NoProfile",
         "-ExecutionPolicy",

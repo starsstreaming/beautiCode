@@ -12,6 +12,7 @@ export interface DshBridgeStatus {
   current: { generation: number; media: "image" | "video" | "clear" } | null;
   readyClients: number;
   failedClients: number;
+  lastRenderError?: string | null;
   visibleClients: number;
   modeReadyClients: number;
   blockedClients: number;
@@ -193,10 +194,16 @@ export class DshHostApplier implements HostApplier {
             details: { ...last },
           };
         }
-        if (currentMatches && last.failedClients > 0 && last.readyClients === 0) {
+        if (
+          currentMatches &&
+          last.failedClients > 0 &&
+          last.readyClients === 0 &&
+          typeof last.lastRenderError === "string" &&
+          last.lastRenderError
+        ) {
           return {
             status: "fail",
-            reason: "DeepSeek Harness client failed to render the background.",
+            reason: last.lastRenderError,
             details: { ...last },
           };
         }

@@ -41,6 +41,8 @@ async function mockBridge(expectedToken = TOKEN) {
   let received = null;
   let connectedClients = 1;
   let renderReady = true;
+  let renderFailed = false;
+  let renderError = null;
   let applyCount = 0;
   let modes = { fish: false, muted: true, tone: "dark" };
   let playbackTime = 8.25;
@@ -71,7 +73,8 @@ async function mockBridge(expectedToken = TOKEN) {
         connectedClients,
         current,
         readyClients: current && connectedClients > 0 && renderReady ? 1 : 0,
-        failedClients: 0,
+        failedClients: current && connectedClients > 0 && (renderFailed || renderError) ? 1 : 0,
+        lastRenderError: renderError,
         visibleClients: current && current.media !== "clear" && connectedClients > 0 && renderReady ? 1 : 0,
         modeReadyClients: connectedClients > 0 ? 1 : 0,
         blockedClients: 0,
@@ -107,6 +110,17 @@ async function mockBridge(expectedToken = TOKEN) {
     },
     setRenderReady(value) {
       renderReady = value;
+    },
+    setRenderError(value) {
+      renderError = value;
+      if (value) {
+        renderFailed = true;
+        renderReady = false;
+      }
+    },
+    setRenderFailed(value) {
+      renderFailed = value;
+      if (value) renderReady = false;
     },
     setPlaybackTime(value) {
       playbackTime = value;
@@ -217,6 +231,59 @@ test("verify is inconclusive when no DSH browser page is connected", async (t) =
   assert.match(verified.reason, /No DeepSeek Harness browser client/);
 });
 
+test("verify preserves the renderer media failure details", async (t) => {
+  const bridge = await mockBridge();
+  t.after(() => bridge.close());
+  bridge.setRenderError(
+    "视频解码器报告失败；mediaError=MEDIA_ERR_DECODE；readyState=1；networkState=2；paused=true",
+  );
+  const host = new DshHostApplier({ baseUrl: bridge.url, token: TOKEN, pollMs: 5 });
+  await host.apply({
+    generation: 9,
+    media: "video",
+    imageDataUrl: null,
+    imageUrl: "http://127.0.0.1:45678/media/image?t=poster",
+    video: {
+      mode: "server",
+      srcUrl: "http://127.0.0.1:45678/media/video?t=movie",
+      localPath: "C:\\movie.mp4",
+    },
+    cssText: "",
+  });
+  const verified = await host.verify(
+    { generation: 9, media: "video" },
+    { deadlineMs: 50 },
+  );
+  assert.equal(verified.status, "fail");
+  assert.match(verified.reason, /MEDIA_ERR_DECODE/);
+  assert.match(verified.reason, /readyState=1/);
+});
+
+test("verify does not treat a generic transient heartbeat as terminal failure", async (t) => {
+  const bridge = await mockBridge();
+  t.after(() => bridge.close());
+  bridge.setRenderReady(false);
+  bridge.setRenderFailed(true);
+  const host = new DshHostApplier({ baseUrl: bridge.url, token: TOKEN, pollMs: 5 });
+  await host.apply({
+    generation: 10,
+    media: "video",
+    imageDataUrl: null,
+    imageUrl: "http://127.0.0.1:45678/media/image?t=poster",
+    video: {
+      mode: "server",
+      srcUrl: "http://127.0.0.1:45678/media/video?t=movie",
+      localPath: "C:\\movie.mp4",
+    },
+    cssText: "",
+  });
+  const verified = await host.verify(
+    { generation: 10, media: "video" },
+    { deadlineMs: 20 },
+  );
+  assert.equal(verified.status, "inconclusive");
+});
+
 test("DSH session applies MP4, restores its position, and controls modes", async (t) => {
   const bridge = await mockBridge(null);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-dsh-test-"));
@@ -241,9 +308,22 @@ test("DSH session applies MP4, restores its position, and controls modes", async
   assert.equal(applied.ok, true);
   assert.equal((await session.status()).manifest.background?.type, "image");
 
-  const videoApplied = await session.apply({ type: "video", imagePath: image, videoPath: video });
+  const videoApplied = await session.applyAndSaveTheme(
+    { type: "video", imagePath: image, videoPath: video, source: "local" },
+    "本地视频主题",
+  );
   assert.equal(videoApplied.ok, true);
+  assert.equal(videoApplied.theme?.name, "本地视频主题");
   assert.equal((await session.status()).manifest.background?.type, "video");
+  assert.equal((await session.status()).manifest.background?.source?.path, video);
+  assert.deepEqual((await fs.readdir(path.join(dataRoot, "active"))).sort(), [
+    "background.json",
+    "poster.png",
+  ]);
+  assert.equal(
+    (await session.listSavedThemes()).find((theme) => !theme.bundled)?.id,
+    videoApplied.theme?.id,
+  );
   assert.equal((await session.setFishMode(true)).ok, true);
   assert.equal((await session.setMuted(false)).ok, true);
   assert.equal((await session.setBackgroundTone("light")).ok, true);
@@ -281,7 +361,8 @@ test("DSH watch loop does not republish a matching generation while render ack i
     await fs.rm(root, { recursive: true, force: true });
   });
   await session.start();
-  assert.equal((await session.apply({ type: "image", imagePath: image })).ok, true);
+  const firstApply = await session.apply({ type: "image", imagePath: image });
+  assert.equal(firstApply.ok, true, JSON.stringify(firstApply));
   const applyCount = bridge.applyCount;
 
   bridge.setRenderReady(false);
@@ -320,7 +401,18 @@ test("DSH session yields the injector lock when the tray claims it", async (t) =
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(session.isOpen, false);
-  await assert.rejects(() => fs.readFile(path.join(dataRoot, "injector.lock")), {
+  const lockPath = path.join(dataRoot, "injector.lock");
+  const lockDeadline = Date.now() + 3_000;
+  while (Date.now() < lockDeadline) {
+    try {
+      await fs.access(lockPath);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } catch (error) {
+      if (error?.code === "ENOENT") break;
+      throw error;
+    }
+  }
+  await assert.rejects(() => fs.readFile(lockPath), {
     code: "ENOENT",
   });
 });
@@ -347,11 +439,18 @@ test("DSH session rolls disk state back when the bridge disappears", async (t) =
   const before = (await session.status()).manifest;
   await bridge.close();
 
-  const failed = await session.apply({ type: "image", imagePath: secondImage });
+  const failed = await session.applyAndSaveTheme(
+    { type: "image", imagePath: secondImage, source: "local" },
+    "不应保留",
+  );
   assert.equal(failed.ok, false);
   assert.equal(failed.rolledBack, true);
   const after = (await session.status()).manifest;
   assert.deepEqual(after.background, before.background);
+  assert.deepEqual(
+    (await session.listSavedThemes()).filter((theme) => !theme.bundled),
+    [],
+  );
   assert.ok(after.generation > before.generation);
   assert.deepEqual(
     await fs.readFile(path.join(root, "data", "active", after.background.image)),
