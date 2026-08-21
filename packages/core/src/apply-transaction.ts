@@ -9,10 +9,17 @@ import {
   MediaServerController,
   type MediaAssetHandle,
 } from "./media-server.js";
+import {
+  isLocalBackgroundSource,
+  resolveBackgroundImagePath,
+  resolveBackgroundVideoPath,
+} from "./media-source.js";
 import { detectImageMime } from "./media-validation.js";
 import type {
   ApplyInput,
   ApplyResult,
+  AppliedSourceMode,
+  ApplyTimings,
   BackgroundManifest,
   HostApplier,
   HostApplyPayload,
@@ -22,6 +29,8 @@ export interface ApplyTransactionOptions {
   store: BackgroundStore;
   media: MediaServerController;
   host?: HostApplier | null;
+  /** DSH uses the authenticated loopback image URL and does not need a data URL. */
+  includeImageDataUrl?: boolean;
   /** Background-only CSS text injected with every apply. */
   cssText?: string;
   verifyDeadlineMs?: number;
@@ -56,6 +65,17 @@ export interface StagedMediaPair {
   video: MediaAssetHandle | null;
 }
 
+export interface ApplyTransactionHooks {
+  /**
+   * Runs after the renderer has acknowledged the new background and the media
+   * handles have been promoted, but before the rollback snapshot is cleared.
+   * Throwing keeps the whole apply recoverable.
+   */
+  beforeFinalize?: (manifest: BackgroundManifest) => Promise<void>;
+  /** Best-effort cleanup for state created by beforeFinalize. */
+  onRollback?: () => Promise<void>;
+}
+
 /**
  * Orchestrates snapshot → disk commit → media stage → host apply → verify →
  * finalize/rollback. Disk success is never treated as user-visible success when
@@ -72,6 +92,7 @@ export class ApplyTransaction {
   readonly cssText: string;
   readonly verifyDeadlineMs: number;
   readonly offline: boolean;
+  readonly includeImageDataUrl: boolean;
   #busy = false;
 
   constructor(opts: ApplyTransactionOptions) {
@@ -81,13 +102,17 @@ export class ApplyTransaction {
     this.cssText = opts.cssText ?? DEFAULT_CSS;
     this.verifyDeadlineMs = opts.verifyDeadlineMs ?? 30_000;
     this.offline = opts.offline ?? false;
+    this.includeImageDataUrl = opts.includeImageDataUrl ?? true;
   }
 
   get busy(): boolean {
     return this.#busy;
   }
 
-  async run(input: ApplyInput): Promise<ApplyResult> {
+  async run(
+    input: ApplyInput,
+    hooks: ApplyTransactionHooks = {},
+  ): Promise<ApplyResult> {
     if (this.#busy) {
       return {
         ok: false,
@@ -97,7 +122,9 @@ export class ApplyTransaction {
     }
     this.#busy = true;
     try {
-      return await this.store.withExclusiveMutation(() => this.#runExclusive(input));
+      return await this.store.withExclusiveMutation(() =>
+        this.#runExclusive(input, hooks),
+      );
     } catch (error) {
       return {
         ok: false,
@@ -109,62 +136,102 @@ export class ApplyTransaction {
     }
   }
 
-  async #runExclusive(input: ApplyInput): Promise<ApplyResult> {
+  async #runExclusive(
+    input: ApplyInput,
+    hooks: ApplyTransactionHooks,
+  ): Promise<ApplyResult> {
+    const startedAt = performance.now();
+    const phases: Record<string, number> = {};
+    const measure = async <T>(name: string, work: () => Promise<T>): Promise<T> => {
+      const phaseStartedAt = performance.now();
+      try {
+        return await work();
+      } finally {
+        phases[name] = Math.round((performance.now() - phaseStartedAt) * 10) / 10;
+      }
+    };
+    const requestedSourceMode: AppliedSourceMode =
+      input.type === "clear" ? "clear" : input.source ?? "managed";
+    const timings = (): ApplyTimings => ({
+      totalMs: Math.round((performance.now() - startedAt) * 10) / 10,
+      phases: { ...phases },
+    });
     let snapshot: BackgroundSnapshot | null = null;
     let staged: StagedMediaPair | null = null;
     let runtimeVideoPath: string | null = null;
+    let finalizeStarted = false;
     try {
-      await this.store.init();
-      snapshot = await this.store.snapshot();
+      await measure("initialize", () => this.store.init());
+      snapshot = await measure("snapshot", () => this.store.snapshot());
 
-      const manifest = await this.store.commitImport(input);
-      staged = await this.#stageMediaFor(manifest);
+      const manifest = await measure("commitImport", () => this.store.commitImport(input));
+      const sourceMode: AppliedSourceMode = !manifest.background
+        ? "clear"
+        : isLocalBackgroundSource(manifest.background)
+          ? "local"
+          : "managed";
+      if (requestedSourceMode === "local" && sourceMode !== "local") {
+        throw new Error("Local import contract was not preserved by the media store.");
+      }
+      staged = await measure("stageMedia", () => this.#stageMediaFor(manifest));
 
       if (!this.offline && this.host) {
-        const payload = await this.#buildPayload(
-          manifest,
-          staged,
-          input.type === "video" ? input.startAt : undefined,
+        const payload = await measure("buildPayload", () =>
+          this.#buildPayload(
+            manifest,
+            staged,
+            input.type === "video" ? input.startAt : undefined,
+          ),
         );
         runtimeVideoPath = payload.video?.localPath ?? null;
-        await this.host.apply(payload);
-        const verify = await this.host.verify(
-          {
-            generation: manifest.generation,
-            media: manifest.background?.type ?? "clear",
-          },
-          { deadlineMs: this.verifyDeadlineMs },
+        await measure("hostApply", () => this.host!.apply(payload));
+        const verify = await measure("rendererVerify", () =>
+          this.host!.verify(
+            {
+              generation: manifest.generation,
+              media: manifest.background?.type ?? "clear",
+            },
+            { deadlineMs: this.verifyDeadlineMs },
+          ),
         );
         if (verify.status !== "pass") {
-          await this.#rollback(snapshot, staged);
+          await measure("rollback", () => this.#rollback(snapshot!, staged));
           staged = null;
           snapshot = null;
           return {
             ok: false,
             error: `Live verify did not pass (${verify.status}): ${verify.reason}`,
             rolledBack: true,
+            sourceMode,
+            timings: timings(),
           };
         }
       }
 
-      await this.media.commit(staged);
-      await this.store.pruneRuntimeMedia(runtimeVideoPath);
+      await measure("mediaCommit", () => this.media.commit(staged!));
+      await measure("pruneRuntimeMedia", () => this.store.pruneRuntimeMedia(runtimeVideoPath));
       staged = null;
+      if (hooks.beforeFinalize) {
+        finalizeStarted = true;
+        await measure("saveTheme", () => hooks.beforeFinalize!(manifest));
+      }
       if (snapshot) {
-        await this.store.clearSnapshot(snapshot);
+        await measure("clearSnapshot", () => this.store.clearSnapshot(snapshot!));
         snapshot = null;
       }
       return {
         ok: true,
         generation: manifest.generation,
         mode: manifest.background?.type ?? "clear",
+        sourceMode,
+        timings: timings(),
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       let rolledBack = false;
       if (snapshot) {
         try {
-          await this.#rollback(snapshot, staged);
+          await measure("rollback", () => this.#rollback(snapshot!, staged));
           staged = null;
           snapshot = null;
           rolledBack = true;
@@ -176,7 +243,16 @@ export class ApplyTransaction {
         await this.#abortPair(staged);
         staged = null;
       }
-      return { ok: false, error: message, rolledBack };
+      if (finalizeStarted && hooks.onRollback) {
+        await measure("finalizeRollback", () => hooks.onRollback!()).catch(() => {});
+      }
+      return {
+        ok: false,
+        error: message,
+        rolledBack,
+        sourceMode: requestedSourceMode,
+        timings: timings(),
+      };
     }
   }
 
@@ -185,13 +261,19 @@ export class ApplyTransaction {
       return { image: null, video: null };
     }
 
-    const imagePath = path.join(
+    const imagePath = resolveBackgroundImagePath(
       this.store.paths.activeDir,
-      manifest.background.image,
+      manifest.background,
     );
-    const image = await this.media.stage(imagePath);
+    if (!imagePath) throw new Error("Background has no image source.");
+    const image = await this.media.stage(imagePath, {
+      validation:
+        manifest.background.type === "image" && isLocalBackgroundSource(manifest.background)
+          ? "fast"
+          : "full",
+    });
     let video: MediaAssetHandle | null = null;
-    if (manifest.background.type === "video" && manifest.background.video) {
+    if (manifest.background.type === "video") {
       // DSH streams this handle for the lifetime of the active <video>. On
       // Windows, serving active/background.mp4 directly keeps the active
       // directory open and the next atomic directory swap fails with EPERM.
@@ -199,7 +281,9 @@ export class ApplyTransaction {
       if (!runtimeVideoPath) {
         throw new Error("Video media staging requires a detached runtime copy.");
       }
-      video = await this.media.stage(runtimeVideoPath);
+      video = await this.media.stage(runtimeVideoPath, {
+        validation: isLocalBackgroundSource(manifest.background) ? "fast" : "full",
+      });
     }
     return { image, video };
   }
@@ -215,6 +299,7 @@ export class ApplyTransaction {
       staged,
       this.cssText,
       videoStartAt,
+      { includeImageDataUrl: this.includeImageDataUrl },
     );
   }
 
@@ -267,6 +352,7 @@ export async function buildHostApplyPayload(
   staged: StagedMediaPair | null,
   cssText: string,
   videoStartAt?: number,
+  opts: { includeImageDataUrl?: boolean } = {},
 ): Promise<HostApplyPayload> {
   if (!manifest.background) {
     return {
@@ -279,11 +365,13 @@ export async function buildHostApplyPayload(
     };
   }
 
-  const imagePath = path.join(
+  const imagePath = resolveBackgroundImagePath(
     store.paths.activeDir,
-    manifest.background.image,
+    manifest.background,
   );
-  const imageDataUrl = await fileToDataUrl(imagePath);
+  if (!imagePath) throw new Error("Background has no image source.");
+  const imageDataUrl =
+    opts.includeImageDataUrl === false ? null : await fileToDataUrl(imagePath);
   const imageUrl = staged?.image?.srcUrl ?? null;
   if (manifest.background.type === "image") {
     return {
@@ -296,14 +384,11 @@ export async function buildHostApplyPayload(
       atmosphere: manifest.background.effects ?? null,
     };
   }
-  if (!manifest.background.video) {
-    throw new Error("Video background is missing a video basename.");
-  }
-
-  const videoPath = path.join(
+  const videoPath = resolveBackgroundVideoPath(
     store.paths.activeDir,
-    manifest.background.video,
+    manifest.background,
   );
+  if (!videoPath) throw new Error("Video background has no video source.");
   const runtimeVideoPath = await store.prepareRuntimeVideo(manifest);
   if (!runtimeVideoPath) {
     throw new Error("Video payload requires a detached runtime copy.");

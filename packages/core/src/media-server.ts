@@ -1,7 +1,9 @@
 import http from "node:http";
 import fs from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { pipeline } from "node:stream/promises";
 import {
   DEFAULT_TRUSTED_ORIGINS,
   IMAGE_EXTENSIONS,
@@ -16,6 +18,7 @@ import {
 import {
   validateImageFile,
   validateVideoFile,
+  type MediaValidationMode,
 } from "./media-validation.js";
 
 /**
@@ -39,6 +42,7 @@ export interface MediaAssetHandle {
   mtimeMs: number;
   ctimeMs: number;
   mime: string;
+  validation: MediaValidationMode;
   token: string;
   route: string;
   /** Base URL without query token. */
@@ -133,6 +137,7 @@ type AssetRecord = {
   mtimeMs: number;
   ctimeMs: number;
   mime: string;
+  validation: MediaValidationMode;
   token: string;
   route: string;
 };
@@ -146,6 +151,8 @@ export class LoopbackMediaHub {
   readonly maxVideoBytes: number;
   private server: http.Server | null = null;
   private sockets = new Set<import("node:net").Socket>();
+  private transferControllers = new Set<AbortController>();
+  private transfers = new Set<Promise<void>>();
   private assets = new Map<string, AssetRecord>();
   private closed = false;
   private port = 0;
@@ -210,7 +217,11 @@ export class LoopbackMediaHub {
     }
   }
 
-  async addFile(filePath: string): Promise<MediaAssetHandle> {
+  async addFile(
+    filePath: string,
+    opts: { validation?: MediaValidationMode } = {},
+  ): Promise<MediaAssetHandle> {
+    const validation = opts.validation ?? "full";
     const ext = path.extname(filePath).toLowerCase();
     let kind: "image" | "video";
     let mime: string;
@@ -225,6 +236,7 @@ export class LoopbackMediaHub {
     if ((IMAGE_EXTENSIONS as readonly string[]).includes(ext)) {
       const v = await validateImageFile(filePath, {
         maxBytes: this.maxImageBytes,
+        mode: validation,
       });
       kind = "image";
       mime = v.mime;
@@ -238,6 +250,7 @@ export class LoopbackMediaHub {
     } else if (ext === VIDEO_EXTENSION) {
       const v = await validateVideoFile(filePath, {
         maxBytes: this.maxVideoBytes,
+        mode: validation,
       });
       kind = "video";
       mime = VIDEO_MIME;
@@ -279,6 +292,7 @@ export class LoopbackMediaHub {
       mtimeMs,
       ctimeMs,
       mime,
+      validation,
       token,
       route,
     };
@@ -295,6 +309,8 @@ export class LoopbackMediaHub {
     this.closed = true;
     this.assets.clear();
     await this.listenPromise?.catch(() => {});
+    for (const controller of this.transferControllers) controller.abort();
+    await Promise.allSettled([...this.transfers]);
     await this.closeServerOnly();
   }
 
@@ -310,6 +326,7 @@ export class LoopbackMediaHub {
       mtimeMs: rec.mtimeMs,
       ctimeMs: rec.ctimeMs,
       mime: rec.mime,
+      validation: rec.validation,
       token: rec.token,
       route: rec.route,
       url,
@@ -343,6 +360,47 @@ export class LoopbackMediaHub {
       // Failsafe: never hang process exit on a stuck listener.
       setTimeout(resolve, 500).unref?.();
     });
+  }
+
+  private async pipeOpenedFile(
+    opened: FileHandle,
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    range: { start: number; end?: number },
+  ): Promise<void> {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const abortIfIncomplete = () => {
+      if (!response.writableFinished) controller.abort();
+    };
+    request.once("aborted", abort);
+    response.once("close", abortIfIncomplete);
+    this.transferControllers.add(controller);
+
+    const transfer = (async () => {
+      try {
+        const stream = opened.createReadStream({
+          start: range.start,
+          ...(range.end == null ? {} : { end: range.end }),
+          // The hub owns the FileHandle lifecycle. This guarantees a close on
+          // normal completion, browser Range cancellation, and hub shutdown.
+          autoClose: false,
+        });
+        if (request.aborted || response.destroyed || this.closed) controller.abort();
+        await pipeline(stream, response, { signal: controller.signal });
+      } finally {
+        request.removeListener("aborted", abort);
+        response.removeListener("close", abortIfIncomplete);
+        this.transferControllers.delete(controller);
+        await opened.close().catch(() => {});
+      }
+    })();
+    this.transfers.add(transfer);
+    try {
+      await transfer;
+    } finally {
+      this.transfers.delete(transfer);
+    }
   }
 
   private async handle(
@@ -450,6 +508,9 @@ export class LoopbackMediaHub {
         throw new Error("Media file changed or exceeded the safety limit");
       }
       if (fingerprintChanged) {
+        if (asset.validation === "fast") {
+          throw new Error("Media file changed after staging");
+        }
         const currentHash = await hashOpenedFile(opened, stat.size);
         if (currentHash !== asset.identity) {
           throw new Error("Media file content changed after staging");
@@ -495,11 +556,9 @@ export class LoopbackMediaHub {
           opened = null;
           return;
         }
-        const stream = opened.createReadStream({ start: 0, autoClose: true });
+        const streamingHandle = opened;
         opened = null;
-        stream
-          .on("error", () => response.destroy())
-          .pipe(response);
+        await this.pipeOpenedFile(streamingHandle, request, response, { start: 0 });
         return;
       }
 
@@ -513,15 +572,12 @@ export class LoopbackMediaHub {
         opened = null;
         return;
       }
-      const stream = opened.createReadStream({
+      const streamingHandle = opened;
+      opened = null;
+      await this.pipeOpenedFile(streamingHandle, request, response, {
         start: range.start,
         end: range.end,
-        autoClose: true,
       });
-      opened = null;
-      stream
-        .on("error", () => response.destroy())
-        .pipe(response);
     } catch {
       await opened?.close().catch(() => {});
       if (response.headersSent) {
@@ -601,9 +657,12 @@ export class MediaServerController {
     return this.#video;
   }
 
-  async stage(filePath: string | null | undefined): Promise<MediaAssetHandle | null> {
+  async stage(
+    filePath: string | null | undefined,
+    opts: { validation?: MediaValidationMode } = {},
+  ): Promise<MediaAssetHandle | null> {
     if (!filePath || !this.#enabled) return null;
-    return this.#hub.addFile(filePath);
+    return this.#hub.addFile(filePath, opts);
   }
 
   /**

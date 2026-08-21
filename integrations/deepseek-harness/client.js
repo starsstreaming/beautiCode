@@ -9,6 +9,7 @@
     `bc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const desiredModes = { fish: false, muted: true, tone: "auto" };
   let activePayload = null;
+  let renderPhase = "idle";
   let playbackBlocked = false;
   const systemDarkMedia = globalThis.matchMedia?.("(prefers-color-scheme: dark)") ?? null;
   let themeSyncQueued = false;
@@ -161,6 +162,9 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
   }
 
   async function acknowledgeRender(payload, ok, visible, error = null) {
+    if (activePayload === payload) {
+      renderPhase = ok ? "ready" : "failed";
+    }
     await postAck({
       kind: "render",
       generation: payload.generation,
@@ -189,7 +193,6 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
   function loadImage(url) {
     const image = new Image();
     image.alt = "";
-    image.crossOrigin = "anonymous";
     image.decoding = "async";
     return new Promise((resolve, reject) => {
       image.onload = () => resolve(image);
@@ -198,7 +201,19 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     });
   }
 
-  function waitForVideo(video) {
+  function describeVideoState(video, phase) {
+    const mediaErrorNames = {
+      1: "MEDIA_ERR_ABORTED",
+      2: "MEDIA_ERR_NETWORK",
+      3: "MEDIA_ERR_DECODE",
+      4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
+    };
+    const code = Number(video?.error?.code) || 0;
+    const mediaError = code ? mediaErrorNames[code] || `MEDIA_ERR_${code}` : "none";
+    return `${phase}；mediaError=${mediaError}；readyState=${video?.readyState ?? -1}；networkState=${video?.networkState ?? -1}；paused=${Boolean(video?.paused)}`;
+  }
+
+  function waitForVideo(video, timeoutMs = 20_000) {
     if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const done = () => {
@@ -207,14 +222,80 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       };
       const failed = () => {
         cleanup();
-        reject(new Error("MP4 加载或解码失败"));
+        reject(new Error(describeVideoState(video, "MP4 加载或解码失败")));
       };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(describeVideoState(video, "等待视频首帧超时")));
+      }, timeoutMs);
       const cleanup = () => {
+        clearTimeout(timer);
         video.removeEventListener("loadeddata", done);
         video.removeEventListener("error", failed);
       };
       video.addEventListener("loadeddata", done, { once: true });
       video.addEventListener("error", failed, { once: true });
+    });
+  }
+
+  function waitForStablePlayback(video, timeoutMs = 8_000) {
+    return new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const initialTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      let frameSeen = false;
+      let settled = false;
+      let frameRequest = null;
+
+      const cleanup = () => {
+        clearInterval(timer);
+        video.removeEventListener("playing", check);
+        video.removeEventListener("timeupdate", check);
+        video.removeEventListener("error", failed);
+        if (frameRequest != null && typeof video.cancelVideoFrameCallback === "function") {
+          video.cancelVideoFrameCallback(frameRequest);
+        }
+      };
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (error) reject(error);
+        else resolve();
+      };
+      const failed = () => {
+        finish(new Error(describeVideoState(video, "视频解码器报告失败")));
+      };
+      const check = () => {
+        if (settled) return;
+        if (video.error) {
+          failed();
+          return;
+        }
+        const progressed =
+          Number.isFinite(video.currentTime) && video.currentTime >= initialTime + 0.08;
+        if (
+          video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+          !video.paused &&
+          (frameSeen || progressed)
+        ) {
+          finish();
+          return;
+        }
+        if (performance.now() - startedAt >= timeoutMs) {
+          finish(new Error(describeVideoState(video, "视频未在稳定窗口内输出首帧")));
+        }
+      };
+      const timer = setInterval(check, 100);
+      video.addEventListener("playing", check);
+      video.addEventListener("timeupdate", check);
+      video.addEventListener("error", failed, { once: true });
+      if (typeof video.requestVideoFrameCallback === "function") {
+        frameRequest = video.requestVideoFrameCallback(() => {
+          frameSeen = true;
+          check();
+        });
+      }
+      check();
     });
   }
 
@@ -255,6 +336,7 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
   async function applyBackground(payload) {
     if (!Number.isSafeInteger(payload?.generation)) return;
     activePayload = payload;
+    renderPhase = "pending";
     document.documentElement.dataset.bcGeneration = String(payload.generation);
     syncGallery(payload);
     if (payload.media === "clear") {
@@ -298,13 +380,14 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       video.playsInline = true;
       video.preload = "auto";
       video.poster = payload.imageUrl;
-      video.crossOrigin = "anonymous";
       video.src = payload.videoUrl;
       node.replaceChildren(image, video);
       await waitForVideo(video);
       if (activePayload !== payload) return;
       seekVideo(video, payload.startAt);
       await playWithPreference(video);
+      await waitForStablePlayback(video);
+      if (activePayload !== payload) return;
       document.documentElement.dataset.bcActive = "true";
       document.documentElement.dataset.bcMedia = "video";
       const visible = video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !video.paused;
@@ -339,8 +422,8 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       } catch {
         playbackBlocked = desiredModes.muted === false;
       }
-      if (activePayload?.media === "video") {
-        await acknowledgeRender(activePayload, video.readyState >= 2 && !video.paused, true);
+      if (activePayload?.media === "video" && renderPhase === "ready") {
+        await acknowledgeRender(activePayload, true, true);
       }
     } else {
       playbackBlocked = false;
@@ -363,8 +446,15 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
 
   setInterval(() => {
     const video = activeVideo();
-    if (activePayload?.media === "video" && video instanceof HTMLVideoElement) {
-      void acknowledgeRender(activePayload, video.readyState >= 2 && !video.paused, true);
+    if (
+      activePayload?.media === "video" &&
+      renderPhase === "ready" &&
+      video instanceof HTMLVideoElement
+    ) {
+      // A heartbeat is observational, not a second render verdict. Playback can
+      // briefly pause while Chromium changes modes or refills an 8K buffer; do
+      // not downgrade an already-rendered generation or fail a pending one.
+      void acknowledgeRender(activePayload, true, true);
     }
   }, 1_000);
 })();

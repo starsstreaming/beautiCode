@@ -98,6 +98,13 @@ test("plugin injects its client script exactly once", async (t) => {
   assert.equal(response.status, 200);
   const source = await response.text();
   assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /waitForStablePlayback/);
+  assert.match(source, /renderPhase = "pending"/);
+  assert.match(source, /renderPhase === "ready"/);
+  assert.doesNotMatch(source, /acknowledgeRender\(activePayload, video\.readyState >= 2/);
+  assert.match(source, /requestVideoFrameCallback/);
+  assert.match(source, /currentTime.*initialTime \+ 0\.08/s);
+  assert.match(source, /MEDIA_ERR_DECODE/);
   assert.match(source, /:has\(#root \[data-phase="active"\]\)/);
   assert.match(source, /:has\(#root \[data-phase="settling"\]\)/);
   assert.doesNotMatch(source, /:has\(#root \[data-phase="hero"\]\)/);
@@ -262,6 +269,7 @@ test("authenticated apply reaches SSE client and same-origin ack becomes ready",
     current: { ...payload, videoUrl: null, startAt: null },
     readyClients: 1,
     failedClients: 0,
+    lastRenderError: null,
     visibleClients: 1,
     modeReadyClients: 0,
     blockedClients: 0,
@@ -408,4 +416,73 @@ test("video apply and display modes are broadcast and acknowledged", async (t) =
   assert.equal(body.blockedClients, 1);
   assert.equal(body.resolvedTone, "light");
   assert.equal(body.playback.currentTime, 4.8);
+});
+
+test("transient video heartbeat is pending until an explicit renderer verdict", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-dsh-plugin-"));
+  const tokenFile = path.join(root, "token");
+  await fs.writeFile(tokenFile, TOKEN);
+  const plugin = await createPluginServer(tokenFile);
+  const events = await openEvents(plugin.origin, "client-video-pending-01");
+  t.after(async () => {
+    events.request.destroy();
+    events.response.destroy();
+    await plugin.dispose();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const payload = {
+    generation: 120,
+    media: "video",
+    imageUrl: "http://127.0.0.1:45678/media/image?t=poster",
+    videoUrl: "http://127.0.0.1:45678/media/video?t=movie",
+    startAt: 0,
+  };
+  assert.equal((await fetch(`${plugin.origin}/__beauticode/apply`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })).status, 200);
+
+  const headers = { Origin: plugin.origin, "content-type": "application/json" };
+  assert.equal((await fetch(`${plugin.origin}/__beauticode/ack`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      clientId: "client-video-pending-01",
+      kind: "render",
+      generation: 120,
+      media: "video",
+      ok: false,
+      visible: true,
+      error: null,
+    }),
+  })).status, 200);
+
+  let status = await (await fetch(`${plugin.origin}/__beauticode/status`, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+  })).json();
+  assert.equal(status.readyClients, 0);
+  assert.equal(status.failedClients, 0);
+  assert.equal(status.lastRenderError, null);
+
+  const decodeError = "视频解码器报告失败；mediaError=MEDIA_ERR_DECODE";
+  assert.equal((await fetch(`${plugin.origin}/__beauticode/ack`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      clientId: "client-video-pending-01",
+      kind: "render",
+      generation: 120,
+      media: "video",
+      ok: false,
+      visible: false,
+      error: decodeError,
+    }),
+  })).status, 200);
+  status = await (await fetch(`${plugin.origin}/__beauticode/status`, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+  })).json();
+  assert.equal(status.failedClients, 1);
+  assert.equal(status.lastRenderError, decodeError);
 });

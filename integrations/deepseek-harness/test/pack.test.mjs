@@ -13,7 +13,7 @@ test("staged npm plugin is a self-contained DSH bundle with a vendored engine", 
   const dest = path.join(os.tmpdir(), `bc-dsh-pack-${process.pid}`);
   await stageDshPlugin(dest, { build: false });
   const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf8"));
-  assert.equal(pkg.name, "@beauticode/dsh-plugin");
+  assert.equal(pkg.name, "beauticode-dsh");
   assert.equal(pkg.dsh.bundle.patch, "./cordis.patch.yml");
   assert.equal(pkg.bin["beauticode-dsh"], "bin/beauticode-dsh");
   assert.equal(await fs.readFile(path.join(dest, "cordis.patch.yml"), "utf8").then((text) => text.includes("beauticode-bridge")), true);

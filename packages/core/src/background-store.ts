@@ -21,7 +21,6 @@ import {
   emptyDir,
   ensureDataLayout,
   isPathInsideRoot,
-  linkOrCopyFileAtomic,
   resolveDataPaths,
   rmrf,
   type DataPaths,
@@ -32,6 +31,12 @@ import type {
   BackgroundMedia,
 } from "./types.js";
 import { normalizeBackgroundEffects } from "./types.js";
+import {
+  isLocalBackgroundSource,
+  managedPrimaryFile,
+  resolveBackgroundImagePath,
+  resolveBackgroundVideoPath,
+} from "./media-source.js";
 import {
   BUNDLED_GALLERY_THEME_ID,
   type BundledThemeSpec,
@@ -92,8 +97,24 @@ function isManifest(value: unknown): value is BackgroundManifest {
   if (!v.background || typeof v.background !== "object") return false;
   const b = v.background as Record<string, unknown>;
   if (b.type !== "image" && b.type !== "video") return false;
-  if (typeof b.image !== "string") return false;
-  if (b.type === "video" && typeof b.video !== "string") return false;
+  if (b.image != null && typeof b.image !== "string") return false;
+  if (b.video != null && typeof b.video !== "string") return false;
+  if (b.source != null) {
+    if (!b.source || typeof b.source !== "object") return false;
+    const source = b.source as Record<string, unknown>;
+    if (source.kind === "local") {
+      if (typeof source.path !== "string" || !path.isAbsolute(source.path)) return false;
+    } else if (source.kind === "managed") {
+      if (typeof source.file !== "string") return false;
+    } else {
+      return false;
+    }
+  }
+  // Legacy v1 manifests have no source field. New local image manifests do
+  // not need an active copy; video manifests still retain a managed poster.
+  if (!b.source && b.type === "image" && typeof b.image !== "string") return false;
+  if (!b.source && b.type === "video" && typeof b.video !== "string") return false;
+  if (b.type === "video" && typeof b.image !== "string") return false;
   if (b.effects != null && !normalizeBackgroundEffects(b.effects)) return false;
   return true;
 }
@@ -120,12 +141,14 @@ export class BackgroundStore {
   async init(): Promise<void> {
     await ensureDataLayout(this.paths);
     const markerFresh = await this.#isCommitMarkerFresh();
-    if (!markerFresh || this.#writeContext.getStore()) {
-      await this.#recoverInterruptedCommit();
-      await fs.mkdir(this.paths.activeDir, { recursive: true });
-    } else {
+    // A fresh marker always belongs to a live transaction. Readers and
+    // re-entrant writer calls must leave its journal/staging tree untouched;
+    // recovery is only safe after the marker becomes stale or disappears.
+    if (markerFresh) {
       return;
     }
+    await this.#recoverInterruptedCommit();
+    await fs.mkdir(this.paths.activeDir, { recursive: true });
     const manifestPath = path.join(this.paths.activeDir, MANIFEST_NAME);
     try {
       await fs.access(manifestPath);
@@ -267,9 +290,14 @@ export class BackgroundStore {
       throw new MediaValidationError("Active background manifest failed schema checks.");
     }
     if (parsed.background) {
-      assertSafeBasename(parsed.background.image, "background.image");
+      if (parsed.background.image) {
+        assertSafeBasename(parsed.background.image, "background.image");
+      }
       if (parsed.background.video) {
         assertSafeBasename(parsed.background.video, "background.video");
+      }
+      if (parsed.background.source?.kind === "managed") {
+        assertSafeBasename(parsed.background.source.file, "background.source.file");
       }
     }
     return parsed;
@@ -278,15 +306,15 @@ export class BackgroundStore {
   async activeImagePath(): Promise<string | null> {
     const m = await this.readActiveManifest();
     if (!m.background) return null;
-    return path.join(this.paths.activeDir, m.background.image);
+    return resolveBackgroundImagePath(this.paths.activeDir, m.background);
   }
 
   async activeVideoPath(): Promise<string | null> {
     const m = await this.readActiveManifest();
-    if (!m.background || m.background.type !== "video" || !m.background.video) {
+    if (!m.background || m.background.type !== "video") {
       return null;
     }
-    return path.join(this.paths.activeDir, m.background.video);
+    return resolveBackgroundVideoPath(this.paths.activeDir, m.background);
   }
 
   /**
@@ -315,24 +343,29 @@ export class BackgroundStore {
   }
 
   /**
-   * Copy the active video to a renderer-only path outside `active`.
-   *
-   * Chromium keeps a Windows file handle for videos attached through
-   * DOM.setFileInputFiles. Pointing it at `active/background.mp4` prevents the
-   * next atomic active-directory rotation with EPERM. The detached copy keeps
-   * renderer lifetime independent from the disk transaction.
+   * Resolve the renderer video path. Managed videos get a detached runtime
+   * copy because Chromium can keep an active-directory handle open. Local
+   * references already live outside active, so returning the source path avoids
+   * both the active copy and the runtime copy.
    */
   async prepareRuntimeVideo(
     manifest: BackgroundManifest,
   ): Promise<string | null> {
     return this.#withWriteLock(async () => {
-      if (
-        manifest.background?.type !== "video" ||
-        !manifest.background.video
-      ) {
+      if (manifest.background?.type !== "video") {
         return null;
       }
       await this.init();
+
+      const source = resolveBackgroundVideoPath(
+        this.paths.activeDir,
+        manifest.background,
+      );
+      if (!source) return null;
+      if (isLocalBackgroundSource(manifest.background)) {
+        await validateVideoFile(source, { mode: "fast" });
+        return source;
+      }
 
       const cached = this.#runtimeVideoCache.get(manifest.generation);
       if (cached) {
@@ -344,10 +377,6 @@ export class BackgroundStore {
         }
       }
 
-      const source = path.join(
-        this.paths.activeDir,
-        manifest.background.video,
-      );
       const validated = await validateVideoFile(source);
       const sessionDir = path.join(
         this.paths.runtimeMediaDir,
@@ -479,14 +508,11 @@ export class BackgroundStore {
       await emptyDir(dir);
       await this.#writeJsonAtomic(path.join(dir, MANIFEST_NAME), manifest);
       if (manifest.background) {
-        const imgSrc = path.join(this.paths.activeDir, manifest.background.image);
-        const imgDst = path.join(dir, manifest.background.image);
-        await linkOrCopyFileAtomic(imgSrc, imgDst);
-        if (manifest.background.video) {
-          const vSrc = path.join(this.paths.activeDir, manifest.background.video);
-          const vDst = path.join(dir, manifest.background.video);
-          await linkOrCopyFileAtomic(vSrc, vDst);
-        }
+        await this.#copyManagedBackgroundFiles(
+          this.paths.activeDir,
+          dir,
+          manifest.background,
+        );
       }
       return { id, dir, manifest };
     });
@@ -541,21 +567,44 @@ export class BackgroundStore {
         let background: BackgroundMedia | null = null;
 
         if (input.type === "image") {
-          const image = await validateImageFile(input.imagePath);
-          // Keep extension from source when it's an allowed one.
-          const basename = `poster${image.extension === ".jpeg" ? ".jpg" : image.extension}`;
-          assertSafeBasename(basename, "image");
-          await copyFileAtomic(image.filePath, path.join(stagingDir, basename));
-          background = { type: "image", image: basename };
-          const effects = normalizeBackgroundEffects(input.effects);
-          if (effects) background.effects = effects;
+          const mode = input.source ?? "managed";
+          if (mode !== "local" && mode !== "managed") {
+            throw new MediaValidationError(`Unsupported image import mode: ${mode}`);
+          }
+          const image = await validateImageFile(input.imagePath, {
+            mode: mode === "local" ? "fast" : "full",
+          });
+          if (mode === "local") {
+            background = {
+              type: "image",
+              source: { kind: "local", path: image.filePath },
+            };
+            const effects = normalizeBackgroundEffects(input.effects);
+            if (effects) background.effects = effects;
+          } else {
+            // Keep extension from source when it's an allowed one.
+            const basename = `poster${image.extension === ".jpeg" ? ".jpg" : image.extension}`;
+            assertSafeBasename(basename, "image");
+            await copyFileAtomic(image.filePath, path.join(stagingDir, basename));
+            background = { type: "image", image: basename };
+            const effects = normalizeBackgroundEffects(input.effects);
+            if (effects) background.effects = effects;
+          }
         } else if (input.type === "video") {
-          const video = await validateVideoFile(input.videoPath);
-          assertSafeBasename(DEFAULT_VIDEO_BASENAME, "video");
-          await copyFileAtomic(
-            video.filePath,
-            path.join(stagingDir, DEFAULT_VIDEO_BASENAME),
-          );
+          const mode = input.source ?? "managed";
+          if (mode !== "local" && mode !== "managed") {
+            throw new MediaValidationError(`Unsupported video import mode: ${mode}`);
+          }
+          const video = await validateVideoFile(input.videoPath, {
+            mode: mode === "local" ? "fast" : "full",
+          });
+          if (mode === "managed") {
+            assertSafeBasename(DEFAULT_VIDEO_BASENAME, "video");
+            await copyFileAtomic(
+              video.filePath,
+              path.join(stagingDir, DEFAULT_VIDEO_BASENAME),
+            );
+          }
           // Poster: explicit path → reuse active image → synthetic 1x1 PNG.
           let imageBasename: string;
           if (input.imagePath) {
@@ -566,11 +615,14 @@ export class BackgroundStore {
               image.filePath,
               path.join(stagingDir, imageBasename),
             );
-          } else if (previous.background?.image) {
-            const prevImage = path.join(
+          } else if (previous.background) {
+            const prevImage = resolveBackgroundImagePath(
               this.paths.activeDir,
-              previous.background.image,
+              previous.background,
             );
+            if (!prevImage) {
+              throw new MediaValidationError("Previous background has no poster image.");
+            }
             const image = await validateImageFile(prevImage);
             imageBasename = `poster${image.extension === ".jpeg" ? ".jpg" : image.extension}`;
             assertSafeBasename(imageBasename, "image");
@@ -589,7 +641,9 @@ export class BackgroundStore {
           background = {
             type: "video",
             image: imageBasename,
-            video: DEFAULT_VIDEO_BASENAME,
+            ...(mode === "local"
+              ? { source: { kind: "local" as const, path: video.filePath } }
+              : { video: DEFAULT_VIDEO_BASENAME }),
           };
         } else {
           background = null;
@@ -641,16 +695,11 @@ export class BackgroundStore {
           restored,
         );
         if (restored.background) {
-          await copyFileAtomic(
-            path.join(snapshot.dir, restored.background.image),
-            path.join(stagingDir, restored.background.image),
+          await this.#copyManagedBackgroundFiles(
+            snapshot.dir,
+            stagingDir,
+            restored.background,
           );
-          if (restored.background.video) {
-            await copyFileAtomic(
-              path.join(snapshot.dir, restored.background.video),
-              path.join(stagingDir, restored.background.video),
-            );
-          }
         }
         await this.#validateTree(stagingDir, restored);
         await this.#promoteStagingToActive(stagingDir);
@@ -663,11 +712,40 @@ export class BackgroundStore {
 
   async #validateTree(dir: string, manifest: BackgroundManifest): Promise<void> {
     if (!manifest.background) return;
-    const imagePath = path.join(dir, manifest.background.image);
-    await validateImageFile(imagePath);
-    if (manifest.background.video) {
-      const videoPath = path.join(dir, manifest.background.video);
-      await validateVideoFile(videoPath);
+    const imagePath = resolveBackgroundImagePath(dir, manifest.background);
+    if (!imagePath) {
+      throw new MediaValidationError("Background has no image source.");
+    }
+    await validateImageFile(imagePath, {
+      mode: manifest.background.type === "image" && isLocalBackgroundSource(manifest.background)
+        ? "fast"
+        : "full",
+    });
+    const videoPath = resolveBackgroundVideoPath(dir, manifest.background);
+    if (videoPath) {
+      await validateVideoFile(videoPath, {
+        mode: isLocalBackgroundSource(manifest.background) ? "fast" : "full",
+      });
+    }
+  }
+
+  async #copyManagedBackgroundFiles(
+    sourceDir: string,
+    destinationDir: string,
+    background: BackgroundMedia,
+  ): Promise<void> {
+    if (background.image) {
+      await copyFileAtomic(
+        path.join(sourceDir, background.image),
+        path.join(destinationDir, background.image),
+      );
+    }
+    const primaryFile = managedPrimaryFile(background);
+    if (primaryFile && primaryFile !== background.image) {
+      await copyFileAtomic(
+        path.join(sourceDir, primaryFile),
+        path.join(destinationDir, primaryFile),
+      );
     }
   }
 
@@ -729,7 +807,7 @@ export class BackgroundStore {
       if (!trimmed || trimmed.length > 80) {
         throw new MediaValidationError("Theme name must be 1–80 characters.");
       }
-      if (/[<>:"/\|?*]/.test(trimmed) || Array.from(trimmed).some((ch) => ch.charCodeAt(0) < 32)) {
+      if (/[<>:"/\\|?*]/.test(trimmed) || Array.from(trimmed).some((ch) => ch.charCodeAt(0) < 32)) {
         throw new MediaValidationError("Theme name contains illegal characters.");
       }
       const manifest = await this.readActiveManifest();
@@ -742,13 +820,23 @@ export class BackgroundStore {
           `Saved theme limit reached (${this.maxSavedThemes}). Delete one before saving.`,
         );
       }
-      let incomingBytes = (await fs.stat(
-        path.join(this.paths.activeDir, manifest.background.image),
-      )).size;
-      if (manifest.background.video) {
-        incomingBytes += (await fs.stat(
-          path.join(this.paths.activeDir, manifest.background.video),
-        )).size;
+      const imagePath = resolveBackgroundImagePath(
+        this.paths.activeDir,
+        manifest.background,
+      );
+      const primaryPath =
+        manifest.background.type === "video"
+          ? resolveBackgroundVideoPath(this.paths.activeDir, manifest.background)
+          : imagePath;
+      if (!imagePath || !primaryPath) {
+        throw new MediaValidationError("Active background has no resolvable media source.");
+      }
+      let incomingBytes = 0;
+      if (manifest.background.type === "video") {
+        incomingBytes += (await fs.stat(imagePath)).size;
+      }
+      if (!isLocalBackgroundSource(manifest.background)) {
+        incomingBytes += (await fs.stat(primaryPath)).size;
       }
       if (usage.bytes + incomingBytes > this.maxSavedBytes) {
         throw new MediaValidationError(
@@ -763,20 +851,11 @@ export class BackgroundStore {
       }
       const stagingDir = await this.#createStagingDir();
       try {
-        const imageSrc = path.join(
+        await this.#copyManagedBackgroundFiles(
           this.paths.activeDir,
-          manifest.background.image,
+          stagingDir,
+          manifest.background,
         );
-        await copyFileAtomic(
-          imageSrc,
-          path.join(stagingDir, manifest.background.image),
-        );
-        if (manifest.background.video) {
-          await copyFileAtomic(
-            path.join(this.paths.activeDir, manifest.background.video),
-            path.join(stagingDir, manifest.background.video),
-          );
-        }
 
         // Persist media only — generation is assigned on restore.
         const savedManifest: BackgroundManifest = {
@@ -816,6 +895,7 @@ export class BackgroundStore {
           type: manifest.background.type,
           path: dir,
           savedAt: meta.savedAt,
+          sourceMode: isLocalBackgroundSource(manifest.background) ? "local" : "managed",
         };
         if (typeof meta.videoPositionSec === "number") {
           info.videoPositionSec = meta.videoPositionSec;
@@ -859,6 +939,7 @@ export class BackgroundStore {
           type: m.background.type,
           path: dir,
           savedAt: typeof meta.savedAt === "string" ? meta.savedAt : "",
+          sourceMode: isLocalBackgroundSource(m.background) ? "local" : "managed",
           ...(pos != null && m.background.type === "video"
             ? { videoPositionSec: pos }
             : {}),
@@ -1016,11 +1097,18 @@ export class BackgroundStore {
     }
     await this.#validateTree(dir, parsed);
 
-    const imagePath = path.join(dir, parsed.background.image);
+    const imagePath = resolveBackgroundImagePath(dir, parsed.background);
+    if (!imagePath) {
+      throw new MediaValidationError("Saved theme has no image source.");
+    }
+    const sourceMode = isLocalBackgroundSource(parsed.background)
+      ? ("local" as const)
+      : ("managed" as const);
     if (parsed.background.type === "image") {
       const input: Extract<ApplyInput, { type: "image" }> = {
         type: "image",
         imagePath,
+        source: sourceMode,
       };
       const effects = normalizeBackgroundEffects(parsed.background.effects);
       if (effects) input.effects = effects;
@@ -1030,7 +1118,8 @@ export class BackgroundStore {
         themeId: id,
       };
     }
-    if (!parsed.background.video) {
+    const videoPath = resolveBackgroundVideoPath(dir, parsed.background);
+    if (!videoPath) {
       throw new MediaValidationError("Saved video theme has no video file.");
     }
     let videoPositionSec: number | null = null;
@@ -1044,7 +1133,8 @@ export class BackgroundStore {
     const input: Extract<ApplyInput, { type: "video" }> = {
       type: "video",
       imagePath,
-      videoPath: path.join(dir, parsed.background.video),
+      videoPath,
+      source: sourceMode,
     };
     if (videoPositionSec != null && videoPositionSec > 0) {
       input.startAt = videoPositionSec;
@@ -1109,20 +1199,15 @@ export class BackgroundStore {
 
       const stagingDir = await this.#createStagingDir();
       try {
-      await this.#writeJsonAtomic(
-        path.join(stagingDir, MANIFEST_NAME),
-        restored,
-      );
-      await copyFileAtomic(
-        path.join(dir, restored.background!.image),
-        path.join(stagingDir, restored.background!.image),
-      );
-      if (restored.background!.video) {
-        await copyFileAtomic(
-          path.join(dir, restored.background!.video),
-          path.join(stagingDir, restored.background!.video),
+        await this.#writeJsonAtomic(
+          path.join(stagingDir, MANIFEST_NAME),
+          restored,
         );
-      }
+        await this.#copyManagedBackgroundFiles(
+          dir,
+          stagingDir,
+          restored.background!,
+        );
       await this.#validateTree(stagingDir, restored);
       await this.#promoteStagingToActive(stagingDir);
       const manifest = await this.readActiveManifest();
@@ -1212,6 +1297,7 @@ export class BackgroundStore {
           type: "image",
           path: spec.imagePath,
           savedAt: "",
+          sourceMode: "managed",
           bundled: true,
         });
       } catch {
@@ -1236,13 +1322,17 @@ export class BackgroundStore {
         );
         const manifest = JSON.parse(raw) as BackgroundManifest;
         if (!isManifest(manifest) || !manifest.background) continue;
-        bytes += (await fs.stat(
-          path.join(theme.path, manifest.background.image),
-        )).size;
-        if (manifest.background.video) {
-          bytes += (await fs.stat(
-            path.join(theme.path, manifest.background.video),
-          )).size;
+        const imagePath = resolveBackgroundImagePath(theme.path, manifest.background);
+        const primaryPath =
+          manifest.background.type === "video"
+            ? resolveBackgroundVideoPath(theme.path, manifest.background)
+            : imagePath;
+        if (!imagePath || !primaryPath) continue;
+        if (manifest.background.type === "video") {
+          bytes += (await fs.stat(imagePath)).size;
+        }
+        if (!isLocalBackgroundSource(manifest.background)) {
+          bytes += (await fs.stat(primaryPath)).size;
         }
       } catch {
         /* broken entries do not count as valid themes */
@@ -1269,6 +1359,8 @@ export interface SavedThemeInfo {
   type: "image" | "video";
   path: string;
   savedAt: string;
+  /** Whether the primary media is referenced in place or copied into the store. */
+  sourceMode?: "local" | "managed";
   /** Last known playback position in seconds (video themes only). */
   videoPositionSec?: number;
   /** Plugin-shipped theme that cannot be deleted. */
