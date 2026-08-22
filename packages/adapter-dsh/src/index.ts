@@ -1,5 +1,6 @@
 export {
   DshHostApplier,
+  dshTrustedOrigins,
   normalizeDshBaseUrl,
   type DshBridgeStatus,
   type DshHostApplierOptions,

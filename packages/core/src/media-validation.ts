@@ -57,6 +57,8 @@ export class MediaValidationError extends Error {
   }
 }
 
+export type MediaValidationMode = "full" | "fast";
+
 async function assertNoSymbolicLinkSegments(filePath: string): Promise<void> {
   const root = path.parse(filePath).root;
   const relative = path.relative(root, filePath);
@@ -123,6 +125,7 @@ async function assertRegularFile(filePath: string): Promise<{
 async function inspectAndHash(
   filePath: string,
   expectedSize: number,
+  mode: MediaValidationMode = "full",
 ): Promise<{
   head: Buffer;
   identity: string;
@@ -139,23 +142,31 @@ async function inspectAndHash(
     }
     const head = Buffer.alloc(Math.min(64, expectedSize));
     const hash = createHash("sha256");
-    const chunk = Buffer.allocUnsafe(1024 * 1024);
-    let position = 0;
-    let headOffset = 0;
-    while (position < expectedSize) {
-      const length = Math.min(chunk.byteLength, expectedSize - position);
-      const { bytesRead } = await handle.read(chunk, 0, length, position);
-      if (bytesRead <= 0) {
-        throw new MediaValidationError("Media file ended during validation.");
+    const { bytesRead } = await handle.read(head, 0, head.byteLength, 0);
+    if (bytesRead !== head.byteLength) {
+      throw new MediaValidationError("Media file ended during validation.");
+    }
+    if (mode === "fast") {
+      // Local-reference imports must not hash a multi-GB file. The file
+      // fingerprint is deliberately tied to metadata and the validated head;
+      // the media server rejects the asset if metadata changes afterwards.
+      hash.update(
+        `${before.dev}:${before.ino}:${before.size}:${before.mtimeMs}:${before.ctimeMs}`,
+      );
+      hash.update(head);
+    } else {
+      hash.update(head);
+      const chunk = Buffer.allocUnsafe(1024 * 1024);
+      let position = head.byteLength;
+      while (position < expectedSize) {
+        const length = Math.min(chunk.byteLength, expectedSize - position);
+        const read = await handle.read(chunk, 0, length, position);
+        if (read.bytesRead <= 0) {
+          throw new MediaValidationError("Media file ended during validation.");
+        }
+        hash.update(chunk.subarray(0, read.bytesRead));
+        position += read.bytesRead;
       }
-      const bytes = chunk.subarray(0, bytesRead);
-      hash.update(bytes);
-      if (headOffset < head.byteLength) {
-        const take = Math.min(bytesRead, head.byteLength - headOffset);
-        bytes.copy(head, headOffset, 0, take);
-        headOffset += take;
-      }
-      position += bytesRead;
     }
     const after = await handle.stat();
     if (
@@ -211,7 +222,7 @@ export function detectImageMime(
 
 export async function validateImageFile(
   filePath: string,
-  opts: { maxBytes?: number } = {},
+  opts: { maxBytes?: number; mode?: MediaValidationMode } = {},
 ): Promise<ValidatedImage> {
   const maxBytes = opts.maxBytes ?? MAX_IMAGE_BYTES;
   const ext = path.extname(filePath).toLowerCase();
@@ -226,7 +237,7 @@ export async function validateImageFile(
       `Image must be a non-empty file no larger than ${maxBytes} bytes.`,
     );
   }
-  const inspected = await inspectAndHash(resolved, size);
+  const inspected = await inspectAndHash(resolved, size, opts.mode);
   const detected = detectImageMime(inspected.head, ext, size);
   if (!detected) {
     throw new MediaValidationError(
@@ -249,7 +260,7 @@ export async function validateImageFile(
 
 export async function validateVideoFile(
   filePath: string,
-  opts: { maxBytes?: number } = {},
+  opts: { maxBytes?: number; mode?: MediaValidationMode } = {},
 ): Promise<ValidatedVideo> {
   const maxBytes = opts.maxBytes ?? MAX_VIDEO_BYTES;
   const ext = path.extname(filePath).toLowerCase();
@@ -262,7 +273,7 @@ export async function validateVideoFile(
       `Video background must be a non-empty MP4 no larger than ${maxBytes} bytes.`,
     );
   }
-  const inspected = await inspectAndHash(resolved, size);
+  const inspected = await inspectAndHash(resolved, size, opts.mode);
   if (!isMp4Container(inspected.head, size)) {
     throw new MediaValidationError(
       "Video background is not a valid MP4 container.",

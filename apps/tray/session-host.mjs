@@ -9,10 +9,11 @@
  * Protocol (JSON):
  *   GET  /health
  *   GET  /status
- *   POST /apply/image   { "imagePath": "..." }
- *   POST /apply/video   { "videoPath": "...", "imagePath"?: "...", "startAt"?: number }
+ *   POST /apply/image   { "imagePath": "...", "source"?: "managed"|"local" }
+ *   POST /apply/video   { "videoPath": "...", "imagePath"?: "...", "source"?: "managed"|"local", "startAt"?: number }
  *   POST /apply/clear   {}
  *   POST /reapply       {}   // republish active background into live sessions
+ *   POST /theme/apply   { "name": "...", "input": ApplyInput }
  *   POST /theme/save    { "name": "..." }   // keep current image/video
  *   GET  /theme/list
  *   POST /theme/use     { "id": "..." }
@@ -49,6 +50,54 @@ function argValue(name) {
   if (idx === -1) return null;
   const value = process.argv[idx + 1] ?? null;
   return value && !value.startsWith("--") ? value : null;
+}
+
+function parseImportMode(value) {
+  if (value == null) return undefined;
+  if (value === "managed" || value === "local") return value;
+  throw new Error("source 必须是 managed 或 local。");
+}
+
+function parseThemeApplyInput(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("input 必须是图片或视频导入参数。");
+  }
+  if (value.type === "image") {
+    if (typeof value.imagePath !== "string" || !value.imagePath) {
+      throw new Error("图片主题必须提供 imagePath。");
+    }
+    const input = {
+      type: "image",
+      imagePath: path.resolve(value.imagePath),
+      source: parseImportMode(value.source),
+    };
+    if (value.effects && typeof value.effects === "object") {
+      input.effects = value.effects;
+    }
+    return input;
+  }
+  if (value.type === "video") {
+    if (typeof value.videoPath !== "string" || !value.videoPath) {
+      throw new Error("视频主题必须提供 videoPath。");
+    }
+    const input = {
+      type: "video",
+      videoPath: path.resolve(value.videoPath),
+      source: parseImportMode(value.source),
+    };
+    if (typeof value.imagePath === "string" && value.imagePath) {
+      input.imagePath = path.resolve(value.imagePath);
+    }
+    if (value.startAt != null) {
+      const startAt = Number(value.startAt);
+      if (!Number.isFinite(startAt) || startAt < 0) {
+        throw new Error("startAt 必须是非负数字（秒）。");
+      }
+      input.startAt = startAt;
+    }
+    return input;
+  }
+  throw new Error("input.type 必须是 image 或 video。");
 }
 
 const hostKind = argValue("--host") ?? "codex";
@@ -312,6 +361,7 @@ const server = http.createServer(
         type: "image",
         imagePath: path.resolve(body.imagePath),
       };
+      imageInput.source = parseImportMode(body.source);
       if (body.effects && typeof body.effects === "object") {
         imageInput.effects = body.effects;
       }
@@ -332,6 +382,7 @@ const server = http.createServer(
         type: "video",
         videoPath: path.resolve(body.videoPath),
       };
+      videoInput.source = parseImportMode(body.source);
       if (typeof body.imagePath === "string" && body.imagePath) {
         videoInput.imagePath = path.resolve(body.imagePath);
       }
@@ -355,6 +406,25 @@ const server = http.createServer(
     if (req.method === "POST" && url === "/reapply") {
       const result = await session.reapply();
       send(res, result.ok ? 200 : 422, result);
+      return;
+    }
+    if (req.method === "POST" && url === "/theme/apply") {
+      const body = await readBody(req);
+      if (typeof body.name !== "string" || !body.name.trim()) {
+        send(res, 400, { ok: false, error: "必须提供主题名称。" });
+        return;
+      }
+      if (typeof session.applyAndSaveTheme !== "function") {
+        send(res, 501, { ok: false, error: "当前会话不支持应用并保存主题。" });
+        return;
+      }
+      const input = parseThemeApplyInput(body.input);
+      const result = await session.applyAndSaveTheme(input, body.name.trim());
+      send(
+        res,
+        result.ok ? 200 : 422,
+        result.ok ? { ...result, theme: publicTheme(result.theme) } : result,
+      );
       return;
     }
     if (req.method === "POST" && url === "/theme/save") {

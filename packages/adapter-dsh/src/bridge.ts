@@ -12,6 +12,7 @@ export interface DshBridgeStatus {
   current: { generation: number; media: "image" | "video" | "clear" } | null;
   readyClients: number;
   failedClients: number;
+  lastRenderError?: string | null;
   visibleClients: number;
   modeReadyClients: number;
   blockedClients: number;
@@ -50,6 +51,19 @@ export function normalizeDshBaseUrl(value: string): URL {
   }
   url.pathname = url.pathname.replace(/\/+$/, "") || "/";
   return url;
+}
+
+export function dshTrustedOrigins(value: string | URL): string[] {
+  const baseUrl = normalizeDshBaseUrl(String(value));
+  const port = baseUrl.port ? `:${baseUrl.port}` : "";
+  return [
+    ...new Set([
+      baseUrl.origin,
+      new URL(`http://127.0.0.1${port}`).origin,
+      new URL(`http://localhost${port}`).origin,
+      new URL(`http://[::1]${port}`).origin,
+    ]),
+  ];
 }
 
 function delay(ms: number): Promise<void> {
@@ -193,10 +207,16 @@ export class DshHostApplier implements HostApplier {
             details: { ...last },
           };
         }
-        if (currentMatches && last.failedClients > 0 && last.readyClients === 0) {
+        if (
+          currentMatches &&
+          last.failedClients > 0 &&
+          last.readyClients === 0 &&
+          typeof last.lastRenderError === "string" &&
+          last.lastRenderError
+        ) {
           return {
             status: "fail",
-            reason: "DeepSeek Harness client failed to render the background.",
+            reason: last.lastRenderError,
             details: { ...last },
           };
         }

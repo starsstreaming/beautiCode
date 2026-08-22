@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   callDshControl,
   formatStatusText,
@@ -5,7 +6,7 @@ import {
   matchSavedTheme,
   stripPathQuotes,
 } from "./control-client.mjs";
-import { resolveApplyBackend, stopInProcessSession } from "./host-apply.mjs";
+import { loadAdapter, resolveApplyBackend, stopInProcessSession } from "./host-apply.mjs";
 import { ATMOSPHERE_PRESETS, effectsForPreset, presetImagePath } from "./presets.mjs";
 
 const APPLY_TIMEOUT_MS = 180_000;
@@ -30,6 +31,60 @@ function asText(message) {
 
 function fail(error) {
   throw error instanceof Error ? error : new Error(String(error));
+}
+
+export function themeNameFromFilePath(filePath, fallback = "主题") {
+  const base = path.basename(String(filePath ?? "").replaceAll("\\", "/"));
+  const ext = path.extname(base);
+  let name = (ext ? base.slice(0, -ext.length) : base).trim();
+  name = name
+    .replace(/[<>:"/\\|?*]/g, " ")
+    .replace(/[\u0000-\u001f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!name) name = fallback;
+  if (name.length > 80) name = name.slice(0, 80).trim();
+  if (!name) name = fallback;
+  return name;
+}
+
+async function chineseError(error) {
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  try {
+    const adapter = await loadAdapter();
+    if (typeof adapter.toChineseErrorMessage === "function") {
+      return adapter.toChineseErrorMessage(error);
+    }
+  } catch {
+    /* keep raw */
+  }
+  return raw || "操作失败。";
+}
+
+async function unwrapApplyResult(result, fallbackMode, message) {
+  if (!result || result.ok === false) {
+    const failure = new Error(await chineseError(result?.error || "操作失败。"));
+    if (result?.sourceMode != null) failure.sourceMode = result.sourceMode;
+    if (result?.timings != null) failure.timings = result.timings;
+    throw failure;
+  }
+  return {
+    ok: true,
+    generation: result.generation ?? null,
+    mode: result.mode ?? fallbackMode,
+    sourceMode: result.sourceMode ?? null,
+    timings: result.timings ?? null,
+    message,
+    ...(result.theme
+      ? {
+          theme: {
+            id: result.theme.id,
+            name: result.theme.name,
+            type: result.theme.type ?? null,
+          },
+        }
+      : {}),
+  };
 }
 
 function commandResultFromError(error) {
@@ -57,10 +112,20 @@ function unwrapApply(result, fallbackMode, message) {
     generation: result.generation ?? null,
     mode: result.mode ?? fallbackMode,
     message,
+    ...(result.theme
+      ? {
+          theme: {
+            id: result.theme.id,
+            name: result.theme.name,
+            type: result.theme.type ?? null,
+          },
+        }
+      : {}),
   };
 }
 
 function presentStatus(status) {
+  const background = status.manifest?.background ?? status.background ?? null;
   return {
     ok: true,
     hostReady: status.hostReady === true || status.sessions > 0,
@@ -68,7 +133,13 @@ function presentStatus(status) {
     fish: status.fish === true,
     muted: status.muted !== false,
     tone: status.tone ?? "dark",
-    background: status.manifest?.background ?? status.background ?? null,
+    background,
+    sourceMode: background
+      ? background.source?.kind === "local"
+        ? "local"
+        : "managed"
+      : "clear",
+    themeId: typeof status.themeId === "string" && status.themeId ? status.themeId : null,
     message: formatStatusText(status),
   };
 }
@@ -106,24 +177,45 @@ export function createBeauticodeActions(dataRootOrOptions) {
         fail("beauticode_apply_image 只接受图片文件。");
       }
       const effects = effectsForPreset(options?.effects?.preset) || options?.effects || null;
-      const input = { type: "image", imagePath: inspected.path };
+      const persistTheme = options?.persistTheme !== false;
+      const themeName =
+        String(options?.themeName ?? "").trim() ||
+        themeNameFromFilePath(inspected.path, "图片");
+      const source = options?.source === "managed" ? "managed" : "local";
+      const input = { type: "image", imagePath: inspected.path, source };
       if (effects) input.effects = effects;
       const resolved = await backend();
       if (resolved.kind === "tray") {
-        const body = { imagePath: inspected.path };
-        if (effects) body.effects = effects;
-        return unwrapApply(
-          await request({
-            method: "POST",
-            path: "/apply/image",
-            body,
-            signal,
-          }),
+        const result = await request({
+          method: "POST",
+          path: persistTheme ? "/theme/apply" : "/apply/image",
+          body: persistTheme
+            ? { name: themeName, input }
+            : {
+                imagePath: inspected.path,
+                source,
+                ...(effects ? { effects } : {}),
+              },
+          signal,
+        });
+        return unwrapApplyResult(
+          result,
           "image",
-          "已将图片设为背景。",
+          persistTheme
+            ? `已将「${result.theme?.name || themeName}」设为背景。`
+            : "已将图片设为背景。",
         );
       }
-      return unwrapApply(await resolved.session.apply(input), "image", "已将图片设为背景。");
+      const applied = persistTheme
+        ? await resolved.session.applyAndSaveTheme(input, themeName)
+        : await resolved.session.apply(input);
+      return unwrapApplyResult(
+        applied,
+        "image",
+        persistTheme
+          ? `已将「${applied.theme?.name || themeName}」设为背景。`
+          : "已将图片设为背景。",
+      );
     },
 
     async applyPreset(id, signal) {
@@ -132,6 +224,7 @@ export function createBeauticodeActions(dataRootOrOptions) {
       if (!preset || !imagePath) fail("未找到内置主题文件。");
       const result = await this.applyImage(imagePath, signal, {
         effects: effectsForPreset(id),
+        persistTheme: false,
       });
       try {
         await this.setTone(preset.tone, signal);
@@ -167,8 +260,13 @@ export function createBeauticodeActions(dataRootOrOptions) {
       if (inspected.kind !== "video") {
         fail("beauticode_apply_video 只接受 .mp4 文件。");
       }
-      const body = { videoPath: inspected.path };
-      const localInput = { type: "video", videoPath: inspected.path };
+      const persistTheme = input?.persistTheme !== false;
+      const themeName =
+        String(input?.themeName ?? "").trim() ||
+        themeNameFromFilePath(inspected.path, "视频");
+      const source = input?.source === "managed" ? "managed" : "local";
+      const body = { videoPath: inspected.path, persistTheme, themeName, source };
+      const localInput = { type: "video", videoPath: inspected.path, source };
       if (typeof input.poster === "string" && input.poster.trim()) {
         const poster = await inspectLocalMedia(input.poster);
         if (!poster.ok) fail(poster.error);
@@ -186,21 +284,29 @@ export function createBeauticodeActions(dataRootOrOptions) {
       }
       const resolved = await backend();
       if (resolved.kind === "tray") {
-        return unwrapApply(
-          await request({
-            method: "POST",
-            path: "/apply/video",
-            body,
-            signal,
-          }),
+        const result = await request({
+          method: "POST",
+          path: persistTheme ? "/theme/apply" : "/apply/video",
+          body: persistTheme ? { name: themeName, input: localInput } : body,
+          signal,
+        });
+        return unwrapApplyResult(
+          result,
           "video",
-          "已将视频设为背景。",
+          persistTheme
+            ? `已将「${result.theme?.name || themeName}」设为背景。`
+            : "已将视频设为背景。",
         );
       }
-      return unwrapApply(
-        await resolved.session.apply(localInput),
+      const applied = persistTheme
+        ? await resolved.session.applyAndSaveTheme(localInput, themeName)
+        : await resolved.session.apply(localInput);
+      return unwrapApplyResult(
+        applied,
         "video",
-        "已将视频设为背景。",
+        persistTheme
+          ? `已将「${applied.theme?.name || themeName}」设为背景。`
+          : "已将视频设为背景。",
       );
     },
 
@@ -240,6 +346,39 @@ export function createBeauticodeActions(dataRootOrOptions) {
       });
     },
 
+    async importTheme(input, signal) {
+      const name = String(input?.name ?? "").trim();
+      const imagePath = String(input?.imagePath ?? "").trim();
+      if (!name || !imagePath) fail("导入皮肤必须提供名称和图片。");
+      const body = {
+        name,
+        imagePath,
+      };
+      if (typeof input.videoPath === "string" && input.videoPath.trim()) {
+        body.videoPath = input.videoPath.trim();
+      }
+      if (input.effects) body.effects = input.effects;
+      if (input.source) body.source = input.source;
+      const resolved = await backend();
+      if (resolved.kind === "tray") {
+        const result = await request({
+          method: "POST",
+          path: "/theme/import",
+          body,
+          signal,
+          timeoutMs: 30 * 60 * 1000,
+        });
+        if (!result || result.ok === false) fail(result?.error || "导入皮肤失败。");
+        return {
+          ok: true,
+          theme: result.theme,
+          message: `已保存皮肤「${result.theme.name}」。`,
+        };
+      }
+      const theme = await resolved.session.importSavedTheme(body);
+      return { ok: true, theme, message: `已保存皮肤「${theme.name}」。` };
+    },
+
     async listThemes(signal) {
       const resolved = await backend();
       if (resolved.kind === "tray") {
@@ -276,6 +415,32 @@ export function createBeauticodeActions(dataRootOrOptions) {
         ),
         theme: matched.theme,
       };
+    },
+
+    async deleteTheme(id, signal) {
+      const themeId = String(id ?? "").trim();
+      if (!themeId) fail("必须提供主题。");
+      const resolved = await backend();
+      if (resolved.kind === "tray") {
+        const result = await request({
+          method: "POST",
+          path: "/theme/delete",
+          body: { id: themeId },
+          signal,
+          timeoutMs: QUICK_TIMEOUT_MS,
+        });
+        if (!result || result.ok === false) {
+          fail(await chineseError(result?.error || "删除主题失败。"));
+        }
+        return { ok: true, deleted: true, message: "已删除主题。" };
+      }
+      try {
+        const deleted = await resolved.session.deleteSavedTheme(themeId);
+        if (!deleted) fail("未找到已保存的主题。");
+        return { ok: true, deleted: true, message: "已删除主题。" };
+      } catch (error) {
+        fail(await chineseError(error));
+      }
     },
 
     async setFish(enabled, signal) {

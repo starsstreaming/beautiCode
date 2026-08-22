@@ -35,4 +35,5 @@ test("gallery is a valid atmosphere preset", () => {
 test("atmosphere.js stays a valid browser script", () => {
   const source = fs.readFileSync(path.join(here, "../atmosphere.js"), "utf8");
   assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /#beauticode-bg-stage img,\s*\nhtml\[data-bc-gallery="true"\] #beauticode-bg-stage video/);
 });

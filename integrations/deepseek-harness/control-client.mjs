@@ -90,6 +90,47 @@ export function isPidAlive(pid) {
   }
 }
 
+let livenessModulePromise;
+
+function loadCoreLiveness() {
+  if (!livenessModulePromise) {
+    livenessModulePromise = (async () => {
+      const candidates = [
+        "@beauticode/core",
+        new URL("./vendor/core/index.js", import.meta.url).href,
+        new URL("../../packages/core/dist/index.js", import.meta.url).href,
+      ];
+      for (const specifier of candidates) {
+        try {
+          const mod = await import(specifier);
+          if (typeof mod.isRecordedPidLive === "function") return mod;
+        } catch {
+          /* try the next resolution path */
+        }
+      }
+      return null;
+    })();
+  }
+  return livenessModulePromise;
+}
+
+async function isLiveRecordedPid(pid, startedAt, mtimeMs) {
+  if (!isPidAlive(pid)) return false;
+  const recorded =
+    typeof startedAt === "string" && startedAt
+      ? startedAt
+      : Number.isFinite(mtimeMs)
+        ? new Date(mtimeMs).toISOString()
+        : null;
+  try {
+    const core = await loadCoreLiveness();
+    if (core) return await core.isRecordedPidLive(pid, recorded);
+  } catch {
+    /* fall back to the cheap PID check */
+  }
+  return true;
+}
+
 export function stripPathQuotes(value) {
   const text = String(value ?? "").trim();
   if (text.length >= 2) {
@@ -195,6 +236,7 @@ export async function writeDshControlFile(opts) {
     pid,
     url: new URL(url).origin,
     token,
+    startedAt: new Date().toISOString(),
   });
 }
 
@@ -219,6 +261,7 @@ export async function writeSessionHostFile(opts) {
     pid,
     url: new URL(url).origin,
     token,
+    startedAt: new Date().toISOString(),
   });
 }
 
@@ -253,8 +296,11 @@ export async function removeDshControlFile(opts) {
 export async function readDshControlFile(dataRoot, opts = {}) {
   const file = controlFilePath(dataRoot);
   let raw;
+  let mtimeMs = 0;
   try {
-    raw = await fs.readFile(file, "utf8");
+    const [text, stat] = await Promise.all([fs.readFile(file, "utf8"), fs.stat(file)]);
+    raw = text;
+    mtimeMs = stat.mtimeMs;
   } catch (error) {
     if (error && typeof error === "object" && error.code === "ENOENT") return null;
     throw error;
@@ -277,13 +323,19 @@ export async function readDshControlFile(dataRoot, opts = {}) {
   ) {
     return null;
   }
-  if (!opts.allowDead && !isPidAlive(parsed.pid)) return null;
+  if (
+    !opts.allowDead &&
+    !(await isLiveRecordedPid(parsed.pid, parsed.startedAt, mtimeMs))
+  ) {
+    return null;
+  }
   return {
     schema: CONTROL_SCHEMA,
     host: "dsh",
     pid: parsed.pid,
     url: new URL(parsed.url).origin,
     token: parsed.token,
+    startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : null,
   };
 }
 
@@ -305,8 +357,11 @@ export async function removeSessionHostFile(opts) {
 export async function readSessionHostFile(dataRoot, opts = {}) {
   const file = sessionHostFilePath(dataRoot);
   let raw;
+  let mtimeMs = 0;
   try {
-    raw = await fs.readFile(file, "utf8");
+    const [text, stat] = await Promise.all([fs.readFile(file, "utf8"), fs.stat(file)]);
+    raw = text;
+    mtimeMs = stat.mtimeMs;
   } catch (error) {
     if (error && typeof error === "object" && error.code === "ENOENT") return null;
     throw error;
@@ -329,21 +384,30 @@ export async function readSessionHostFile(dataRoot, opts = {}) {
   ) {
     return null;
   }
-  if (!opts.allowDead && !isPidAlive(parsed.pid)) return null;
+  if (
+    !opts.allowDead &&
+    !(await isLiveRecordedPid(parsed.pid, parsed.startedAt, mtimeMs))
+  ) {
+    return null;
+  }
   return {
     schema: SESSION_HOST_SCHEMA,
     host: parsed.host,
     pid: parsed.pid,
     url: new URL(parsed.url).origin,
     token: parsed.token,
+    startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : null,
   };
 }
 
 export async function readTrayClaim(dataRoot, opts = {}) {
   const file = trayClaimFilePath(dataRoot);
   let raw;
+  let mtimeMs = 0;
   try {
-    raw = await fs.readFile(file, "utf8");
+    const [text, stat] = await Promise.all([fs.readFile(file, "utf8"), fs.stat(file)]);
+    raw = text;
+    mtimeMs = stat.mtimeMs;
   } catch (error) {
     if (error && typeof error === "object" && error.code === "ENOENT") return null;
     throw error;
@@ -362,7 +426,12 @@ export async function readTrayClaim(dataRoot, opts = {}) {
   ) {
     return null;
   }
-  if (!opts.allowDead && !isPidAlive(parsed.pid)) return null;
+  if (
+    !opts.allowDead &&
+    !(await isLiveRecordedPid(parsed.pid, parsed.startedAt, mtimeMs))
+  ) {
+    return null;
+  }
   return {
     schema: TRAY_CLAIM_SCHEMA,
     pid: parsed.pid,
@@ -439,6 +508,8 @@ export async function callDshControl(dataRoot, spec) {
     const error = new Error(message);
     error.statusCode = response.status;
     error.payload = payload;
+    if (payload?.sourceMode != null) error.sourceMode = payload.sourceMode;
+    if (payload?.timings != null) error.timings = payload.timings;
     throw error;
   }
   return payload;

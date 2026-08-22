@@ -136,6 +136,67 @@ test("loopback media server: token, range, origin, identity drift", async () => 
   }
 });
 
+test("fast staging rejects local media drift without requiring a full-file hash", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-media-fast-"));
+  try {
+    const videoPath = path.join(root, "background.mp4");
+    await fs.writeFile(videoPath, mp4Fixture("FAST"));
+
+    const media = new MediaServerController();
+    const staged = await media.stage(videoPath, { validation: "fast" });
+    assert.ok(staged);
+    assert.equal(staged.validation, "fast");
+    await media.commit(staged);
+
+    await fs.writeFile(videoPath, mp4Fixture("DRFT"));
+    const changed = await fetch(staged.url, {
+      headers: { [MEDIA_TOKEN_HEADER_CANON]: staged.token },
+    });
+    assert.equal(changed.status, 404);
+    await media.close();
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("aborted Range responses close their source FileHandle", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-media-abort-"));
+  const videoPath = path.join(root, "background.mp4");
+  const renamedPath = path.join(root, "background-renamed.mp4");
+  const media = new MediaServerController();
+  try {
+    const largeVideo = Buffer.concat([
+      mp4Fixture("ABRT"),
+      Buffer.alloc(16 * 1024 * 1024, 0x61),
+    ]);
+    await fs.writeFile(videoPath, largeVideo);
+    const staged = await media.stage(videoPath, { validation: "fast" });
+    assert.ok(staged);
+    await media.commit(staged);
+
+    const controller = new AbortController();
+    const response = await fetch(staged.url, {
+      signal: controller.signal,
+      headers: {
+        Range: `bytes=0-${largeVideo.length - 1}`,
+        [MEDIA_TOKEN_HEADER_CANON]: staged.token,
+      },
+    });
+    assert.equal(response.status, 206);
+    const reader = response.body.getReader();
+    await reader.read();
+    controller.abort();
+    await reader.cancel().catch(() => {});
+    await media.close();
+
+    await fs.rename(videoPath, renamedPath);
+    assert.equal((await fs.stat(renamedPath)).size, largeVideo.length);
+  } finally {
+    await media.close().catch(() => {});
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("media hub serves image + video with pair commit and query tokens", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-media-img-"));
   try {

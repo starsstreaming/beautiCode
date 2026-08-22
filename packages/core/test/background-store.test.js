@@ -81,6 +81,64 @@ test("background store atomic image/video/clear + generation", async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+test("local image and video imports keep original paths without media copies", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-local-store-"));
+  try {
+    const fixtures = path.join(root, "fixtures");
+    await fs.mkdir(fixtures);
+    const { imagePath, videoPath } = await writeFixtures(fixtures);
+    const store = new BackgroundStore({ root: path.join(root, "data") });
+
+    const imageManifest = await store.commitImport({
+      type: "image",
+      imagePath,
+      source: "local",
+    });
+    assert.deepEqual(imageManifest.background?.source, {
+      kind: "local",
+      path: imagePath,
+    });
+    assert.equal(imageManifest.background?.image, undefined);
+    assert.equal(await store.activeImagePath(), imagePath);
+    assert.deepEqual(await fs.readdir(store.paths.activeDir), ["background.json"]);
+    const savedImage = await store.saveCurrentTheme("Local image");
+    const loadedImage = await store.loadSavedTheme(savedImage.id);
+    assert.equal(loadedImage.input.source, "local");
+    assert.equal(loadedImage.input.imagePath, imagePath);
+
+    const manifest = await store.commitImport({
+      type: "video",
+      videoPath,
+      source: "local",
+    });
+
+    assert.deepEqual(manifest.background?.source, {
+      kind: "local",
+      path: videoPath,
+    });
+    assert.equal(manifest.background?.video, undefined);
+    assert.equal(await store.activeVideoPath(), videoPath);
+    assert.equal(await store.prepareRuntimeVideo(manifest), videoPath);
+    assert.deepEqual(
+      (await fs.readdir(store.paths.activeDir)).sort(),
+      ["background.json", "poster.png"],
+    );
+
+    const saved = await store.saveCurrentTheme("Local video");
+    const loaded = await store.loadSavedTheme(saved.id);
+    assert.equal(loaded.input.type, "video");
+    assert.equal(loaded.input.source, "local");
+    assert.equal(loaded.input.videoPath, videoPath);
+    const dataFiles = await fs.readdir(path.join(root, "data"), {
+      recursive: true,
+    });
+    assert.equal(dataFiles.some((name) => /\.mp4$/i.test(name)), false);
+    assert.equal(dataFiles.some((name) => path.basename(name) === path.basename(imagePath)), false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("image import keeps Internal atmosphere and restores it from a saved theme", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-atmosphere-"));
   const fixtures = path.join(root, "fixtures");
@@ -269,13 +327,22 @@ test("apply transaction offline success path", async () => {
   const media = new MediaServerController();
   const tx = new ApplyTransaction({ store, media, offline: true });
 
-  const r1 = await tx.run({ type: "image", imagePath });
+  const r1 = await tx.run({ type: "image", imagePath, source: "local" });
   assert.equal(r1.ok, true);
-  if (r1.ok) assert.equal(r1.mode, "image");
+  if (r1.ok) {
+    assert.equal(r1.mode, "image");
+    assert.equal(r1.sourceMode, "local");
+    assert.equal(typeof r1.timings?.totalMs, "number");
+    assert.equal(typeof r1.timings?.phases.commitImport, "number");
+    assert.equal(typeof r1.timings?.phases.stageMedia, "number");
+  }
 
   const r2 = await tx.run({ type: "video", videoPath });
   assert.equal(r2.ok, true);
-  if (r2.ok) assert.equal(r2.mode, "video");
+  if (r2.ok) {
+    assert.equal(r2.mode, "video");
+    assert.equal(r2.sourceMode, "managed");
+  }
   assert.ok(media.activeVideo?.url.startsWith("http://127.0.0.1:"));
   assert.ok(media.activeImage?.srcUrl.includes("?t="));
   assert.ok(
@@ -293,6 +360,70 @@ test("apply transaction offline success path", async () => {
   assert.equal(r3.ok, true);
   assert.equal(media.activeImage, null);
   assert.equal(media.activeVideo, null);
+  await media.close();
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test("apply transaction rolls back active media and finalized theme together", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-finalize-"));
+  const fixtures = path.join(root, "fixtures");
+  await fs.mkdir(fixtures);
+  const { imagePath, videoPath } = await writeFixtures(fixtures);
+  const store = new BackgroundStore({ root: path.join(root, "data") });
+  const media = new MediaServerController();
+  const tx = new ApplyTransaction({ store, media, offline: true });
+
+  assert.equal((await tx.run({ type: "image", imagePath })).ok, true);
+  let savedTheme = null;
+  const result = await tx.run(
+    { type: "video", videoPath, source: "local" },
+    {
+      beforeFinalize: async () => {
+        savedTheme = await store.saveCurrentTheme("must roll back");
+        throw new Error("theme finalize failed");
+      },
+      onRollback: async () => {
+        if (savedTheme) await store.deleteSavedTheme(savedTheme.id);
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.rolledBack, true);
+    assert.match(result.error, /finalize failed/);
+  }
+  assert.equal((await store.readActiveManifest()).background?.type, "image");
+  assert.deepEqual(await store.listSavedThemes(), []);
+
+  await media.close();
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test("theme quota failure rolls the applied background back", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-finalize-quota-"));
+  const fixtures = path.join(root, "fixtures");
+  await fs.mkdir(fixtures);
+  const { imagePath } = await writeFixtures(fixtures);
+  const store = new BackgroundStore({
+    root: path.join(root, "data"),
+    maxSavedThemes: 0,
+  });
+  const media = new MediaServerController();
+  const tx = new ApplyTransaction({ store, media, offline: true });
+
+  const result = await tx.run(
+    { type: "image", imagePath, source: "local" },
+    { beforeFinalize: () => store.saveCurrentTheme("quota") },
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.rolledBack, true);
+    assert.match(result.error, /limit reached/i);
+  }
+  assert.equal((await store.readActiveManifest()).background, null);
+  assert.deepEqual(await store.listSavedThemes(), []);
+
   await media.close();
   await fs.rm(root, { recursive: true, force: true });
 });

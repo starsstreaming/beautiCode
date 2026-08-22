@@ -205,6 +205,20 @@ test("tools and slash commands reuse the tray apply routes", async (t) => {
       json(res, 200, { ok: true, generation: 5, mode: "video" });
       return;
     }
+    if (url === "/theme/apply") {
+      const type = body.input.type;
+      json(res, 200, {
+        ok: true,
+        generation: type === "video" ? 5 : 4,
+        mode: type,
+        theme: {
+          id: `theme-${type}`,
+          name: body.name,
+          type,
+        },
+      });
+      return;
+    }
     if (url === "/apply/clear") {
       json(res, 200, { ok: true, generation: 6, mode: "clear" });
       return;
@@ -242,22 +256,63 @@ test("tools and slash commands reuse the tray apply routes", async (t) => {
   await writeControl(root, tray.url);
 
   const actions = createBeauticodeActions(root);
-  assert.equal((await actions.applyImage(image)).message, "已将图片设为背景。");
+  assert.equal((await actions.applyImage(image)).message, "已将「wall」设为背景。");
   assert.equal((await actions.applyVideo({ path: video, startAt: 12 })).ok, true);
   assert.equal((await actions.useTheme("雨夜")).theme.id, "theme-rain");
   assert.equal((await actions.setFish(true)).fish, true);
   assert.match(await runBgCommand(root, ""), /背景：视频/);
-  assert.equal(await runBgCommand(root, `"${image}"`), "已将图片设为背景。");
+  assert.equal(await runBgCommand(root, `"${image}"`), "已将「wall」设为背景。");
 
-  const videoApply = tray.received.find((item) => item.url === "/apply/video");
-  assert.equal(videoApply.body.videoPath, video);
-  assert.equal(videoApply.body.startAt, 12);
+  const videoApply = tray.received.find(
+    (item) => item.url === "/theme/apply" && item.body.input.type === "video",
+  );
+  assert.equal(videoApply.body.name, "bg");
+  assert.equal(videoApply.body.input.videoPath, video);
+  assert.equal(videoApply.body.input.startAt, 12);
+  assert.equal(videoApply.body.input.source, "local");
   const themeUse = tray.received.find((item) => item.url === "/theme/use");
   assert.equal(themeUse.body.id, "theme-rain");
 
   await assert.rejects(
     () => actions.applyVideo({ path: image }),
     /只接受 \.mp4/,
+  );
+});
+
+test("failed apply preserves source mode and phase timings for diagnostics", async (t) => {
+  const root = await createTempRoot();
+  const image = path.join(root, "wall.png");
+  await fs.writeFile(image, PNG_1X1);
+  const tray = await startFakeTray(({ url }, res) => {
+    if (url === "/health") {
+      json(res, 200, { ok: true, open: true, hostReady: true });
+      return;
+    }
+    if (url === "/theme/apply") {
+      json(res, 200, {
+        ok: false,
+        error: "renderer failed",
+        sourceMode: "local",
+        timings: { totalMs: 1400, phases: { rendererVerify: 1200, rollback: 30 } },
+      });
+      return;
+    }
+    json(res, 404, { ok: false, error: "not found" });
+  });
+  t.after(async () => {
+    await tray.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await writeControl(root, tray.url);
+
+  await assert.rejects(
+    () => createBeauticodeActions(root).applyImage(image),
+    (error) => {
+      assert.equal(error.sourceMode, "local");
+      assert.equal(error.timings.phases.rendererVerify, 1200);
+      assert.equal(error.timings.phases.rollback, 30);
+      return true;
+    },
   );
 });
 
@@ -373,6 +428,12 @@ test("in-process apply imports a video without the tray", async (t) => {
   assert.match(String(current.videoUrl), /^http:\/\/127\.0\.0\.1:\d+\//);
   const status = await actions.status();
   assert.equal(status.background?.type, "video");
+  assert.equal(status.background?.source?.kind, "local");
+  assert.equal(status.background?.video, undefined);
+  assert.deepEqual((await fs.readdir(path.join(dataRoot, "active"))).sort(), [
+    "background.json",
+    "poster.png",
+  ]);
 });
 
 test("prompt section failure does not prevent tool registration", () => {
