@@ -1,6 +1,6 @@
 {
-  "name": "@beauticode/dsh-plugin",
-  "version": "1.0.0",
+  "name": "beauticode-dsh",
+  "version": "1.0.19",
   "description": "Cordis plugin: image/video backgrounds for DeepSeek Harness web.",
   "type": "module",
   "main": "./index.mjs",
@@ -16,6 +16,9 @@
     "index.mjs",
     "client.js",
     "console.js",
+    "gallery.js",
+    "gallery-host.mjs",
+    "skin-center.json",
     "atmosphere.js",
     "presets.mjs",
     "agent.mjs",

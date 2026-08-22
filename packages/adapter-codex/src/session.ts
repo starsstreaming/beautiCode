@@ -7,6 +7,8 @@ import {
   defaultDataRoot,
   buildHostApplyPayload,
   resolveSessionBundledThemes,
+  isLocalBackgroundSource,
+  resolveBackgroundImagePath,
   type ApplyInput,
   type ApplyResult,
   type BackgroundTone,
@@ -862,20 +864,26 @@ export class BeautiSession implements HostSession {
       return;
     }
 
-    const imagePath = path.join(
+    const imagePath = resolveBackgroundImagePath(
       this.store.paths.activeDir,
-      manifest.background.image,
+      manifest.background,
     );
+    if (!imagePath) throw new Error("Background has no image source.");
     // Codex CSP requires data:/blob:; loopback is secondary only.
-    const imageHandle = await this.media.stage(imagePath);
+    const imageHandle = await this.media.stage(imagePath, {
+      validation:
+        manifest.background.type === "image" && isLocalBackgroundSource(manifest.background)
+          ? "fast"
+          : "full",
+    });
     let videoHandle = null as Awaited<ReturnType<MediaServerController["stage"]>>;
 
-    if (manifest.background.type === "video" && manifest.background.video) {
-      const videoPath = path.join(
-        this.store.paths.activeDir,
-        manifest.background.video,
-      );
-      videoHandle = await this.media.stage(videoPath);
+    if (manifest.background.type === "video") {
+      const videoPath = await this.store.prepareRuntimeVideo(manifest);
+      if (!videoPath) throw new Error("Video background has no video source.");
+      videoHandle = await this.media.stage(videoPath, {
+        validation: isLocalBackgroundSource(manifest.background) ? "fast" : "full",
+      });
       // Codex Desktop primary: CDP file-input → blob: (Dream Skin path).
       // Skip multi-MB dataUrl — host applier attaches the local file.
     }

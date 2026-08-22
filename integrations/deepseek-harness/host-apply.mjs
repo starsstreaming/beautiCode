@@ -8,6 +8,7 @@ import {
 import { canvasImagePath } from "./presets.mjs";
 
 const sessions = new Map();
+const DSH_VERIFY_DEADLINE_MS = 10_000;
 
 export const ENGINE_MISSING_MESSAGE =
   "beautiCode 插件未能加载本机导入引擎。请执行 npx beauticode-dsh，或从完整安装目录加载桥接。";
@@ -92,7 +93,7 @@ export async function ensureInProcessSession(options) {
     const session = new adapter.DshSession({
       dataRoot,
       baseUrl,
-      verifyDeadlineMs: 30_000,
+      verifyDeadlineMs: DSH_VERIFY_DEADLINE_MS,
       bundledGalleryImagePath: canvasImagePath() || undefined,
     });
     try {

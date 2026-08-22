@@ -336,7 +336,7 @@ async function main() {
       finish(1);
       return;
     }
-    input = { type: "image", imagePath: path.resolve(a) };
+    input = { type: "image", imagePath: path.resolve(a), source: "local" };
   } else if (cmd === "apply-video") {
     if (!a) {
       printUsage();
@@ -353,16 +353,17 @@ async function main() {
       ? path.extname(bPath).toLowerCase() === ".mp4"
       : false;
     if (aIsMp4 && !bIsMp4) {
-      input = { type: "video", videoPath: aPath };
+      input = { type: "video", videoPath: aPath, source: "local" };
       if (bPath) input.imagePath = bPath;
     } else if (bIsMp4) {
       input = {
         type: "video",
         imagePath: aPath,
         videoPath: bPath,
+        source: "local",
       };
     } else if (aIsMp4) {
-      input = { type: "video", videoPath: aPath };
+      input = { type: "video", videoPath: aPath, source: "local" };
     } else {
       console.error(
         "apply-video 需要 <video.mp4> [poster]（或旧格式 <poster> <video.mp4>）。",

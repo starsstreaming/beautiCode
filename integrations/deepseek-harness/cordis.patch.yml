@@ -1,4 +1,4 @@
 - insert:
     - id: beauticode-bridge
-      name: '@beauticode/dsh-plugin'
+      name: beauticode-dsh
       inject: [webServer]
