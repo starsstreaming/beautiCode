@@ -673,8 +673,9 @@ test("console page follows the settings row recipe", async () => {
     /data-act="(?:fullscreen|sound|gallery|clear)"/,
     "no other control sits between them",
   );
-  assert.equal(page.querySelectorAll(".bc-row-title").length, 6);
-  assert.equal(page.querySelectorAll(".bc-row-desc").length, 6);
+  // 7 rows: fullscreen, dim, sound, background blur, import, gallery, clear.
+  assert.equal(page.querySelectorAll(".bc-row-title").length, 7);
+  assert.equal(page.querySelectorAll(".bc-row-desc").length, 7);
   assert.ok(page.querySelector('[data-act="sound"]'));
   assert.ok(page.querySelector('[data-act="clear"]'));
   assert.ok(page.querySelector('[data-act="gallery"]'));
