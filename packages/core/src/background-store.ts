@@ -22,6 +22,7 @@ import {
   emptyDir,
   ensureDataLayout,
   isPathInsideRoot,
+  renameWithRetry,
   resolveDataPaths,
   rmrf,
   type DataPaths,
@@ -192,7 +193,7 @@ export class BackgroundStore {
     await fs.mkdir(dir, { recursive: true });
     const tmp = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
     await fs.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-    await fs.rename(tmp, filePath);
+    await renameWithRetry(tmp, filePath);
   }
 
   #journalPath(): string {
@@ -252,9 +253,9 @@ export class BackgroundStore {
     if (!activeValid) {
       await rmrf(this.paths.activeDir);
       if (nextValid) {
-        await fs.rename(nextDir, this.paths.activeDir);
+        await renameWithRetry(nextDir, this.paths.activeDir);
       } else if (backupValid) {
-        await fs.rename(backupDir, this.paths.activeDir);
+        await renameWithRetry(backupDir, this.paths.activeDir);
       } else {
         throw new MediaValidationError(
           "Interrupted commit could not recover either active generation.",
@@ -777,11 +778,11 @@ export class BackgroundStore {
     });
     await this.#writeJsonAtomic(this.#journalPath(), journal);
     try {
-      await fs.rename(this.paths.activeDir, backupDir);
+      await renameWithRetry(this.paths.activeDir, backupDir);
       journal.phase = "old-moved";
       await this.#writeJsonAtomic(this.#journalPath(), journal);
 
-      await fs.rename(stagingDir, this.paths.activeDir);
+      await renameWithRetry(stagingDir, this.paths.activeDir);
       journal.phase = "new-active";
       await this.#writeJsonAtomic(this.#journalPath(), journal);
 
@@ -892,7 +893,7 @@ export class BackgroundStore {
         );
         await this.#validateTree(stagingDir, savedManifest);
         // Same-volume directory rename makes a saved theme appear all at once.
-        await fs.rename(stagingDir, dir);
+        await renameWithRetry(stagingDir, dir);
 
         const info: SavedThemeInfo = {
           id,

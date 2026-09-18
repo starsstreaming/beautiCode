@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { renameWithRetry } from "./paths.js";
 
 export interface FileLockOwner {
   pid: number;
@@ -155,10 +156,10 @@ export async function acquireFileLock(
 
     const quarantine = `${resolved}.stale-${process.pid}-${crypto.randomUUID()}`;
     try {
-      await fs.rename(resolved, quarantine);
+      await renameWithRetry(resolved, quarantine);
       const movedRaw = await fs.readFile(quarantine, "utf8").catch(() => "");
       if (movedRaw !== raw) {
-        await fs.rename(quarantine, resolved).catch(() => {});
+        await renameWithRetry(quarantine, resolved).catch(() => {});
         continue;
       }
       await fs.rm(quarantine, { force: true });

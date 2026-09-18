@@ -175,6 +175,82 @@ export async function emptyDir(target: string): Promise<void> {
   await fs.mkdir(target, { recursive: true });
 }
 
+/**
+ * Windows has no POSIX-style atomic rename-over-existing. When another process
+ * holds even a transient handle on the destination — a real-time AV scan, the
+ * search indexer, or a cloud-sync client — Windows fails the rename outright
+ * with EPERM/EACCES instead of waiting for the handle to close. That made the
+ * commit chain fail at random and roll an otherwise healthy apply back.
+ *
+ * Retry the same operation the way VS Code's file-system layer does, then give
+ * up so a genuinely stuck handle still surfaces as a real error.
+ */
+const RETRYABLE_RENAME_CODES: ReadonlySet<string> = new Set([
+  "EPERM",
+  "EACCES",
+  "EBUSY",
+]);
+
+const RENAME_RETRY_ATTEMPTS = 6;
+const RENAME_RETRY_BASE_DELAY_MS = 15;
+const RENAME_RETRY_MAX_DELAY_MS = 250;
+
+export interface RenameRetryOptions {
+  /** Total tries, including the first one. */
+  attempts?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+}
+
+function errorCodeOf(error: unknown): string {
+  return error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : "";
+}
+
+/**
+ * Retry `operation` while it fails with a transient handle-contention code.
+ * Permanent failures (ENOENT, EXDEV, ENOTEMPTY, …) propagate on the first try,
+ * so callers keep their existing error semantics.
+ */
+export async function retryTransientRename<T>(
+  operation: () => Promise<T>,
+  opts: RenameRetryOptions = {},
+): Promise<T> {
+  const attempts = Math.max(1, opts.attempts ?? RENAME_RETRY_ATTEMPTS);
+  const baseDelayMs = Math.max(
+    0,
+    opts.baseDelayMs ?? RENAME_RETRY_BASE_DELAY_MS,
+  );
+  const maxDelayMs = Math.max(
+    baseDelayMs,
+    opts.maxDelayMs ?? RENAME_RETRY_MAX_DELAY_MS,
+  );
+  let delay = baseDelayMs;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= attempts || !RETRYABLE_RENAME_CODES.has(errorCodeOf(error))) {
+        throw error;
+      }
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      delay = Math.min(delay * 2, maxDelayMs);
+    }
+  }
+}
+
+/** Atomic rename that survives transient handle contention. */
+export async function renameWithRetry(
+  source: string,
+  destination: string,
+  opts: RenameRetryOptions = {},
+): Promise<void> {
+  await retryTransientRename(() => fs.rename(source, destination), opts);
+}
+
 export async function copyFileAtomic(
   source: string,
   destination: string,
@@ -183,7 +259,7 @@ export async function copyFileAtomic(
   await fs.mkdir(dir, { recursive: true });
   const tmp = `${destination}.${process.pid}.${crypto.randomUUID()}.tmp`;
   await fs.copyFile(source, tmp);
-  await fs.rename(tmp, destination);
+  await renameWithRetry(tmp, destination);
 }
 
 /**
@@ -199,7 +275,7 @@ export async function linkOrCopyFileAtomic(
   const tmp = `${destination}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
     await fs.link(source, tmp);
-    await fs.rename(tmp, destination);
+    await renameWithRetry(tmp, destination);
   } catch {
     await fs.rm(tmp, { force: true }).catch(() => {});
     await copyFileAtomic(source, destination);
