@@ -59,7 +59,47 @@ export class MediaValidationError extends Error {
 
 export type MediaValidationMode = "full" | "fast";
 
-async function assertNoSymbolicLinkSegments(filePath: string): Promise<void> {
+function splitPathSegments(value: string): string[] {
+  return value.split(path.sep).filter((segment) => segment !== "" && segment !== ".");
+}
+
+/**
+ * True when `canonical` is `logical` with **extra leading segments** — the
+ * signature of an OS-provided prefix alias rather than a symlink the caller
+ * could have named.
+ *
+ * macOS maps `/tmp` and `/var` into `/private`, so `/var/folders/…/x.png`
+ * canonicalises to `/private/var/folders/…/x.png`. Those leading symlinks are
+ * not attacker-controlled and not something a caller can influence by naming a
+ * path, so they must not reject the file. Anything that diverges **below** the
+ * prefix (a symlinked directory in the user's own tree) fails this test and is
+ * still walked and rejected.
+ */
+function isSystemPrefixAlias(logical: string, canonical: string): boolean {
+  const logicalParts = splitPathSegments(logical);
+  const canonicalParts = splitPathSegments(canonical);
+  const extra = canonicalParts.length - logicalParts.length;
+  if (extra <= 0) return false;
+  const sameSegment = (a: string, b: string): boolean =>
+    process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  return logicalParts.every((part, index) => {
+    const other = canonicalParts[extra + index];
+    return other !== undefined && sameSegment(part, other);
+  });
+}
+
+/**
+ * Reject a media path that traverses a symbolic link.
+ *
+ * Called only when `realpath` already disagreed with the logical path, to tell
+ * a real symlink apart from a harmless alias (Windows 8.3 short names, macOS
+ * `/private` prefixes).
+ */
+async function assertNoSymbolicLinkSegments(
+  filePath: string,
+  canonicalPath: string,
+): Promise<void> {
+  if (isSystemPrefixAlias(filePath, canonicalPath)) return;
   const root = path.parse(filePath).root;
   const relative = path.relative(root, filePath);
   let current = root;
@@ -115,9 +155,10 @@ async function assertRegularFile(filePath: string): Promise<{
     return process.platform === "win32" ? resolved.toLowerCase() : resolved;
   };
   if (normalizeForCompare(realPath) !== normalizeForCompare(resolvedInput)) {
-    // realpath can also expand a harmless Windows 8.3 path alias. Inspect each
-    // segment so only an actual symlink or junction is rejected.
-    await assertNoSymbolicLinkSegments(resolvedInput);
+    // realpath can also expand a harmless Windows 8.3 path alias or a macOS
+    // `/private` prefix. Inspect each segment so only an actual symlink or
+    // junction is rejected.
+    await assertNoSymbolicLinkSegments(resolvedInput, realPath);
   }
   const stat = await fs.stat(realPath);
   if (!stat.isFile()) {

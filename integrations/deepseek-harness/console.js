@@ -38,6 +38,12 @@
 #beauticode-console-page .bc-link{cursor:pointer;height:auto;padding:0;border:0;border-radius:6px;background:0 0;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;text-decoration:underline;text-underline-offset:3px}
 #beauticode-console-page .bc-link:hover{color:var(--dsw-alias-label-primary)}
 #beauticode-console-page .bc-slider{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:18px;background:var(--dsw-alias-bg-module-platform)}
+#beauticode-console-page .bc-blur-slider{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
+#beauticode-console-page .bc-blur-slider::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
+#beauticode-console-page .bc-blur-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
+#beauticode-console-page .bc-blur-value{min-width:2.6em;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;text-align:right}
+#beauticode-console-page .bc-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
+#beauticode-console-page .bc-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
 #beauticode-console-page .bc-dim-slider{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
 #beauticode-console-page .bc-dim-slider::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
 #beauticode-console-page .bc-dim-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
@@ -141,6 +147,22 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     "</button>" +
     "</div></div>" +
     '<div class="bc-row"><div class="bc-row-text">' +
+    '<span class="bc-row-title">背景磨砂</span>' +
+    '<span class="bc-row-desc">把背景画面磨砂化，界面不受影响</span>' +
+    "</div>" +
+    '<div class="bc-control">' +
+    '<span class="bc-slider">' +
+    '<input type="range" class="bc-blur-slider" min="0" max="100" step="1" value="0" aria-label="背景磨砂"/>' +
+    '<span class="bc-blur-value">0%</span>' +
+    "</span>" +
+    '<button type="button" class="bc-blur-reset" data-act="blur-reset" aria-label="恢复默认" title="恢复默认">' +
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+    '<path d="M13.2 10.4A5.6 5.6 0 1 1 12.9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
+    '<path d="M13.9 1.7 13.2 5.2l-3.5-.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    "</svg>" +
+    "</button>" +
+    "</div></div>" +
+    '<div class="bc-row"><div class="bc-row-text">' +
     '<span class="bc-row-title">声音</span>' +
     '<span class="bc-row-desc">播放视频背景的声音</span>' +
     "</div>" +
@@ -191,6 +213,9 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   const dimSlider = page.querySelector(".bc-dim-slider");
   const dimValue = page.querySelector(".bc-dim-value");
   const dimReset = page.querySelector('[data-act="dim-reset"]');
+  const blurSlider = page.querySelector(".bc-blur-slider");
+  const blurValue = page.querySelector(".bc-blur-value");
+  const blurReset = page.querySelector('[data-act="blur-reset"]');
   const fullscreenRow = page.querySelector('[data-row="fullscreen"]');
   const fullscreenBtn = page.querySelector('[data-act="fullscreen"]');
   const themesBox = page.querySelector(".bc-themes");
@@ -299,6 +324,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     dialogEl.setAttribute("data-bc-page", "on");
     navButton.setAttribute("aria-current", "true");
     renderDim();
+  renderBlur();
     void refresh();
     const options = page.parentElement;
     if (options) options.scrollTop = 0;
@@ -317,6 +343,17 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   // React changes its active section only from a nav-cell click, and buttons fire
   // click for keyboard activation too, so a capture-phase listener on the dialog
   // is a complete reverse switch — and it runs before React re-renders.
+
+  // Mirrors renderDim(): the slider is the single source of truth and the value
+  // label always shows the percentage that is actually applied.
+  function renderBlur() {
+    const current = globalThis.BeauticodeBackgroundBlur?.get?.() ?? 0;
+    const percent = Math.round(current);
+    if (blurSlider.value !== String(percent)) blurSlider.value = String(percent);
+    const label = `${percent}%`;
+    if (blurValue.textContent !== label) blurValue.textContent = label;
+  }
+
   function onDialogClick(event) {
     if (!pageActive || !dialogEl) return;
     const nav = dialogEl.querySelector("nav");
@@ -751,6 +788,18 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     // separate auto state the slider cannot show.
     globalThis.BeauticodeBackgroundDim?.set?.(AUTO_DIM_PERCENT / 100);
     renderDim();
+  });
+  blurSlider.addEventListener("input", (event) => {
+    event.stopPropagation();
+    const n = Number(blurSlider.value);
+    if (!Number.isFinite(n)) return;
+    globalThis.BeauticodeBackgroundBlur?.set?.(n);
+    renderBlur();
+  });
+  blurReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    globalThis.BeauticodeBackgroundBlur?.set?.(0);
+    renderBlur();
   });
   renderDim();
   fullscreenBtn.addEventListener("click", (event) => {
