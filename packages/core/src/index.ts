@@ -8,7 +8,10 @@ export {
   defaultDataRoot,
   resolveDataPaths,
   isPathInsideRoot,
+  renameWithRetry,
+  retryTransientRename,
   type DataPaths,
+  type RenameRetryOptions,
 } from "./paths.js";
 export * from "./file-lock.js";
 export * from "./error-message.js";

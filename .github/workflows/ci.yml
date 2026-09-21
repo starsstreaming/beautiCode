@@ -40,7 +40,9 @@ jobs:
             "apps/tray/start-tray.ps1",
             "scripts/codex-launch.ps1",
             "scripts/start-beauticode-engine.ps1",
+            "scripts/start-beauticode.ps1",
             "scripts/install-desktop-shortcut.ps1",
+            "scripts/install-dsh-plugin.ps1",
             "scripts/build-windows-installer.ps1"
           )
           foreach ($script in $scripts) {
