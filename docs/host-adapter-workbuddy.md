@@ -544,3 +544,51 @@ asar 里 `cb-sidebar-nav`（§5.7 提到的那个组件，52 条规则全在）*
 - 不做持久化：刷新页面背景就回到默认。**这条要等 M3 再做**（写到 `~/.beauticode/...`，
   与 WorkBuddy 的 `~/.workbuddy/app` 完全分开）。
 - 不接入主题列表 / 资源中心 / 受管素材策略。
+
+---
+
+## 15. 故障取证：「适配之后模型不响应」到底是谁的问题（2026-09-20 结案）
+
+用户报告：beautiCode 的 WorkBuddy 适配生效后，「对话大模型不响应」。逐层查完，
+结论是**与注入无关**，两件事叠加造成了这个观感：
+
+1. **上游偶发尖峰**：`POST https://copilot.tencent.com/v2/chat/completions` 的
+   首字延迟（TTFT）平时 p50 ≈ 2.6s，尖峰可到 **24.2s / 16.5s**。用户等到 ~15s
+   按了「停止」，看起来就是「模型不响应」。
+2. **取消之后宿主前端状态没恢复**：`.cr-send-button` 持续 `disabled`、
+   `.cr-cancelled-indicator`（「用户已取消」）一直挂着 —— 于是「发不出消息」
+   比「模型慢」更像故障。
+
+### 15.1 证据链（全部可复跑）
+
+| 观察 | 证据 | 说明 |
+|---|---|---|
+| 请求确实发出去了 | worker 日志 `[ModelProvider] Sending request: agent=cli, model=…, url=https://copilot.tencent.com/v2/chat/completions` | 16:52:47.515 |
+| 上游 15.7s 内一个字没出 | 同一 requestId 之后只有 `Request failed: … error=canceled` | `InterruptionService elapsed=15757ms` |
+| 同刻后台请求 TTFT=24.2s | `First raw chunk received … elapsed=24245ms` | 上游当时整体慢 |
+| 渲染层没卡死 | `[perf] [loop-lag] macro=0ms micro=0ms` | 主线程空闲；不是 JS 阻塞 |
+| 注入的样式不是性能元凶 | 强制重算 5 次：带我们的 4 张样式表 **0.06ms**，移除后 **4.9ms** | 排除「样式太多拖死页面」 |
+| 注入没有结构破坏 | `.teams-container/.conversation-shell/.cr-input-container/.cr-message-list` 全部命中，`pointer-events` 正常 | 面板/舞台都是 `pointer-events:none` |
+| 卡住的是宿主前端 | 16:53 之后 25 分钟，发送键仍 `disabled`、取消标记仍在 | 后端 `runtime-status: persisted status=completed`，两边不一致 |
+| 守护当时确实在跑 | 注入 `window.__bcPickRequest=777`，150ms 内被取件轮询清成 0 | 所以「守护已退出」不成立，不能拿它当借口 |
+
+### 15.2 一条命令复现这份报告
+
+```sh
+node scripts/wb-latency-report.mjs --hours 5      # 人读
+node scripts/wb-latency-report.mjs --hours 24 --json   # 机器读
+```
+
+它只读 `~/.workbuddy/logs/<date>/*.log`，把
+`sendPrompt → Sending request → First meaningful token → Stream completed / canceled`
+串成时间线并给出 TTFT 分位数；不打 prompt 正文、不碰页面、不改注入。
+
+### 15.3 判读规则（下次直接照抄）
+
+- `send` 与 `first` 的间隔 = 上游出字时间；**`cancelled` 出现在 `first` 之前 = 用户主动放弃**，
+  不是模型坏了。
+- `loop-lag macro=0ms` + 发送键 `disabled` + 取消标记常驻 = **宿主前端状态机没恢复**
+  （beautiCode 不接管输入区，改不动；重启宿主/刷新页面即恢复）。
+- 只有在「注入的样式表重算开销出现数量级劣化」或「契约锚点出现 0 命中」时，
+  才该怀疑适配层。
+

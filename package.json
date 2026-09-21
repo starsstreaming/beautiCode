@@ -21,7 +21,8 @@
     "plugin:publish": "node scripts/pack-dsh-plugin.mjs --publish",
     "plugin:pack-codex": "node scripts/pack-codex-plugin.mjs",
     "wb:runner": "node scripts/wb-cdp-runner.mjs",
-    "wb:setup": "node scripts/wb-setup.mjs"
+    "wb:setup": "node scripts/wb-setup.mjs",
+    "wb:latency": "node scripts/wb-latency-report.mjs"
   },
   "engines": {
     "node": ">=22"
