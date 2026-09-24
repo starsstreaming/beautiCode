@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Wire the beautiCode Cordis plugin into the user's own DSH profile.
