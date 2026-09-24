@@ -32,7 +32,7 @@ export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
  * payload 世代戳：每次改 payload 内容时递增。守卫用它判断页面上的注入
  * 是否为「当前代」——旧代按钮的闭包攥着已分离的节点引用，必须全拆重建。
  */
-export const BACKGROUND_BAR_VERSION = 'v10.0';
+export const BACKGROUND_BAR_VERSION = 'v10.1';
 
 /** 注入 IIFE 字符串；幂等（守卫同时校验 entry 是否仍在 DOM，侧栏收起/重挂后可重建）。 */
 export const BACKGROUND_BAR_INJECTION: string = (function () {
@@ -690,10 +690,20 @@ window.__bcRestoreState = function (stRaw) {
     syncThemesButton();
     if (!savedDialog.hidden) renderSavedThemes();
     var qs = function (sel) { return document.querySelector('#beauticode-workbuddy-bg-panel ' + sel); };
-    // 值相同就不设置/不派发事件——调和每 tick 调用时不再无谓跳动、不干扰拖动中的滑杆
-    if (st.dim != null) { var d2 = qs('.bc-dim-slider'); if (d2 && d2.value !== String(st.dim)) { d2.value = String(st.dim); d2.dispatchEvent(new Event('input')); } }
-    if (st.blur != null) { var b2 = qs('.bc-blur-slider'); if (b2 && b2.value !== String(st.blur)) { b2.value = String(st.blur); b2.dispatchEvent(new Event('input')); } }
-    if (st.alpha != null) { var a2 = qs('.bc-alpha-slider'); if (a2 && a2.value !== String(st.alpha)) { a2.value = String(st.alpha); a2.dispatchEvent(new Event('input')); } }
+    // 「值相同不派发事件」是为了不给拖动中的滑杆添乱；但状态播种必须无条件做——
+    // 否则当存档值恰好等于滑杆默认值时（如磨砂 0%），不派发事件 ⇒ PERSIST 该字段
+    // 停在 null ⇒ 下一次写盘把它存成 null ⇒ 之后 st.blur != null 永假、再也恢复不了
+    //（实测踩过：state.json 出现 "blur":null 而界面显示 0%）。
+    var restoreSlider = function (sel, key) {
+      if (st[key] == null) return;
+      var el = qs(sel);
+      if (!el) return;
+      if (el.value !== String(st[key])) { el.value = String(st[key]); el.dispatchEvent(new Event('input')); }
+      PERSIST[key] = Number(st[key]);
+    };
+    restoreSlider('.bc-dim-slider', 'dim');
+    restoreSlider('.bc-blur-slider', 'blur');
+    restoreSlider('.bc-alpha-slider', 'alpha');
     var hasMediaEl = (function () { var s2 = document.getElementById('beauticode-bg-stage'); return !!(s2 && s2.querySelector('img.bc-media,video.bc-media')); })();
     if (st.wallpaper && (st.wallpaper !== PERSIST.wallpaper || !hasMediaEl)) applyPath(st.wallpaper, PERSIST.activeThemeId);
     else if (!st.wallpaper && st.cleared) { clearMedia(); persistMark(null); }

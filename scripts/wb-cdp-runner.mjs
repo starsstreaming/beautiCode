@@ -407,8 +407,17 @@ function isBlankPersistState(live) {
 
 async function applyAll(c) {
   // 1) 主题（fail-closed：读不出就不上 CSS，只上 UI 并说明原因）
-  const className = await evaluate(c, 'document.documentElement.className');
-  const theme = readTheme(String(className || ''));
+  let className = await evaluate(c, 'document.documentElement.className');
+  let theme = readTheme(String(className || ''));
+  // 启动期 html 常常还没挂上主题类（class=""）。旧实现就此跳过透明契约，
+  // 而契约样式表一旦缺失，界面全程实心、壁纸被盖住——用户看到的是
+  // 「导入没反应」。这里先短暂重试，等主题类出现再注入。
+  for (let i = 0; !theme && i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 400));
+    className = await evaluate(c, 'document.documentElement.className');
+    theme = readTheme(String(className || ''));
+    if (theme) log.info(`主题延迟可读（第 ${i + 1} 次重试）→ 正常注入契约`);
+  }
   if (!theme) log.warn(`读不出主题（class="${String(className).slice(0, 60)}"）—— 本轮只注入 UI，不上透明契约`);
 
   // 2) 契约 CSS（浅深两套同时烘）
@@ -547,8 +556,11 @@ function startWatcher(c, state) {
       if (v.nav && !v.entry) {
         log.warn('entry 丢失（侧栏重挂），重新应用完整序列');
         await applyAll(c);
-      } else if (state.lastThemeFp && fpTheme !== state.lastThemeFp) {
-        log.info('主题切换 → 重扫 token 覆盖层');
+      } else if (fpTheme && fpTheme !== state.lastThemeFp) {
+        // 旧条件写作 `state.lastThemeFp && ...`（要求上轮非空），于是
+        // 「启动期空 → 随后可读」这一次变化被吞掉：契约一旦在启动时被跳过，
+        // 就再也不会补上（界面全程实心）。去掉那个前置判断即自愈。
+        log.info(`主题（可用/切换 ${state.lastThemeFp ? '切换' : '首次可读'}）→ 重扫注入  fp=${fpTheme.slice(0, 40)}`);
         await applyAll(c);
       }
       state.lastThemeFp = fpTheme;
