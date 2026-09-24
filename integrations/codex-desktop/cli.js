@@ -7,7 +7,9 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { recoverStaleCodexLock } from "./lifecycle.mjs";
 
 function findPackageRoot(startDir) {
   let dir = startDir;
@@ -51,6 +53,15 @@ async function copyJsTree(fromDir, toDir) {
   }
 }
 
+async function copyFileAtomic(source, destination) {
+  const temporary = `${destination}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  await fsp.copyFile(source, temporary);
+  await fsp.rename(temporary, destination).catch(async (error) => {
+    await fsp.rm(temporary, { force: true }).catch(() => {});
+    throw error;
+  });
+}
+
 function rewriteCoreImports(text) {
   return text
     .replaceAll('from "@beauticode/core"', 'from "../core/index.js"')
@@ -60,10 +71,13 @@ function rewriteCoreImports(text) {
 async function ensureVendor(destRoot) {
   const vendorRoot = path.join(destRoot, "vendor");
   const vendorAdapter = path.join(vendorRoot, "adapter-codex");
-  await fsp.rm(vendorRoot, { recursive: true, force: true });
+  const temporaryVendor = `${vendorRoot}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  await fsp.rm(temporaryVendor, { recursive: true, force: true });
   const packed = path.join(here, "vendor", "adapter-codex");
   if (fs.existsSync(path.join(packed, "index.js"))) {
-    await copyJsTree(path.join(here, "vendor"), vendorRoot);
+    await copyJsTree(path.join(here, "vendor"), temporaryVendor);
+    await fsp.rm(vendorRoot, { recursive: true, force: true });
+    await fsp.rename(temporaryVendor, vendorRoot);
     return;
   }
   const repoCore = path.resolve(here, "../../packages/core/dist");
@@ -71,13 +85,16 @@ async function ensureVendor(destRoot) {
   if (!fs.existsSync(path.join(repoAdapter, "index.js"))) {
     throw new Error("缺少 adapter-codex 产物。请先运行 npm run build。");
   }
-  await copyJsTree(repoCore, path.join(vendorRoot, "core"));
-  await copyJsTree(repoAdapter, vendorAdapter);
-  for (const name of await fsp.readdir(vendorAdapter)) {
+  const temporaryAdapter = path.join(temporaryVendor, "adapter-codex");
+  await copyJsTree(repoCore, path.join(temporaryVendor, "core"));
+  await copyJsTree(repoAdapter, temporaryAdapter);
+  for (const name of await fsp.readdir(temporaryAdapter)) {
     if (!name.endsWith(".js")) continue;
-    const filePath = path.join(vendorAdapter, name);
+    const filePath = path.join(temporaryAdapter, name);
     await fsp.writeFile(filePath, rewriteCoreImports(await fsp.readFile(filePath, "utf8")));
   }
+  await fsp.rm(vendorRoot, { recursive: true, force: true });
+  await fsp.rename(temporaryVendor, vendorRoot);
 }
 
 function writeRunKey(command) {
@@ -148,17 +165,20 @@ export async function runCli(argv = process.argv.slice(2)) {
     return;
   }
   await fsp.mkdir(home, { recursive: true });
-  for (const name of ["watch-host.mjs", "package.json"]) {
-    await fsp.copyFile(path.join(here, name), path.join(home, name));
+  for (const name of ["watch-host.mjs", "codex-watchdog.mjs", "lifecycle.mjs", "package.json"]) {
+    await copyFileAtomic(path.join(here, name), path.join(home, name));
   }
   await ensureVendor(home);
-  const watch = path.join(home, "watch-host.mjs");
+  const watch = path.join(home, "codex-watchdog.mjs");
   const starter = path.join(home, "start-watch.ps1");
-  await fsp.writeFile(
-    starter,
-    `Start-Process -WindowStyle Hidden -FilePath ${JSON.stringify(process.execPath)} -ArgumentList ${JSON.stringify(watch)}\r\n`,
-    "utf8",
-  );
+  const starterText =
+    `Start-Process -WindowStyle Hidden -FilePath ${JSON.stringify(process.execPath)} -ArgumentList ${JSON.stringify(watch)}\r\n`;
+  await fsp.writeFile(`${starter}.tmp-${process.pid}-${crypto.randomUUID()}`, starterText, "utf8");
+  const starterTemp = (await fsp.readdir(home)).find((name) => name.startsWith("start-watch.ps1.tmp-"));
+  if (!starterTemp) throw new Error("无法准备 Codex watcher 启动脚本。");
+  await fsp.rename(path.join(home, starterTemp), starter);
+  const namespaceLock = path.join(home, "..", "hosts", "codex", "injector.lock");
+  await recoverStaleCodexLock(namespaceLock, home).catch(() => false);
   writeRunKey(`powershell.exe -NoProfile -WindowStyle Hidden -File "${starter}"`);
   if (process.platform === "win32") {
     try {

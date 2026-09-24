@@ -274,8 +274,9 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresWi
     );
     assert.equal(migrate.status, 0, migrate.stderr || migrate.stdout);
     const webPatch = fs.readFileSync(path.join(web, "cordis.patch.yml"), "utf8");
-    assert.match(webPatch, /name:\s*'?beauticode-dsh'?/);
+    assert.doesNotMatch(webPatch, /id:\s*beauticode-bridge/);
     assert.doesNotMatch(webPatch, /@beauticode\/dsh-plugin/);
+    assert.match(fs.readFileSync(path.join(pluginRoot, "cordis.patch.yml"), "utf8"), /id:\s*beauticode-bridge/);
     assert.equal(fs.existsSync(path.join(home, "cordis.patch.yml")), false);
     const pkgBytes = fs.readFileSync(path.join(web, "package.json"));
     assert.notEqual(pkgBytes[0], 0xef, "profile package.json must not have a UTF-8 BOM");
@@ -316,6 +317,54 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresWi
       false,
     );
   } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("install-dsh-plugin deduplicates a loader already shipped by the plugin", requiresWindowsPowerShell, () => {
+  const script = path.join(repoRoot, "scripts/install-dsh-plugin.ps1");
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-plugin-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-duplicate-"));
+  try {
+    fs.writeFileSync(path.join(pluginRoot, "index.mjs"), "export {};\n", "utf8");
+    fs.writeFileSync(
+      path.join(pluginRoot, "package.json"),
+      JSON.stringify({ name: "beauticode-dsh", version: "test" }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(pluginRoot, "cordis.patch.yml"),
+      "- insert:\n    - id: beauticode-bridge\n      name: beauticode-dsh\n      inject: [webServer]\n",
+      "utf8",
+    );
+    const web = path.join(home, "profiles", "web");
+    fs.mkdirSync(web, { recursive: true });
+    fs.writeFileSync(
+      path.join(web, "package.json"),
+      JSON.stringify({ name: "dsh-profile-web", dependencies: {} }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(web, "cordis.patch.yml"),
+      "- insert:\n    - id: user-loader\n      name: user-plugin\n      inject: [webServer]\n\n# beauticode-bridge (installer)\n- insert:\n    - id: beauticode-bridge\n      name: beauticode-dsh\n      inject: [webServer]\n",
+      "utf8",
+    );
+
+    const result = spawnSync(
+      powerShellExecutable,
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-PluginRoot", pluginRoot, "-DshHome", home],
+      { encoding: "utf8", windowsHide: true },
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const webPatch = fs.readFileSync(path.join(web, "cordis.patch.yml"), "utf8");
+    assert.match(webPatch, /id: user-loader/);
+    assert.doesNotMatch(webPatch, /id: beauticode-bridge/);
+    const backups = fs.readdirSync(web).filter((name) => name.startsWith("cordis.patch.yml.beauticode-backup-"));
+    assert.equal(backups.length, 1);
+    assert.match(fs.readFileSync(path.join(web, backups[0]), "utf8"), /id: beauticode-bridge/);
+    assert.match(fs.readFileSync(path.join(pluginRoot, "cordis.patch.yml"), "utf8"), /id: beauticode-bridge/);
+  } finally {
+    fs.rmSync(pluginRoot, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

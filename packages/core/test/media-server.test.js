@@ -79,8 +79,8 @@ test("loopback media server: token, range, origin, identity drift", async () => 
     });
     assert.equal(
       changed.status,
-      404,
-      "same-size content replacement must invalidate the staged server",
+      409,
+      "same-size content replacement must invalidate the staged server (409 conflict)",
     );
     await fs.writeFile(videoPath, bytes);
 
@@ -152,7 +152,7 @@ test("fast staging rejects local media drift without requiring a full-file hash"
     const changed = await fetch(staged.url, {
       headers: { [MEDIA_TOKEN_HEADER_CANON]: staged.token },
     });
-    assert.equal(changed.status, 404);
+    assert.equal(changed.status, 409);
     await media.close();
   } finally {
     await fs.rm(root, { recursive: true, force: true });

@@ -27,6 +27,7 @@ import {
   codexInstallCandidates,
   pickAvailableCodexPort,
   ensureCodexCdp,
+  waitForAnyCodexCdp,
 } from "../dist/index.js";
 import { startMockCdp } from "./mock-cdp.js";
 import http from "node:http";
@@ -651,6 +652,25 @@ test("discoverCdpEndpoints finds mock loopback CDP", async () => {
   }
 });
 
+test("Codex target polling uses a 200ms fake-clock cadence after a 220ms probe", async () => {
+  let now = 0;
+  let calls = 0;
+  const sleeps = [];
+  const target = { port: 9335, browserUrl: "http://127.0.0.1:9335", pages: [], primaryPages: 1 };
+  const found = await waitForAnyCodexCdp([9335], 1_000, {
+    now: () => now,
+    discover: async () => {
+      calls += 1;
+      if (calls === 1) { now += 220; return []; }
+      return now >= 220 ? [target] : [];
+    },
+    sleep: async (ms) => { sleeps.push(ms); now += ms; },
+  });
+  assert.equal(found?.port, 9335);
+  assert.deepEqual(sleeps, [200]);
+  assert.equal(now, 420);
+});
+
 test("Codex auto-launch does not mistake WorkBuddy CDP for Codex", async () => {
   const mock = await startMockCdp({
     title: "WorkBuddy",
@@ -1064,6 +1084,10 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
   assert.match(runtime, /wantImageBlob/);
   assert.match(runtime, /videoEl\.style\.opacity = ""/);
   assert.match(runtime, /Promise\.resolve\(videoEl\.play\?\.\(\)\)/);
+  assert.match(runtime, /const imageReady =/);
+  assert.match(runtime, /const mediaReady = videoEnabled/);
+  assert.match(runtime, /waitForImageReady/);
+  assert.match(runtime, /Never make the host transparent while a replacement is still decoding/);
   assert.doesNotMatch(
     runtime,
     /Promise\.resolve\(\)\s*\.then\(apply\)\s*\.catch\([\s\S]{0,240}\)\s*;\s*return \{ installed: true/,

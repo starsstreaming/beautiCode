@@ -27,31 +27,40 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Parse JavaScript entry points
+        shell: bash
         run: |
+          set -e
+          # Fixed entry points (renderer payloads that are not standalone modules)
           node --check apps/tray/session-host.mjs
           node --check scripts/beauticode.mjs
           node --check scripts/live-smoke.mjs
           node --check packages/adapter-codex/src/renderer/background-runtime.js
+          # Every scripts/*.mjs CLI: syntax errors must not reach main
+          for file in scripts/*.mjs; do
+            node --check "$file"
+          done
       - name: Parse PowerShell launchers
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          $scripts = @(
-            "apps/tray/start-tray.ps1",
-            "scripts/codex-launch.ps1",
-            "scripts/start-beauticode-engine.ps1",
-            "scripts/install-desktop-shortcut.ps1",
-            "scripts/build-windows-installer.ps1"
-          )
+          # Parse every tracked .ps1 instead of a hand-maintained list
+          $scripts = @(Get-ChildItem -Recurse -Filter *.ps1 -Path apps, scripts, installer |
+            Where-Object { $_.FullName -notmatch 'node_modules' } |
+            Select-Object -ExpandProperty FullName)
+          if ($scripts.Count -eq 0) {
+            Write-Error "No PowerShell scripts found to parse."
+            exit 1
+          }
           foreach ($script in $scripts) {
             $tokens = $null
             $errors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path $script),
+              $script,
               [ref]$tokens,
               [ref]$errors
             )
             if ($errors.Count -gt 0) {
+              Write-Host "Parse errors in ${script}:"
               $errors | ForEach-Object { Write-Error $_.Message }
               exit 1
             }

@@ -578,14 +578,27 @@ export class LoopbackMediaHub {
         start: range.start,
         end: range.end,
       });
-    } catch {
+    } catch (error) {
       await opened?.close().catch(() => {});
       if (response.headersSent) {
         response.destroy();
-      } else {
-        response.writeHead(404, { "Cache-Control": "no-store" });
-        response.end();
+        return;
       }
+      // 复审 m-11：不再把所有服务端错误折叠为 404——被吞掉的包括
+      // 「路径被换成符号链接」（安全拒绝）与「文件内容/大小漂移」
+      // （一致性冲突），渲染端此前无从区分。分类应答 + stderr 一次性
+      // 结构化日志（仅 basename，不落绝对路径与 token）。
+      const message = error instanceof Error ? error.message : String(error);
+      const status = /symbolic link/.test(message)
+        ? 403
+        : /changed|exceeded/.test(message)
+          ? 409
+          : 404;
+      process.stderr.write(
+        `[media-hub] ${status} ${path.basename(asset.filePath)}: ${message}\n`,
+      );
+      response.writeHead(status, { "Cache-Control": "no-store" });
+      response.end();
     }
   }
 }

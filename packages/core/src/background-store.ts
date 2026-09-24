@@ -30,6 +30,7 @@ import type {
   ApplyInput,
   BackgroundManifest,
   BackgroundMedia,
+  ThemeProvenance,
 } from "./types.js";
 import { normalizeBackgroundEffects } from "./types.js";
 import {
@@ -117,6 +118,19 @@ function isManifest(value: unknown): value is BackgroundManifest {
   if (!b.source && b.type === "video" && typeof b.video !== "string") return false;
   if (b.type === "video" && typeof b.image !== "string") return false;
   if (b.effects != null && !normalizeBackgroundEffects(b.effects)) return false;
+  if (b.provenance != null) {
+    const p = b.provenance as Record<string, unknown>;
+    if (
+      p.source !== "hnnulwh" ||
+      typeof p.sourceSkinId !== "string" ||
+      !/^skin-[a-z0-9]{8,40}$/.test(p.sourceSkinId) ||
+      typeof p.sourceVersion !== "string" ||
+      !p.sourceVersion.trim() ||
+      (p.onlineAvailable != null && typeof p.onlineAvailable !== "boolean")
+    ) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -586,6 +600,7 @@ export class BackgroundStore {
             };
             const effects = normalizeBackgroundEffects(input.effects);
             if (effects) background.effects = effects;
+            if (input.provenance) background.provenance = input.provenance;
           } else {
             // Keep extension from source when it's an allowed one.
             const basename = `poster${image.extension === ".jpeg" ? ".jpg" : image.extension}`;
@@ -594,6 +609,7 @@ export class BackgroundStore {
             background = { type: "image", image: basename };
             const effects = normalizeBackgroundEffects(input.effects);
             if (effects) background.effects = effects;
+            if (input.provenance) background.provenance = input.provenance;
           }
         } else if (input.type === "video") {
           const mode = input.source ?? "managed";
@@ -650,6 +666,7 @@ export class BackgroundStore {
               ? { source: { kind: "local" as const, path: video.filePath } }
               : { video: DEFAULT_VIDEO_BASENAME }),
           };
+          if (input.provenance) background.provenance = input.provenance;
         } else {
           background = null;
         }
@@ -878,6 +895,9 @@ export class BackgroundStore {
           name: trimmed,
           type: manifest.background.type,
           savedAt: nowIso(),
+          ...(manifest.background.provenance
+            ? { provenance: manifest.background.provenance }
+            : {}),
         };
         if (manifest.background.type === "video") {
           const pos = normalizeVideoPositionSec(opts.videoPositionSec);
@@ -901,6 +921,7 @@ export class BackgroundStore {
           path: dir,
           savedAt: meta.savedAt,
           sourceMode: isLocalBackgroundSource(manifest.background) ? "local" : "managed",
+          ...(meta.provenance ? { provenance: meta.provenance } : {}),
         };
         if (typeof meta.videoPositionSec === "number") {
           info.videoPositionSec = meta.videoPositionSec;
@@ -945,6 +966,7 @@ export class BackgroundStore {
           path: dir,
           savedAt: typeof meta.savedAt === "string" ? meta.savedAt : "",
           sourceMode: isLocalBackgroundSource(m.background) ? "local" : "managed",
+          ...(meta.provenance ? { provenance: meta.provenance } : {}),
           ...(pos != null && m.background.type === "video"
             ? { videoPositionSec: pos }
             : {}),
@@ -1352,6 +1374,7 @@ export interface SavedThemeMeta {
   name: string;
   type: "image" | "video";
   savedAt: string;
+  provenance?: ThemeProvenance;
   /** Last known playback position in seconds (video themes only). */
   videoPositionSec?: number;
   /** ISO timestamp of the last videoPositionSec write. */
@@ -1366,6 +1389,7 @@ export interface SavedThemeInfo {
   savedAt: string;
   /** Whether the primary media is referenced in place or copied into the store. */
   sourceMode?: "local" | "managed";
+  provenance?: ThemeProvenance;
   /** Last known playback position in seconds (video themes only). */
   videoPositionSec?: number;
   /** Plugin-shipped theme that cannot be deleted. */

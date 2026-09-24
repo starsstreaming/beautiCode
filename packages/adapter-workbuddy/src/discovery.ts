@@ -10,6 +10,7 @@ export const DEFAULT_WORKBUDDY_CDP_PORT = 9335;
 /** Bounded loopback candidates — never scan the whole range. */
 export const DEFAULT_WORKBUDDY_CDP_PORTS: readonly number[] = Object.freeze([
   9335,
+  9336,
   9222,
   9223,
   9229,
@@ -20,6 +21,24 @@ export const DEFAULT_WORKBUDDY_CDP_PORTS: readonly number[] = Object.freeze([
   9340,
   9350,
 ]);
+
+/** Return the bounded, deterministic port order used for WorkBuddy only. */
+export function workBuddyCdpPortCandidates(
+  preferred: number = DEFAULT_WORKBUDDY_CDP_PORT,
+): number[] {
+  return [
+    preferred,
+    ...DEFAULT_WORKBUDDY_CDP_PORTS.filter((port) => port !== preferred),
+  ];
+}
+
+/** Select the first unblocked WorkBuddy candidate without scanning arbitrary ports. */
+export function selectWorkBuddyCdpPort(
+  preferred: number,
+  blocked: ReadonlySet<number>,
+): number | null {
+  return workBuddyCdpPortCandidates(preferred).find((port) => !blocked.has(port)) ?? null;
+}
 
 export interface DiscoveredWorkBuddyCdp {
   port: number;
@@ -187,6 +206,32 @@ export async function probeWorkBuddyCdp(
   }
   if (endpoint.browser) found.browser = endpoint.browser;
   return found;
+}
+
+/**
+ * Distinguish a foreign CDP owner from a port that is merely settling.
+ * An open /json/version response is not enough: Chromium may bind before its
+ * first page exists. Only a non-WorkBuddy page target is positive evidence of
+ * a foreign owner; an empty target list keeps the normal settling grace.
+ */
+export async function probeForeignCdp(
+  port: number,
+  opts: { timeoutMs?: number } = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 200;
+  const endpoint = await probeCdpPort(port, { timeoutMs });
+  if (!endpoint) return false;
+  let targets: WorkBuddyTarget[];
+  try {
+    targets = await listTargets(port, timeoutMs);
+  } catch {
+    return false;
+  }
+  const pages = targets.filter(
+    (target) => target.type === "page" && target.url.length > 0,
+  );
+  if (pages.length === 0 || pickWorkBuddyTarget(pages)) return false;
+  return true;
 }
 
 export async function discoverWorkBuddyCdp(

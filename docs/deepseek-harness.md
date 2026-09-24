@@ -65,7 +65,7 @@ npx @deepseek-ai/dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beaut
 
 ## 网页控制台
 
-插件注入 `console.js`，它往 DSH 设置对话框的导航栏里加一个「背景」格，并在 `div[data-slot="settings.section"]`（React 渲染的那一栏）后面挂上自己的一页，选中时用 `data-bc-page` 把 React 那栏藏起来。设置对话框只在打开时存在，且类名是构建期 hash，所以识别只看 `role="dialog"` / `aria-modal` / 后代 `nav` / `[data-slot="settings.section"]` 这些结构特征，认不出就什么都不做。样式全部走 `--dsw-alias-*` / `--dsw-specific-*` token，跟设置页其他栏目同一套行结构。页面里的「全屏显示」调 Fullscreen API，用来隐藏浏览器自己的标签页和地址栏；请求同样必须留在用户手势的同步调用栈里，浏览器不支持时整行收起。同源 `POST /__beauticode/ui/*` 转到已有的 `createBeauticodeActions()`。页面连上 SSE 后会 `reapply` 上次背景。DSH 会话列表底部的 fade 在有壁纸时关掉，避免叠出一条暗影。
+插件注入 `console.js`，它往 DSH 设置对话框的导航栏里加一个「背景」格，并在 `div[data-slot="settings.section"]`（React 渲染的那一栏）后面挂上自己的一页，选中时用 `data-bc-page` 把 React 那栏藏起来。设置对话框只在打开时存在，且类名是构建期 hash，所以识别只看 `role="dialog"` / `aria-modal` / 后代 `nav` / `[data-slot="settings.section"]` 这些结构特征，认不出就什么都不做。样式全部走 `--dsw-alias-*` / `--dsw-specific-*` token，跟设置页其他栏目同一套行结构。页面里的「全屏显示」调 Fullscreen API，用来隐藏浏览器自己的标签页和地址栏；请求同样必须留在用户手势的同步调用栈里，浏览器不支持时整行收起。回环同端口的 `POST /__beauticode/ui/*` 转到已有的 `createBeauticodeActions()`。页面连上 SSE 后会 `reapply` 上次背景。DSH 会话列表底部的 fade 在有壁纸时关掉，避免叠出一条暗影。
 
 ## 控制端
 
@@ -107,7 +107,7 @@ npm run bc -- clear --port 3080
 ## 安全边界
 
 - DSH 地址只接受 `http://127.0.0.1`、`http://localhost` 或 `http://[::1]`。
-- 控制请求使用数据目录内的 256 位随机令牌；浏览器回执只接受同源请求。
+- 控制请求使用数据目录内的 256 位随机令牌；浏览器回执与全部 UI 端点只接受本机回环请求：Host/Origin 的主机名必须是 `127.0.0.1`、`localhost` 或 `[::1]`，且端口与插件实际监听端口一致（不以 Host 头为身份基准，防 DNS rebinding）。
 - 图片与 MP4 由随机端口的本机媒体服务提供，URL 带不可预测令牌并校验 DSH 页面来源。
 - 只有浏览器真实加载/解码媒体并回执后，应用事务才成功；否则磁盘状态回滚。
 - 自动化测试不能替代发布前的真实 DSH 页面可见性验收。

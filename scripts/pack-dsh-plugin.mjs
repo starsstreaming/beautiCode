@@ -86,6 +86,16 @@ function rewriteCoreImports(jsText) {
     .replaceAll("from '@beauticode/core'", "from '../core/index.js'");
 }
 
+export function rewritePluginCoreImports(jsText) {
+  return jsText
+    .replaceAll('from "@beauticode/core"', 'from "./vendor/core/index.js"')
+    .replaceAll("from '@beauticode/core'", "from './vendor/core/index.js'")
+    .replaceAll('"@beauticode/core",', 'new URL("./vendor/core/index.js", import.meta.url).href,')
+    .replaceAll("'@beauticode/core',", "new URL('./vendor/core/index.js', import.meta.url).href,")
+    .replace(/\s*"@beauticode\/adapter-dsh",\r?\n/g, "\n")
+    .replace(/\s*new URL\("\.\.\/\.\.\/packages\/(?:core|adapter-dsh)\/dist\/index\.js", import\.meta\.url\)\.href,\r?\n/g, "\n");
+}
+
 export async function stageEngineInto(destRoot) {
   const vendorAdapter = path.join(destRoot, "vendor", "adapter-dsh");
   const vendorCore = path.join(destRoot, "vendor", "core");
@@ -151,7 +161,11 @@ export async function stageDshPlugin(destRoot = defaultStageDir(), opts = {}) {
     }
     const dest = path.join(destRoot, name);
     await fsp.mkdir(path.dirname(dest), { recursive: true });
-    await fsp.copyFile(source, dest);
+    if (name === "gallery-host.mjs" || name === "control-client.mjs" || name === "host-apply.mjs") {
+      await fsp.writeFile(dest, rewritePluginCoreImports(await fsp.readFile(source, "utf8")), "utf8");
+    } else {
+      await fsp.copyFile(source, dest);
+    }
   }
   await stageEngineInto(destRoot);
   if (opts.publishName) await applyPublishName(destRoot, opts.publishName);

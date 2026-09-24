@@ -136,8 +136,8 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     "</div>" +
     '<div class="bc-control">' +
     '<span class="bc-slider">' +
-    '<input type="range" class="bc-dim-slider" min="0" max="100" step="1" value="0" aria-label="背景阴影"/>' +
-    '<span class="bc-dim-value">自动</span>' +
+    '<input type="range" class="bc-dim-slider" min="0" max="100" step="1" value="49" aria-label="背景阴影"/>' +
+    '<span class="bc-dim-value">49%</span>' +
     "</span>" +
     '<button type="button" class="bc-dim-reset" data-act="dim-reset" aria-label="恢复默认" title="恢复默认">' +
     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
@@ -225,7 +225,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   const themeTabs = Array.from(page.querySelectorAll(".bc-tab"));
   const msgEl = page.querySelector(".bc-msg");
   const mediaBtn = page.querySelector('[data-act="media"]');
-  const AUTO_DIM_PERCENT = 0;
+  const AUTO_DIM_PERCENT = 49;
   let busy = false;
   let muted = true;
   let currentThemeId = "";
@@ -242,7 +242,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   let lastStatus = null;
 
   // The shadow is always a real percentage: an untouched profile reads the same
-  // 0% the stylesheet falls back to, so the slider, the label and the veil can
+  // 49% default the stylesheet falls back to, so the slider, the label and the veil can
   // never disagree about which state the page is in.
   function renderDim() {
     const current = globalThis.BeauticodeBackgroundDim?.get?.() ?? null;

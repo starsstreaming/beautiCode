@@ -39,7 +39,7 @@ function defaultTokenFile() {
     (process.env.LOCALAPPDATA
       ? path.join(process.env.LOCALAPPDATA, "beautiCode")
       : path.join(os.homedir(), ".beauticode"));
-  return path.join(base, "dsh-bridge.token");
+  return path.join(base, "hosts", "dsh", "dsh-bridge.token");
 }
 
 function sendJson(res, status, body) {
@@ -87,6 +87,20 @@ function readJson(req) {
   });
 }
 
+// handler 层统一读取 JSON：readJson 拒绝时带着 400/413 状态码，
+// 不捕获的话本应返回的 4xx 会变成挂起或框架 500。
+async function readJsonOrReject(req, res) {
+  try {
+    return await readJson(req);
+  } catch (error) {
+    sendJson(res, error?.statusCode ?? 400, {
+      ok: false,
+      error: error?.message || "请求无效。",
+    });
+    return null;
+  }
+}
+
 async function authorized(req, tokenFile) {
   const match = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || "").trim());
   if (!match) return false;
@@ -105,9 +119,54 @@ async function authorized(req, tokenFile) {
   );
 }
 
-function isSameOrigin(req) {
+// 本插件全部 UI/状态端点的唯一防线（token 只覆盖 apply/mode/status），
+// 因此判定基准绝不能是 Host 头：Host 完全由请求方按所访问域名填写，
+// DNS rebinding 场景下恶意页面以 http://evil.com:<端口> 访问时 Origin 与
+// Host 天然相等，旧的「Origin === Host」校验必然通过。
+// 核心防线：Host 主机名必须是回环地址（rebinding 域名在此被拒）；
+// 监听端口已确认（ctx.webServer.port 就绪）时还要求端口一致；带 Origin
+// 的请求再单独校验回环 + 与 Host 同端口 + http。
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1"]);
+
+function parseHostHeader(raw) {
+  const hostHeader = String(raw || "").trim().toLowerCase();
+  if (!hostHeader) return null;
+  let hostname = hostHeader;
+  let port = "";
+  const bracketEnd = hostHeader.indexOf("]");
+  const colon = hostHeader.lastIndexOf(":");
+  if (colon > (bracketEnd === -1 ? 0 : bracketEnd)) {
+    hostname = hostHeader.slice(0, colon);
+    port = hostHeader.slice(colon + 1);
+  }
+  const bareHost = hostname.replace(/^\[/, "").replace(/\]$/, "");
+  const portNumber = port ? Number(port) : 80;
+  if (!LOOPBACK_HOSTNAMES.has(bareHost)) return null;
+  if (!Number.isInteger(portNumber) || portNumber <= 0) return null;
+  return { hostname: bareHost, port: portNumber };
+}
+
+function isSameOrigin(req, expectedPort) {
+  const host = parseHostHeader(req.headers.host);
+  if (!host) return false;
+  // expectedPort 为 null 表示监听端口尚未可知（如测试注入的假 webServer），
+  // 此时跳过端口一致性，仅保留回环 + Origin/Host 互证两道防线。
+  if (expectedPort != null && host.port !== expectedPort) return false;
   const origin = req.headers.origin;
-  if (typeof origin === "string") return origin === `http://${req.headers.host}`;
+  if (typeof origin === "string") {
+    let originUrl;
+    try {
+      originUrl = new URL(origin);
+    } catch {
+      return false;
+    }
+    const originPort = originUrl.port ? Number(originUrl.port) : 80;
+    return (
+      originUrl.protocol === "http:" &&
+      LOOPBACK_HOSTNAMES.has(originUrl.hostname.toLowerCase()) &&
+      originPort === host.port
+    );
+  }
   return req.headers["sec-fetch-site"] === "same-origin";
 }
 
@@ -209,12 +268,21 @@ export function apply(ctx, config = {}) {
   const modes = { fish: false, muted: true, tone: "auto" };
   const dataRoot = path.dirname(tokenFile);
   const baseUrl = resolvePluginBaseUrl(ctx);
+  // 只传「已确认」的监听端口：ctx.webServer.port 就绪时强制一致；
+  // 尚未就绪（如测试注入的假 webServer）时传 null，退回回环 + Origin/Host
+  // 互证两道防线。不能用 resolvePluginBaseUrl 的 fallback 猜测值比对，
+  // 否则随机端口服务器会被自己的同源校验拒绝。
+  const confirmedPort =
+    Number.isInteger(ctx?.webServer?.port) && ctx.webServer.port > 0
+      ? ctx.webServer.port
+      : null;
+  const sameOrigin = (req) => isSameOrigin(req, confirmedPort);
   registerAgentSurfaces(ctx, { dataRoot, baseUrl });
   const ui = createBeauticodeUi({
     dataRoot,
     getBaseUrl: () => resolvePluginBaseUrl(ctx),
     sendJson,
-    isSameOrigin,
+    isSameOrigin: sameOrigin,
     readJson,
     pickMedia: config.pickMedia,
     allowManagedUpload: config.allowManagedUpload,
@@ -433,7 +501,7 @@ export function apply(ctx, config = {}) {
         kind: "exact",
         path: "/__beauticode/events",
         handler: (req, res) => {
-          if (req.method !== "GET" || !isSameOrigin(req)) {
+          if (req.method !== "GET" || !sameOrigin(req)) {
             res.writeHead(req.method === "GET" ? 403 : 405).end();
             return;
           }
@@ -477,7 +545,8 @@ export function apply(ctx, config = {}) {
             sendJson(res, 401, { ok: false, error: "未授权的请求。" });
             return;
           }
-          const body = await readJson(req);
+          const body = await readJsonOrReject(req, res);
+          if (!body) return;
           if (!validApplyPayload(body)) {
             sendJson(res, 400, { ok: false, error: "背景载荷无效。" });
             return;
@@ -510,7 +579,8 @@ export function apply(ctx, config = {}) {
             sendJson(res, 401, { ok: false, error: "未授权的请求。" });
             return;
           }
-          const body = await readJson(req);
+          const body = await readJsonOrReject(req, res);
+          if (!body) return;
           const keys = Object.keys(body);
           if (
             keys.length === 0 ||
@@ -554,11 +624,12 @@ export function apply(ctx, config = {}) {
         kind: "exact",
         path: "/__beauticode/ack",
         handler: async (req, res) => {
-          if (req.method !== "POST" || !isSameOrigin(req)) {
+          if (req.method !== "POST" || !sameOrigin(req)) {
             res.writeHead(req.method === "POST" ? 403 : 405).end();
             return;
           }
-          const body = await readJson(req);
+          const body = await readJsonOrReject(req, res);
+          if (!body) return;
           const state = clientStates.get(body.clientId);
           if (!clients.has(body.clientId) || !state) {
             sendJson(res, 400, { ok: false, error: "渲染回执无效。" });

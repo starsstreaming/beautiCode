@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { isRecordedPidLive } from "./process-liveness.js";
+
 export interface FileLockOwner {
   pid: number;
   nonce: string;
@@ -17,16 +19,6 @@ export interface FileLockLease {
 export interface AcquireFileLockOptions {
   purpose?: string;
   staleMs?: number;
-}
-
-function isPidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function parseOwner(raw: string): FileLockOwner | null {
@@ -142,10 +134,19 @@ export async function acquireFileLock(
     }
     const existing = parseOwner(raw);
     const existingPid = parseOwnerPid(raw);
-    if (existingPid != null && isPidAlive(existingPid)) {
-      throw new Error(
-        `Another ${opts.purpose ?? "operation"} is running (pid ${existingPid}).`,
+    if (existingPid != null) {
+      // isPidAlive 把 EPERM 视为存活（跨权限边界）；这里再用 startedAt 复核
+      // 一次，防止「PID 已被回收复用给别的进程」时把活着的无关进程当成
+      // 原 owner（启动时间不符即视为可安全接管），或把真正存活的 owner 误判。
+      const ownerAlive = await isRecordedPidLive(
+        existingPid,
+        existing?.startedAt ?? null,
       );
+      if (ownerAlive) {
+        throw new Error(
+          `Another ${opts.purpose ?? "operation"} is running (pid ${existingPid}).`,
+        );
+      }
     }
     if (!existing && age <= staleMs) {
       throw new Error(

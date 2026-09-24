@@ -63,3 +63,6 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install-dsh-plugin.ps1"" -PluginRoot ""{app}\integrations\deepseek-harness"" -InstallRoot ""{app}"" -Remove"; WorkingDir: "{app}"; Flags: runhidden
+Filename: "{app}\runtime\node.exe"; Parameters: """{app}\scripts\desktop-cdp-setup.mjs"" --host cursor uninstall"; WorkingDir: "{app}"; Flags: runhidden; RunOnceId: "RemoveCursorDaemon"
+Filename: "{app}\runtime\node.exe"; Parameters: """{app}\scripts\desktop-cdp-setup.mjs"" --host doubao uninstall"; WorkingDir: "{app}"; Flags: runhidden; RunOnceId: "RemoveDoubaoDaemon"
+Filename: "{app}\runtime\node.exe"; Parameters: """{app}\scripts\wb-setup.mjs"" uninstall"; WorkingDir: "{app}"; Flags: runhidden; RunOnceId: "RemoveWorkBuddyDaemon"

@@ -9,7 +9,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const pluginSrc = path.join(repoRoot, "integrations", "codex-desktop");
 
-const PLUGIN_FILES = ["cli.js", "watch-host.mjs", "bin/beauticode-codex", "package.json"];
+const PLUGIN_FILES = [
+  "cli.js",
+  "watch-host.mjs",
+  "codex-watchdog.mjs",
+  "lifecycle.mjs",
+  "bin/beauticode-codex",
+  "package.json",
+];
 
 export function defaultStageDir() {
   return path.join(repoRoot, "artifacts", "codex-plugin");

@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { recoverStaleCodexLock } from "./lifecycle.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const LOG = path.join(here, "watch.log");
+const codexLock = path.join(
+  process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
+  "beautiCode",
+  "hosts",
+  "codex",
+  "injector.lock",
+);
 
 function adapterHref() {
   const vendor = path.join(here, "vendor", "adapter-codex", "index.js");
@@ -30,6 +39,9 @@ function log(message) {
 }
 
 const { BeautiSession, startCodexStartupRepairMonitor } = await import(adapterHref());
+await recoverStaleCodexLock(codexLock, here).catch((error) => {
+  log(`stale lock recovery skipped: ${error instanceof Error ? error.message : String(error)}`);
+});
 const startupMonitor = startCodexStartupRepairMonitor({
   repairWindowMs: 10_000,
   log: {

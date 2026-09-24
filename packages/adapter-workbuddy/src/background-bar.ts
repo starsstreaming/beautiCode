@@ -32,7 +32,7 @@ export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
  * payload 世代戳：每次改 payload 内容时递增。守卫用它判断页面上的注入
  * 是否为「当前代」——旧代按钮的闭包攥着已分离的节点引用，必须全拆重建。
  */
-export const BACKGROUND_BAR_VERSION = 'v10.0';
+export const BACKGROUND_BAR_VERSION = 'v10.1';
 
 /** 注入 IIFE 字符串；幂等（守卫同时校验 entry 是否仍在 DOM，侧栏收起/重挂后可重建）。 */
 export const BACKGROUND_BAR_INJECTION: string = (function () {
@@ -227,13 +227,13 @@ function pill(text2, act) {
 function slider(cls, label) {
   var s = document.createElement('input');
   s.type = 'range'; s.className = cls; s.min = '0'; s.max = '100'; s.step = '1';
-  s.value = '0'; s.setAttribute('aria-label', label);
+  s.value = cls === 'bc-dim-slider' ? '49' : '0'; s.setAttribute('aria-label', label);
   return s;
 }
 function sliderValue() {
   var v = document.createElement('span');
   v.className = 'bc-sliderval';
-  v.textContent = '自动';
+  v.textContent = '0%';
   return v;
 }
 
@@ -241,7 +241,9 @@ function sliderValue() {
 // 控件先声明为外层变量（监听器在后面引用它们——v6 曾因内联进表达式导致
 // "dimSlider is not defined"，payload 每次执行即崩、监听器从未挂上）
 var dimSlider = slider('bc-dim-slider', '背景阴影');
+dimSlider.value = '49';
 var dimValue = sliderValue();
+dimValue.textContent = '49%';
 dimValue.setAttribute('data-id', 'dimValue');
 pop.appendChild(menuItem(ICONS.dim, '背景阴影', (function(){ var w = document.createElement('span'); w.style.cssText = 'display:flex;align-items:center;gap:6px'; w.appendChild(dimSlider); w.appendChild(dimValue); return w; })()));
 var blurSlider = slider('bc-blur-slider', '背景磨砂');
@@ -252,9 +254,9 @@ pop.appendChild(menuItem(ICONS.blur, '背景磨砂', (function(){ var w = docume
 // 面板透明度滑杆（用户要求移到「背景磨砂」下面，且可调）：
 // 'input' 只更新标签；松手（change）才挂请求 —— 守护按新 α 重造覆盖层（字面量必须重生成）
 var alphaSlider = slider('bc-alpha-slider', '面板透明度');
-alphaSlider.value = '18';
 var alphaValue = sliderValue();
-alphaValue.textContent = '18%';
+alphaSlider.value = '100';
+alphaValue.textContent = '100%';
 alphaValue.setAttribute('data-id', 'alphaValue');
 pop.appendChild(menuItem(ICONS.lock, '面板透明度', (function(){ var w = document.createElement('span'); w.style.cssText = 'display:flex;align-items:center;gap:6px'; w.appendChild(alphaSlider); w.appendChild(alphaValue); return w; })()));
 var soundBtn = pill('已关', 'sound');
@@ -286,6 +288,17 @@ document.body.appendChild(pop);
 var GPORT = parseInt('__BC_GALLERY_PORT__', 10) || 9337;
 var GTOKEN = __BC_GALLERY_TOKEN__;
 var CENTER_URL = __BC_CENTER_URL__;
+// The runner may mount this entry before the gallery listener has selected a
+// free port. Keep the entry usable immediately, then update its connection
+// details idempotently once the local service is ready.
+window.__bcUpdateGalleryConfig = function (next) {
+  if (!next || typeof next !== 'object') return false;
+  if (Number.isInteger(Number(next.port)) && Number(next.port) > 0) GPORT = Number(next.port);
+  if (typeof next.token === 'string' && next.token) GTOKEN = next.token;
+  if (typeof next.centerUrl === 'string') CENTER_URL = next.centerUrl;
+  if (typeof gal !== 'undefined' && gal && !gal.hidden) galLoad();
+  return true;
+};
 function safeCenterUrl(raw) {
   try {
     var parsed = new URL(String(raw || ''));
@@ -579,14 +592,16 @@ function applyMediaUrl(url, kind) {
 function newThemeId() {
   return 'wb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
-function rememberImportedTheme(name, path, kind) {
+function rememberImportedTheme(name, path, kind, provenance) {
   var rows = themeRows();
   var theme = rows.find(function (t) { return t.path === path; });
   if (theme) {
     theme.name = name;
     theme.type = kind;
+    if (provenance && provenance.source === 'hnnulwh') theme.provenance = provenance;
   } else {
     theme = { id: newThemeId(), name: name, path: path, type: kind };
+    if (provenance && provenance.source === 'hnnulwh') theme.provenance = provenance;
     rows.push(theme);
   }
   PERSIST.themes = rows;
@@ -645,7 +660,7 @@ alphaSlider.addEventListener('input', function () {
 // ── 状态记忆：页面维护实时状态，守护轮询落地 state.json，启动时 __bcRestoreState 恢复 ──
 // 挂在 window 上跨 payload 重装存活——否则 applyAll 每轮重装都会把状态打回
 // nulls，watcher 会把 nulls 覆盖进 state.json（实测把已保存的壁纸冲掉的真凶）
-window.__bcPersistStore = window.__bcPersistStore || { wallpaper: null, dim: null, blur: null, alpha: null, cleared: false, themes: [], activeThemeId: null };
+window.__bcPersistStore = window.__bcPersistStore || { wallpaper: null, dim: 49, blur: 0, alpha: 100, cleared: false, themes: [], activeThemeId: null };
 var PERSIST = window.__bcPersistStore;
 if (!Array.isArray(PERSIST.themes)) PERSIST.themes = [];
 if (typeof PERSIST.activeThemeId !== 'string') PERSIST.activeThemeId = null;
@@ -674,12 +689,20 @@ window.__bcRestoreState = function (stRaw) {
       var id = typeof t.id === 'string' && t.id ? t.id : 'legacy-' + index + '-' + String(t.path).length;
       if (seenThemeIds[id]) id += '-' + index;
       seenThemeIds[id] = true;
-      return {
+      var restored = {
         id: id,
         name: typeof t.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 80) : String(t.path).split(/[\\\\/]/).pop().replace(/\\.[^.]+$/, ''),
         path: t.path,
         type: kind,
       };
+      if (t.provenance && t.provenance.source === 'hnnulwh' && typeof t.provenance.sourceSkinId === 'string' && typeof t.provenance.sourceVersion === 'string') {
+        restored.provenance = {
+          source: 'hnnulwh',
+          sourceSkinId: t.provenance.sourceSkinId,
+          sourceVersion: t.provenance.sourceVersion,
+        };
+      }
+      return restored;
     }).filter(Boolean);
     PERSIST.activeThemeId = typeof st.activeThemeId === 'string' && PERSIST.themes.some(function (t) { return t.id === st.activeThemeId; })
       ? st.activeThemeId : null;
@@ -766,7 +789,22 @@ pop.addEventListener('click', function (ev) {
 });
 
 // 守护回填入口：原生选择器选中的路径 / 守护侧主动应用
-window.__bcApplyBackgroundPath = function (p) { try { applyPath(String(p)); } catch (e) {} };
+function applyGalleryPath(p, meta) {
+  var kind = isVideo(p) ? 'video' : isImage(p) ? 'image' : null;
+  if (!kind) return Promise.reject(new Error('不认识的皮肤媒体格式。'));
+  var st = stageEl(), old = Array.prototype.slice.call(st.querySelectorAll('img.bc-media,video.bc-media'));
+  var el = document.createElement(kind === 'video' ? 'video' : 'img');
+  el.className = 'bc-media'; el.setAttribute('data-bc-injected', BC);
+  var url = filePathToUrl(p); el.src = url;
+  if (kind === 'video') { el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto'; }
+  return new Promise(function (resolve, reject) {
+    var done = false, timer = setTimeout(function () { if (!done) { done = true; el.remove(); reject(new Error('皮肤媒体加载超时。')); } }, 30000);
+    var ok = function () { if (done) return; done = true; clearTimeout(timer); st.appendChild(el); old.forEach(function (n) { var u = n.dataset.blobUrl; if (u) URL.revokeObjectURL(u); n.remove(); }); if (currentUrl && currentUrl.indexOf('blob:') === 0) { URL.revokeObjectURL(currentUrl); } currentUrl = url; markMedia(kind); if (kind === 'video') { markVideoReady(el); el.play().catch(function () {}); } var name = String(meta && meta.themeName || '皮肤主题').trim().slice(0, 80); rememberImportedTheme(name, p, kind, meta && meta.provenance); persistMark(p, PERSIST.activeThemeId); resolve(true); };
+    var bad = function () { if (done) return; done = true; clearTimeout(timer); el.remove(); reject(new Error('皮肤媒体加载失败。')); };
+    if (kind === 'video') { el.addEventListener('loadeddata', ok, { once: true }); el.addEventListener('error', bad, { once: true }); } else { el.addEventListener('load', ok, { once: true }); el.addEventListener('error', bad, { once: true }); }
+  });
+}
+window.__bcApplyBackgroundPath = function (p, meta) { try { return meta && meta.themeName ? applyGalleryPath(String(p), meta) : (applyPath(String(p)), Promise.resolve(true)); } catch (e) { return Promise.reject(e); } };
 // 安装完成即自愈：WorkBuddy 重挂侧栏会重建弹窗/舞台（回默认），这里主动从
 // store 恢复一次——重装即恢复，不依赖守护轮询的时机（时机盲区实测卡死在默认）
 try { if (PERSIST.wallpaper) window.__bcRestoreState(JSON.parse(JSON.stringify(PERSIST))); } catch (e) {}
@@ -798,6 +836,7 @@ delete window.__bcApplyBackgroundPath;
 delete window.__bcBackgroundMsg;
 delete window.__bcPickRequest;
 delete window.__bcPendingPickPath;
+delete window.__bcUpdateGalleryConfig;
 document.documentElement.removeAttribute('data-bc-workbuddy-bg');
 document.documentElement.removeAttribute('data-bc-active');
 document.documentElement.removeAttribute('data-bc-media');

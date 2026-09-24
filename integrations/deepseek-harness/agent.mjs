@@ -375,9 +375,18 @@ export function createBeauticodeActions(dataRootOrOptions) {
             videoPath: input.videoPath.trim(),
             imagePath,
             source,
+            ...(input.effects ? { effects: input.effects } : {}),
           }
         : { type: "image", imagePath, source };
-      if (!hasVideo && input.effects) themeInput.effects = input.effects;
+      if (input.provenance?.source === "hnnulwh" &&
+          /^skin-[a-z0-9]{8,40}$/.test(String(input.provenance.sourceSkinId)) &&
+          String(input.provenance.sourceVersion || "").trim()) {
+        themeInput.provenance = {
+          source: "hnnulwh",
+          sourceSkinId: String(input.provenance.sourceSkinId),
+          sourceVersion: String(input.provenance.sourceVersion).trim(),
+        };
+      }
       const resolved = await backend();
       // Gallery import applies-and-saves through the same atomic transaction as
       // the normal image/video flow. There is no separate import-only endpoint:

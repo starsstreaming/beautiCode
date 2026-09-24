@@ -129,7 +129,7 @@
       msg.textContent = data.skins?.length ? "" : "目录是空的。";
       foot.innerHTML = centerUrl
         ? `上传与审核在 <a href="${escapeAttr(centerUrl)}" target="_blank" rel="noreferrer">皮肤中心网站</a>。安装会下载到本机后再应用。`
-        : "未配置皮肤中心地址。在插件的 skin-center.json 或环境变量 BEAUTICODE_SKIN_CENTER 里填入你的域名。";
+        : "皮肤中心暂不可用。地址由插件内置固定，请检查网络后重试。";
     } catch (error) {
       grid.innerHTML = "";
       msg.textContent = error instanceof Error ? error.message : String(error);
@@ -144,7 +144,7 @@
       if (!config.enabled) {
         grid.innerHTML = "";
         msg.textContent = "尚未配置皮肤中心地址。";
-        foot.textContent = "设置 BEAUTICODE_SKIN_CENTER，或在 skin-center.json 填写站点 URL。";
+        foot.textContent = "皮肤中心地址由插件内置固定；目录不可达时请检查网络后重试。";
         return;
       }
       await load();

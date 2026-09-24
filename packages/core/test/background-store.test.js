@@ -726,6 +726,33 @@ test("save/list/use theme keeps Chinese display name and ASCII id", async () => 
   await fs.rm(root, { recursive: true, force: true });
 });
 
+test("skin-center provenance survives active and saved-theme round trips", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-theme-provenance-"));
+  try {
+    const fixtures = path.join(root, "fixtures");
+    await fs.mkdir(fixtures);
+    const { imagePath } = await writeFixtures(fixtures);
+    const store = new BackgroundStore({ root: path.join(root, "data") });
+    const provenance = {
+      source: "hnnulwh",
+      sourceSkinId: "skin-1c4966b620dd6227",
+      sourceVersion: "updatedAt:2026-09-16T12:02:11.457Z",
+    };
+    const active = await store.commitImport({ type: "image", imagePath, provenance });
+    assert.deepEqual(active.background?.provenance, provenance);
+
+    const saved = await store.saveCurrentTheme("室内");
+    assert.deepEqual(saved.provenance, provenance);
+    assert.deepEqual((await store.listSavedThemes())[0].provenance, provenance);
+
+    await store.commitImport({ type: "clear" });
+    const restored = await store.useSavedTheme(saved.id);
+    assert.deepEqual(restored.manifest.background?.provenance, provenance);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("video theme progress is bound per theme and invalid becomes null", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-theme-pos-"));
   const fixtures = path.join(root, "fixtures");

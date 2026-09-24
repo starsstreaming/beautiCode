@@ -781,8 +781,21 @@ export class CodexHostApplier implements HostApplier {
           reason: "host closed during verification",
         };
       }
-      await this.reconcileSessions().catch(() => []);
-      if (this.sessions.size === 0) {
+      // 复审：身份变更（宿主重启、browserId 换代）是结构性信号，吞掉
+      // 它会让 verify 空转整个 deadline 后报出误导性的
+      // "no verification samples"。识别后立即以明确原因失败，保持
+      // verify 的返回值契约（不抛），让上层事务按既有路径回滚与重绑。
+      const reconciled = await this.reconcileSessions().catch((err) => {
+        if (err instanceof CdpIdentityMismatchError) return null;
+        return [] as ConnectedTarget[];
+      });
+      if (reconciled === null) {
+        return {
+          status: "fail",
+          reason: "host restarted (CDP identity mismatch); awaiting re-bind",
+        };
+      }
+      if (reconciled.length === 0 && this.sessions.size === 0) {
         lastFail = {
           status: "fail",
           reason: "injector offline: no CDP sessions",

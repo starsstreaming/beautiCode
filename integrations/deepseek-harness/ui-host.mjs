@@ -332,6 +332,19 @@ export function createBeauticodeUi({
     },
   };
   const actions = createBeauticodeActions(options);
+  // readJson 拒绝时带着 400/413 状态码；不在这里统一捕获，错误会冒泡
+  // 成框架 500，客户端拿不到真实的失败原因。
+  async function readJsonOr400(req, res) {
+    try {
+      return await readJson(req);
+    } catch (error) {
+      sendJson(res, error?.statusCode ?? 400, {
+        ok: false,
+        error: error?.message || "请求无效。",
+      });
+      return null;
+    }
+  }
   const gallery = createGalleryHandlers({ dataRoot, actions });
   const nativePicker = injectedPicker ?? pickWindowsMedia;
   const allowManagedUpload =
@@ -550,7 +563,8 @@ export function createBeauticodeUi({
         res.writeHead(403).end();
         return;
       }
-      const body = await readJson(req);
+      const body = await readJsonOr400(req, res);
+      if (!body) return;
       if (!PICK_KINDS.includes(body.kind)) {
         sendJson(res, 400, { ok: false, error: "kind 必须是 image、video 或 media。" });
         return;
@@ -612,7 +626,8 @@ export function createBeauticodeUi({
         res.writeHead(403).end();
         return;
       }
-      const body = await readJson(req);
+      const body = await readJsonOr400(req, res);
+      if (!body) return;
       const parsedTheme = parseImportThemeName(body.themeName);
       const selectionId =
         typeof body.selectionId === "string" ? body.selectionId.trim() : "";
@@ -708,7 +723,8 @@ export function createBeauticodeUi({
         res.writeHead(403).end();
         return;
       }
-      const body = await readJson(req);
+      const body = await readJsonOr400(req, res);
+      if (!body) return;
       if (typeof body.muted !== "boolean" || Object.keys(body).some((key) => key !== "muted")) {
         sendJson(res, 400, { ok: false, error: "只接受 muted 开关。" });
         return;
@@ -732,7 +748,8 @@ export function createBeauticodeUi({
         res.writeHead(403).end();
         return;
       }
-      const body = await readJson(req);
+      const body = await readJsonOr400(req, res);
+      if (!body) return;
       if (typeof body.id !== "string" || !body.id.trim()) {
         sendJson(res, 400, { ok: false, error: "必须提供主题。" });
         return;
@@ -756,7 +773,8 @@ export function createBeauticodeUi({
         res.writeHead(403).end();
         return;
       }
-      const body = await readJson(req);
+      const body = await readJsonOr400(req, res);
+      if (!body) return;
       if (typeof body.id !== "string" || !body.id.trim()) {
         sendJson(res, 400, { ok: false, error: "必须提供主题。" });
         return;
@@ -792,7 +810,8 @@ export function createBeauticodeUi({
         res.writeHead(403).end();
         return;
       }
-      const body = await readJson(req);
+      const body = await readJsonOr400(req, res);
+      if (!body) return;
       if (body.id !== "internal" && body.id !== "infernal") {
         sendJson(res, 400, { ok: false, error: "未知的内置主题。" });
         return;

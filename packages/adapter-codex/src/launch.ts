@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 
 export const DEFAULT_CODEX_CDP_PORT = 9335;
 export const DEFAULT_CODEX_REPAIR_WINDOW_MS = 10_000;
+export const DEFAULT_CODEX_CDP_POLL_INTERVAL_MS = 200;
 
 export interface CodexProcess {
   pid: number;
@@ -397,7 +398,10 @@ async function launchCodexWithCdp(
   const child = spawn(command.file, command.args, {
     detached: true,
     stdio: "ignore",
-    windowsHide: true,
+    // Codex is the foreground application in this path. Only the watcher
+    // and PowerShell probes use hidden windows; do not pass a hidden-window
+    // hint to the host launch itself.
+    windowsHide: false,
   });
   await new Promise<void>((resolve, reject) => {
     child.once("spawn", resolve);
@@ -641,13 +645,21 @@ async function waitForCodexCdp(
   return await waitForAnyCodexCdp([port], timeoutMs);
 }
 
-async function waitForAnyCodexCdp(
+export async function waitForAnyCodexCdp(
   ports: readonly number[],
   timeoutMs: number,
+  options: {
+    discover?: typeof discoverCdpEndpoints;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
 ): Promise<DiscoveredCdpEndpoint | null> {
-  const deadline = Date.now() + Math.max(1_000, timeoutMs);
-  while (Date.now() < deadline) {
-    const hits = await discoverCdpEndpoints({
+  const discover = options.discover ?? discoverCdpEndpoints;
+  const sleep = options.sleep ?? delay;
+  const now = options.now ?? Date.now;
+  const deadline = now() + Math.max(1_000, timeoutMs);
+  while (now() < deadline) {
+    const hits = await discover({
       ports: [...new Set(ports)],
       scanProcesses: false,
       requirePages: true,
@@ -655,7 +667,7 @@ async function waitForAnyCodexCdp(
     });
     const hit = hits[0];
     if (hit) return hit;
-    await delay(400);
+    await sleep(DEFAULT_CODEX_CDP_POLL_INTERVAL_MS);
   }
   return null;
 }

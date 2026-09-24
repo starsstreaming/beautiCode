@@ -7,6 +7,11 @@
 2. **Never** silently write API base URLs, API keys, auth tokens, or model relay
    settings.
 3. **Loopback only** for CDP and media serving (`127.0.0.1`). No LAN bind.
+   - DSH panel endpoints authenticate by loopback + port, not by Host trust:
+     the `Host` header is attacker-controlled under DNS rebinding, so
+     same-origin checks compare `Host`/`Origin` against the plugin's actual
+     loopback listening origin (loopback hostname + exact port). Requests from
+     any other hostname are 403.
 4. **No arbitrary filesystem exposure.** The media hub serves only explicitly
    validated staged assets behind per-file random token routes. Wrong token /
    wrong origin → 403.

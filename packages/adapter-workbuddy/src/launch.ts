@@ -11,13 +11,18 @@ import {
   discoverWorkBuddyCdp,
   parseRemoteDebuggingFlags,
   probeCdpPort,
+  probeForeignCdp,
   probeWorkBuddyCdp,
+  workBuddyCdpPortCandidates,
   type DiscoveredWorkBuddyCdp,
 } from "./discovery.js";
 
 const execFileAsync = promisify(execFile);
 
 export const DEFAULT_WORKBUDDY_REPAIR_WINDOW_MS = 10_000;
+export const DEFAULT_WORKBUDDY_CDP_POLL_INTERVAL_MS = 200;
+export const DEFAULT_WORKBUDDY_FAST_RECONNECT_DELAY_MS = 500;
+export const DEFAULT_WORKBUDDY_IDLE_RECONNECT_DELAY_MS = 3_000;
 
 export interface WorkBuddyProcess {
   pid: number;
@@ -63,6 +68,40 @@ export interface EnsureWorkBuddyCdpOptions {
   repairWindowMs?: number;
   timeoutMs?: number;
   log?: WorkBuddyEnsureLog;
+  /** Injectable seams for deterministic adapter-level lifecycle tests. */
+  hooks?: EnsureWorkBuddyCdpHooks;
+}
+
+/** Choose a reconnect cadence without ever granting permission to launch. */
+export function selectWorkBuddyReconnectDelay(
+  processes: readonly Pick<WorkBuddyProcess, "pid" | "createdAtMs">[],
+  nowMs = Date.now(),
+  repairWindowMs = DEFAULT_WORKBUDDY_REPAIR_WINDOW_MS,
+): number {
+  const hasLiveProcess = processes.some(
+    (processInfo) => Number.isInteger(processInfo.pid) && processInfo.pid > 0,
+  );
+  const hasRecentStart = processes.some(
+    (processInfo) =>
+      processInfo.createdAtMs != null &&
+      Number.isFinite(processInfo.createdAtMs) &&
+      nowMs >= processInfo.createdAtMs &&
+      nowMs - processInfo.createdAtMs < repairWindowMs,
+  );
+  return hasLiveProcess || hasRecentStart
+    ? DEFAULT_WORKBUDDY_FAST_RECONNECT_DELAY_MS
+    : DEFAULT_WORKBUDDY_IDLE_RECONNECT_DELAY_MS;
+}
+
+export interface EnsureWorkBuddyCdpHooks {
+  discover?: typeof discoverWorkBuddyCdp;
+  probeForeignCdp?: typeof probeForeignCdp;
+  listProcesses?: typeof listWorkBuddyProcesses;
+  waitForCdp?: typeof waitForWorkBuddyCdp;
+  pickPort?: typeof pickAvailableLoopbackPort;
+  findExecutable?: typeof findWorkBuddyExecutable;
+  launchWithCdp?: typeof launchWorkBuddyWithCdp;
+  stopFresh?: typeof stopFreshWorkBuddyProcess;
 }
 
 export interface EnsuredWorkBuddyCdp extends DiscoveredWorkBuddyCdp {
@@ -85,6 +124,14 @@ export function isWorkBuddyMainProcess(
   const executable = exePath || executableFromCommandLine(commandLine);
   if (!executable) return false;
   if (platform === "win32") {
+    const quoted = /^\s*"[^"]+"\s*(.*)$/.exec(commandLine);
+    const args = quoted
+      ? quoted[1] ?? ""
+      : /^\s*\S+\s*(.*)$/.exec(commandLine)?.[1] ?? "";
+    // WorkBuddy ships helper entrypoints (daemon-app-server and extension
+    // servers) through the same executable. They are not the browser main
+    // process and must not make a stale/multi-process repair look unsafe.
+    if (args && !args.trim().startsWith("--")) return false;
     return (
       name.toLowerCase() === "workbuddy.exe" &&
       path.win32.basename(executable).toLowerCase() === "workbuddy.exe"
@@ -163,15 +210,20 @@ export async function isLoopbackPortFree(port: number): Promise<boolean> {
 
 export async function pickAvailableLoopbackPort(
   preferred: number = DEFAULT_WORKBUDDY_CDP_PORT,
+  hooks: {
+    probeCdp?: typeof probeCdpPort;
+    probeWorkBuddy?: typeof probeWorkBuddyCdp;
+    isPortFree?: typeof isLoopbackPortFree;
+  } = {},
 ): Promise<number> {
-  const ordered = [
-    preferred,
-    ...DEFAULT_WORKBUDDY_CDP_PORTS.filter((p) => p !== preferred),
-  ];
+  const probe = hooks.probeCdp ?? probeCdpPort;
+  const probeWorkBuddy = hooks.probeWorkBuddy ?? probeWorkBuddyCdp;
+  const isFree = hooks.isPortFree ?? isLoopbackPortFree;
+  const ordered = workBuddyCdpPortCandidates(preferred);
   for (const port of ordered) {
-    const existing = await probeCdpPort(port, { timeoutMs: 200 });
-    if (!existing && (await isLoopbackPortFree(port))) return port;
-    const workbuddy = await probeWorkBuddyCdp(port, { timeoutMs: 200 });
+    const existing = await probe(port, { timeoutMs: 200 });
+    if (!existing && (await isFree(port))) return port;
+    const workbuddy = await probeWorkBuddy(port, { timeoutMs: 200 });
     if (workbuddy) return port;
   }
   return await new Promise((resolve, reject) => {
@@ -390,21 +442,29 @@ async function stopFreshWorkBuddyProcess(
   }
 }
 
-async function waitForWorkBuddyCdp(
+export async function waitForWorkBuddyCdp(
   ports: readonly number[],
   timeoutMs: number,
+  options: {
+    discover?: typeof discoverWorkBuddyCdp;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
 ): Promise<DiscoveredWorkBuddyCdp | null> {
+  const discover = options.discover ?? discoverWorkBuddyCdp;
+  const sleep = options.sleep ?? delay;
+  const now = options.now ?? Date.now;
   const candidates = [
     ...new Set([...ports, ...DEFAULT_WORKBUDDY_CDP_PORTS]),
   ];
-  const deadline = Date.now() + Math.max(1_000, timeoutMs);
-  while (Date.now() < deadline) {
-    const hit = await discoverWorkBuddyCdp({
+  const deadline = now() + Math.max(1_000, timeoutMs);
+  while (now() < deadline) {
+    const hit = await discover({
       ports: candidates,
       timeoutMs: 400,
     });
     if (hit) return hit;
-    await delay(400);
+    await sleep(DEFAULT_WORKBUDDY_CDP_POLL_INTERVAL_MS);
   }
   return null;
 }
@@ -424,8 +484,17 @@ export async function ensureWorkBuddyCdp(
     opts.repairWindowMs ?? DEFAULT_WORKBUDDY_REPAIR_WINDOW_MS;
   const timeoutMs = opts.timeoutMs ?? 40_000;
   const log = opts.log;
+  const hooks = opts.hooks ?? {};
+  const discover = hooks.discover ?? discoverWorkBuddyCdp;
+  const probeForeign = hooks.probeForeignCdp ?? probeForeignCdp;
+  const listProcesses = hooks.listProcesses ?? listWorkBuddyProcesses;
+  const waitForCdp = hooks.waitForCdp ?? waitForWorkBuddyCdp;
+  const pickPort = hooks.pickPort ?? pickAvailableLoopbackPort;
+  const findExecutable = hooks.findExecutable ?? findWorkBuddyExecutable;
+  const launchWithCdp = hooks.launchWithCdp ?? launchWorkBuddyWithCdp;
+  const stopFresh = hooks.stopFresh ?? stopFreshWorkBuddyProcess;
 
-  const existing = await discoverWorkBuddyCdp({
+  const existing = await discover({
     ports: [preferred, ...DEFAULT_WORKBUDDY_CDP_PORTS],
     timeoutMs: 450,
   });
@@ -439,15 +508,7 @@ export async function ensureWorkBuddyCdp(
     );
   }
 
-  const procs = await listWorkBuddyProcesses();
-  const exe =
-    findWorkBuddyExecutable() ||
-    parseExecutableFromCommand(procs[0]?.commandLine ?? "");
-  if (!exe) {
-    throw new Error(
-      "找不到 WorkBuddy。请先安装，或用带 WORKBUDDY_REMOTE_DEBUGGING_PORT 的方式启动它。",
-    );
-  }
+  const procs = await listProcesses();
 
   let restarted = false;
   if (procs.length > 0) {
@@ -467,7 +528,7 @@ export async function ensureWorkBuddyCdp(
       log?.warn(
         `WorkBuddy 新主进程 ${proc.pid} 没有 CDP，正在执行一次修复性重启…`,
       );
-      if (!(await stopFreshWorkBuddyProcess(proc))) {
+      if (!(await stopFresh(proc))) {
         throw new Error("WorkBuddy 新主进程已退出，取消本次自动重启。");
       }
       await delay(120);
@@ -476,12 +537,46 @@ export async function ensureWorkBuddyCdp(
       const declaredPorts = procs
         .map((proc) => proc.port)
         .filter((port): port is number => port != null);
-      const waiting = await waitForWorkBuddyCdp(
-        declaredPorts,
-        Math.min(timeoutMs, 8_000),
-      );
+      const foreign = (
+        await Promise.all(
+          [...new Set(declaredPorts)].map((port) =>
+            probeForeign(port, { timeoutMs: 200 }).catch(() => false),
+          ),
+        )
+      ).some(Boolean);
+      // A foreign page target is conclusive: do not spend the 2s settling
+      // grace waiting for WorkBuddy to appear on a port it does not own.
+      // Without a target, keep the grace because Chromium may still be
+      // creating WorkBuddy's renderer.
+      const waiting = foreign
+        ? null
+        : await waitForCdp(
+            declaredPorts,
+            Math.min(timeoutMs, 2_000),
+          );
       if (waiting) return { ...waiting, launched: false, restarted: false };
-      throw new Error("WorkBuddy 进程带有调试端口，但本机 CDP 尚未就绪。");
+
+      const now = Date.now();
+      const repairable = procs.filter(
+        (proc) =>
+          proc.port != null &&
+          proc.createdAtMs != null &&
+          now >= proc.createdAtMs &&
+          now - proc.createdAtMs < repairWindowMs,
+      );
+      if (restartIfBlind && repairable.length === 1 && procs.length === 1) {
+        const proc = repairable[0]!;
+        log?.warn(
+          `WorkBuddy 新主进程 ${proc.pid} 声明端口 ${proc.port} 但未出现 WorkBuddy 页面，正在执行一次端口修复性重启…`,
+        );
+        if (!(await stopFresh(proc))) {
+          throw new Error("WorkBuddy 新主进程已退出，取消本次自动重启。");
+        }
+        await delay(120);
+        restarted = true;
+      } else {
+        throw new Error("WorkBuddy 进程带有调试端口，但本机没有 WorkBuddy 目标页。");
+      }
     } else if (!restartIfBlind) {
       throw new Error(
         "WorkBuddy 已在运行但未开启 CDP。请退出后用带 WORKBUDDY_REMOTE_DEBUGGING_PORT 的方式启动。",
@@ -491,10 +586,18 @@ export async function ensureWorkBuddyCdp(
     throw new Error("WorkBuddy 未运行；等待用户从原始图标启动。");
   }
 
-  const port = await pickAvailableLoopbackPort(preferred);
+  const exe =
+    findExecutable() ||
+    parseExecutableFromCommand(procs[0]?.commandLine ?? "");
+  if (!exe) {
+    throw new Error(
+      "找不到 WorkBuddy。请先安装，或用带 WORKBUDDY_REMOTE_DEBUGGING_PORT 的方式启动它。",
+    );
+  }
+  const port = await pickPort(preferred);
   log?.info(`带 ${WORKBUDDY_CDP_ENV_KEY}=${port} 启动 WorkBuddy`);
-  await launchWorkBuddyWithCdp(port, exe);
-  const ready = await waitForWorkBuddyCdp([port], timeoutMs);
+  await launchWithCdp(port, exe);
+  const ready = await waitForCdp([port], timeoutMs);
   if (!ready) {
     throw new Error(
       `已启动 WorkBuddy，但 ${timeoutMs}ms 内未出现本机 CDP。请确认官方版本仍读取 ${WORKBUDDY_CDP_ENV_KEY}。`,

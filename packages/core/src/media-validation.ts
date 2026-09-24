@@ -64,28 +64,26 @@ function splitPathSegments(value: string): string[] {
 }
 
 /**
- * True when `canonical` is `logical` with **extra leading segments** — the
- * signature of an OS-provided prefix alias rather than a symlink the caller
- * could have named.
+ * True when `canonical` is `logical` behind a **known OS prefix alias** —
+ * only macOS `/private` (the canonical form of `/tmp` and `/var`) qualifies.
+ * The leading alias is OS-managed and not something a caller can influence by
+ * naming a path.
  *
- * macOS maps `/tmp` and `/var` into `/private`, so `/var/folders/…/x.png`
- * canonicalises to `/private/var/folders/…/x.png`. Those leading symlinks are
- * not attacker-controlled and not something a caller can influence by naming a
- * path, so they must not reject the file. Anything that diverges **below** the
- * prefix (a symlinked directory in the user's own tree) fails this test and is
- * still walked and rejected.
+ * 修复（复审 m-2）：旧实现只比对「去掉前导段后尾部逐段相等」就放行，
+ * 攻击者可用目录联接构造 `C:\a\b\c -> C:\x\y\a\b\c`（尾部同名）绕过
+ * 逐段 reparse-point 检查。现在仅白名单放行 macOS /private；其余任何
+ * 分歧一律走逐段 lstat（Windows 8.3 短名的段不是符号链接，逐段检查
+ * 天然通过，无需放行；junction 的 lstat 会报告 reparse point 而被拒）。
  */
 function isSystemPrefixAlias(logical: string, canonical: string): boolean {
+  if (process.platform !== "darwin") return false;
   const logicalParts = splitPathSegments(logical);
   const canonicalParts = splitPathSegments(canonical);
-  const extra = canonicalParts.length - logicalParts.length;
-  if (extra <= 0) return false;
-  const sameSegment = (a: string, b: string): boolean =>
-    process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
-  return logicalParts.every((part, index) => {
-    const other = canonicalParts[extra + index];
-    return other !== undefined && sameSegment(part, other);
-  });
+  if (canonicalParts.length - logicalParts.length !== 1) return false;
+  if (canonicalParts[0] !== "private") return false;
+  return logicalParts.every(
+    (part, index) => part === canonicalParts[1 + index],
+  );
 }
 
 /**

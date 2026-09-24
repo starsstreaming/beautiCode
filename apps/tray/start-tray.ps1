@@ -531,7 +531,11 @@ function Test-BcSessionHostPid([int]$ProcId) {
   if ($ProcId -le 0) { return $false }
   try {
     $info = Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f $ProcId) -ErrorAction Stop
-    return ($info.CommandLine -and ($info.CommandLine -match 'session-host\.mjs'))
+    if (-not $info.CommandLine) { return $false }
+    # 复审：仅匹配文件名会误伤其他检出/安装副本下的同名脚本。改为
+    # 匹配本托盘的完整脚本路径（与 setup 脚本的三重过滤范式对齐）。
+    $literal = [regex]::Escape($HostScript)
+    return ($info.CommandLine -match $literal)
   } catch {
     return $false
   }
@@ -544,12 +548,36 @@ function Get-BcInjectorLockPid {
   try { return [int]$json.pid } catch { return 0 }
 }
 
+function Test-BcLoopbackUrl([string]$Url) {
+  # 与 integrations/deepseek-harness/control-client.mjs 的
+  # isLoopbackControlUrl 对齐：scheme 必须 http、主机必须是回环地址、
+  # 禁止 userinfo/query/hash、路径只允许空或 /。数据根内的控制面文件
+  # 可被同用户任意进程改写；不校验就把本机绝对路径与 Bearer token 发
+  # 到外部主机是现实的本地攻击面。
+  if (-not $Url) { return $false }
+  try {
+    $uri = [Uri]$Url
+    if ($uri.Scheme -ne "http") { return $false }
+    if ($uri.UserInfo) { return $false }
+    if ($uri.Query -or $uri.Fragment) { return $false }
+    if (-not ($uri.AbsolutePath -eq "" -or $uri.AbsolutePath -eq "/")) { return $false }
+    $hostName = $uri.Host.ToLowerInvariant()
+    return (@("127.0.0.1", "localhost", "::1") -contains $hostName)
+  } catch {
+    return $false
+  }
+}
+
 function Get-BcExistingControl {
   $root = Get-BcTrayDataRoot
   foreach ($name in @("session-host.json", "dsh-control.json")) {
     $json = Read-BcJsonFile (Join-Path $root $name)
     if (-not $json) { continue }
     if (-not $json.url -or -not $json.token) { continue }
+    if (-not (Test-BcLoopbackUrl ([string]$json.url))) {
+      Write-BcTrayLog ("rejected non-loopback control url in {0}; falling back to self-hosted session" -f $name)
+      continue
+    }
     $ownerPid = 0
     try { $ownerPid = [int]$json.pid } catch { continue }
     if (-not (Test-BcPidAlive $ownerPid)) { continue }
@@ -663,6 +691,10 @@ function Test-BcCanAdopt($Control) {
 function Resolve-BcSessionHost {
   Write-BcTrayClaim
   $deadline = [datetime]::UtcNow.AddSeconds(15)
+  # 复审：锁 PID 存活但身份不符时（典型：PID 被回收复用给无关进程），
+  # 旧逻辑会空转满 15s 才放弃。给身份校验留 2s 缓冲（兼容 CIM 命令行
+  # 尚未就绪的启动竞态），持续不符即判定为残留复用 PID，直接自行启动。
+  $identityMismatchSince = $null
   while ([datetime]::UtcNow -lt $deadline) {
     $existing = Get-BcExistingControl
     if (Test-BcCanAdopt $existing) {
@@ -680,6 +712,16 @@ function Resolve-BcSessionHost {
       }
     }
     if ($lockPid -le 0 -or -not (Test-BcPidAlive $lockPid)) { break }
+    if (-not (Test-BcSessionHostPid $lockPid)) {
+      if ($null -eq $identityMismatchSince) {
+        $identityMismatchSince = [datetime]::UtcNow
+      } elseif (([datetime]::UtcNow - $identityMismatchSince).TotalMilliseconds -ge 2000) {
+        Write-BcTrayLog ("injector.lock pid {0} is alive but not our session-host; assuming recycled pid" -f $lockPid)
+        break
+      }
+    } else {
+      $identityMismatchSince = $null
+    }
     Start-Sleep -Milliseconds 200
   }
 }

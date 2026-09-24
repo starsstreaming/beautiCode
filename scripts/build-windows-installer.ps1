@@ -211,9 +211,15 @@ foreach ($relativeDir in @(
     "packages\core",
     "packages\adapter-codex",
     "packages\adapter-dsh",
+    "packages\adapter-desktop-cdp",
+    "packages\adapter-cursor",
+    "packages\adapter-doubao",
     "integrations\deepseek-harness",
     "integrations\deepseek-harness\bin",
     "node_modules\@beauticode\core",
+    "node_modules\@beauticode\adapter-desktop-cdp",
+    "node_modules\@beauticode\adapter-cursor",
+    "node_modules\@beauticode\adapter-doubao",
     "runtime",
     "licenses\node"
   )) {
@@ -228,10 +234,15 @@ foreach ($relativeFile in @(
     "scripts\start-beauticode.ps1",
     "scripts\start-beauticode-engine.ps1",
     "scripts\install-dsh-plugin.ps1",
+    "scripts\desktop-cdp-runner.mjs",
+    "scripts\desktop-cdp-setup.mjs",
     "scripts\integration-note.zh.txt",
     "packages\core\package.json",
     "packages\adapter-codex\package.json",
     "packages\adapter-dsh\package.json",
+    "packages\adapter-desktop-cdp\package.json",
+    "packages\adapter-cursor\package.json",
+    "packages\adapter-doubao\package.json",
     "integrations\deepseek-harness\index.mjs",
     "integrations\deepseek-harness\client.js",
     "integrations\deepseek-harness\console.js",
@@ -276,11 +287,27 @@ Copy-RuntimeDirectory `
 Copy-RuntimeDirectory `
   (Join-Path $RepoRoot "packages\adapter-dsh\dist") `
   (Join-Path $StageRoot "packages\adapter-dsh\dist")
+Copy-RuntimeDirectory `
+  (Join-Path $RepoRoot "packages\adapter-desktop-cdp\dist") `
+  (Join-Path $StageRoot "packages\adapter-desktop-cdp\dist")
+Copy-RuntimeDirectory `
+  (Join-Path $RepoRoot "packages\adapter-cursor\dist") `
+  (Join-Path $StageRoot "packages\adapter-cursor\dist")
+Copy-RuntimeDirectory `
+  (Join-Path $RepoRoot "packages\adapter-doubao\dist") `
+  (Join-Path $StageRoot "packages\adapter-doubao\dist")
 Copy-Item -LiteralPath (Join-Path $RepoRoot "packages\core\package.json") `
   -Destination (Join-Path $StageRoot "node_modules\@beauticode\core\package.json") -Force
 Copy-RuntimeDirectory `
   (Join-Path $RepoRoot "packages\core\dist") `
   (Join-Path $StageRoot "node_modules\@beauticode\core\dist")
+foreach ($adapterName in @("adapter-desktop-cdp", "adapter-cursor", "adapter-doubao")) {
+  Copy-Item -LiteralPath (Join-Path $RepoRoot ("packages\{0}\package.json" -f $adapterName)) `
+    -Destination (Join-Path $StageRoot ("node_modules\@beauticode\{0}\package.json" -f $adapterName)) -Force
+  Copy-RuntimeDirectory `
+    (Join-Path $RepoRoot ("packages\{0}\dist" -f $adapterName)) `
+    (Join-Path $StageRoot ("node_modules\@beauticode\{0}\dist" -f $adapterName))
+}
 
 Copy-Item -LiteralPath (Join-Path $nodeDistribution "node.exe") `
   -Destination (Join-Path $StageRoot "runtime\node.exe") -Force
@@ -324,6 +351,16 @@ $dshAdapterProbe = & $stagedNode --input-type=module -e `
   $dshAdapterUrl
 if ($LASTEXITCODE -ne 0 -or $dshAdapterProbe -ne "function") {
   throw ("Staged DSH adapter import failed: {0}" -f $dshAdapterProbe)
+}
+foreach ($desktopAdapter in @("cursor", "doubao")) {
+  $desktopAdapterUrl = ([System.Uri](Join-Path $StageRoot ("packages\adapter-{0}\dist\index.js" -f $desktopAdapter))).AbsoluteUri
+  $expectedExport = if ($desktopAdapter -eq "cursor") { "buildCursorBackgroundInjection" } else { "buildDoubaoBackgroundInjection" }
+  $desktopProbe = & $stagedNode --input-type=module -e `
+    "const m=await import(process.argv[1]); console.log(typeof m[process.argv[2]]);" `
+    $desktopAdapterUrl $expectedExport
+  if ($LASTEXITCODE -ne 0 -or $desktopProbe -ne "function") {
+    throw ("Staged {0} adapter import failed: {1}" -f $desktopAdapter, $desktopProbe)
+  }
 }
 # The Cordis plugin imports its sibling modules (ui-host -> gallery-host, etc.),
 # so a staging list that misses any plugin file kills the whole DSH bridge.
