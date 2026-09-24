@@ -13,7 +13,9 @@ test("desktop aggregate manifest is a public test package with one CLI", () => {
   assert.equal(manifest.name, "beauticode-desktop");
   assert.equal(manifest.version, "0.1.0-test.2");
   assert.equal(manifest.private, false);
-  assert.deepEqual(manifest.os, ["win32"]);
+  // 包是纯 JS 聚合器，不声明 os 限制（声明会让 ubuntu CI 的 npm ci
+  // 直接 EBADPLATFORM）；Windows-only 的分发语义由 runtime 产物承担。
+  assert.equal(manifest.os, undefined);
   assert.equal(manifest.bin["beauticode-desktop"], "./bin/beauticode-desktop.mjs");
   assert.ok(manifest.files.includes("runtime"));
 });

@@ -4,12 +4,16 @@ import test from "node:test";
 import { HOSTS, resolveRoute, runHostCommand } from "../src/index.mjs";
 
 test("each host resolves install and uninstall to a package-local script", () => {
+  // runtimeRoot 用平台原生绝对路径：硬编码 "C:/..." 在 Linux 上
+  // path.isAbsolute 为 false，断言必挂。
+  const runtimeRoot = path.join(path.sep, "package", "runtime");
+  const runtimeRootFwd = runtimeRoot.replaceAll("\\", "/");
   for (const host of HOSTS) {
     for (const command of ["install", "uninstall"]) {
-      const route = resolveRoute(host, command, { runtimeRoot: "C:/package/runtime" });
+      const route = resolveRoute(host, command, { runtimeRoot });
       assert.equal(route.host, host);
       assert.equal(route.command, command);
-      assert.equal(route.script.replaceAll("\\", "/").startsWith("C:/package/runtime/"), true);
+      assert.equal(route.script.replaceAll("\\", "/").startsWith(`${runtimeRootFwd}/`), true);
       assert.equal(route.script.includes("desktop"), host === "cursor" || host === "doubao");
       assert.ok(Array.isArray(route.args));
       assert.equal(path.isAbsolute(route.script), true);
