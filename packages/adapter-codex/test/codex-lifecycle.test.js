@@ -12,7 +12,11 @@ import {
 import { startCodexHelperWatchdog } from "../../../integrations/codex-desktop/codex-watchdog.mjs";
 import { classifyCodexStartupProcess } from "../dist/launch.js";
 
-const HELPER_HOME = "C:\\Users\\me\\AppData\\Local\\beautiCode\\codex-plugin";
+// 用平台原生分隔符构造：旧的硬编码 Windows 路径在 Linux 上被
+// path.resolve 当作相对段拼上 cwd，includes 匹配永远失败（CI TS2307
+// 之后的第二个基线自带问题）。本测试只关心「命令行包含 helper 主目录
+// 与 watchdog 脚本」的判定逻辑，不要求该路径真实存在。
+const HELPER_HOME = path.join(os.tmpdir(), "beauticode-codex-helper-home");
 
 function lock(pid) {
   return JSON.stringify({
