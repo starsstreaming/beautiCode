@@ -4,7 +4,6 @@
   "private": false,
   "description": "beautiCode desktop host aggregate for DSH, Codex, WorkBuddy, Cursor, and Doubao.",
   "type": "module",
-  "os": ["win32"],
   "bin": {
     "beauticode-desktop": "./bin/beauticode-desktop.mjs"
   },
