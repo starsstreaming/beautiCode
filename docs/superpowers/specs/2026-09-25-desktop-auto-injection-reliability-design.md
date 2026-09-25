@@ -1,7 +1,7 @@
 # Five-host installation and CDP recovery reliability
 
 Date: 2026-09-25
-Status: Proposed for review
+Status: Approved by user on 2026-09-25
 
 ## Goal and contract
 
