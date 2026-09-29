@@ -75,6 +75,31 @@ function openEvents(origin, clientId) {
   });
 }
 
+function rawHttp(origin, pathname, { method = "GET", headers = {}, body = "" } = {}) {
+  const url = new URL(origin);
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        hostname: "127.0.0.1",
+        port: Number(url.port),
+        path: pathname,
+        method,
+        headers: {
+          ...(body ? { "content-length": Buffer.byteLength(body) } : {}),
+          ...headers,
+        },
+      },
+      (response) => {
+        response.resume();
+        response.once("end", () => resolve({ status: response.statusCode }));
+      },
+    );
+    request.once("error", reject);
+    if (body) request.write(body);
+    request.end();
+  });
+}
+
 test("plugin injects its client script exactly once", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-dsh-plugin-"));
   const tokenFile = path.join(root, "token");
@@ -213,6 +238,59 @@ test("plugin injects its client script exactly once", async (t) => {
     (await fetch(`${plugin.origin}/__beauticode/version`, { method: "POST" })).status,
     405,
   );
+});
+
+test("HTTP routes reject DNS-rebinding Host and cross-origin authorities", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-host-guard-"));
+  const tokenFile = path.join(root, "token");
+  await fs.writeFile(tokenFile, TOKEN);
+  const plugin = await createPluginServer(tokenFile);
+  t.after(async () => {
+    await plugin.dispose();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const port = new URL(plugin.origin).port;
+  const sameOrigin = { Origin: plugin.origin };
+  assert.equal(
+    (await fetch(`${plugin.origin}/__beauticode/ui/status`, { headers: sameOrigin })).status,
+    200,
+  );
+  assert.equal(
+    (
+      await fetch(`${plugin.origin}/__beauticode/ui/status`, {
+        headers: { Host: `evil.example:${port}`, Origin: `http://evil.example:${port}` },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await fetch(`${plugin.origin}/__beauticode/ui/status`, {
+        headers: { Host: `127.0.0.1:${port}`, Origin: `http://evil.example:${port}` },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await rawHttp(plugin.origin, "/__beauticode/version", {
+      headers: { Host: `evil.example:${port}` },
+    })).status,
+    403,
+  );
+  const apply = await rawHttp(plugin.origin, "/__beauticode/apply", {
+    method: "POST",
+    headers: {
+      Host: `evil.example:${port}`,
+      Authorization: `Bearer ${TOKEN}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      generation: 1,
+      media: "clear",
+    }),
+  });
+  assert.equal(apply.status, 401);
 });
 
 test("browser client follows DSH appearance and does not overwrite it", async () => {

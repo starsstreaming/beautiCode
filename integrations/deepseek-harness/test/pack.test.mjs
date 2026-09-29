@@ -18,7 +18,7 @@ test("staged npm plugin is a self-contained DSH bundle with a vendored engine", 
   assert.equal(pkg.bin["beauticode-dsh"], "bin/beauticode-dsh");
   assert.equal(await fs.readFile(path.join(dest, "cordis.patch.yml"), "utf8").then((text) => text.includes("beauticode-bridge")), true);
   const adapter = path.join(dest, "vendor", "adapter-dsh", "index.js");
-  const canvas = path.join(dest, "themes", "internal-beyond", "bg-canvas-4k.png");
+  const canvas = path.join(dest, "themes", "internal-beyond", "bg-canvas-4k.webp");
   const license = path.join(dest, "LICENSE");
   await fs.access(adapter);
   await fs.access(canvas);
@@ -89,6 +89,54 @@ test("installer backs up and deduplicates its own duplicate loader entries", asy
     assert.equal((pluginPatch.match(/id:\s*beauticode-bridge/g) || []).length, 1);
     const backups = (await fs.readdir(web)).filter((name) => name.includes("beauticode-backup"));
     assert.equal(backups.length, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installer refuses to overwrite or remove an unrelated plugin-home directory", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-dsh-plugin-home-guard-"));
+  try {
+    const dshHome = path.join(root, "dsh");
+    const pluginHome = path.join(root, "existing");
+    const sentinel = path.join(pluginHome, "keep.txt");
+    await fs.mkdir(pluginHome, { recursive: true });
+    await fs.writeFile(sentinel, "user data", "utf8");
+
+    await assert.rejects(
+      runCli(["--dsh-home", dshHome, "--plugin-home", pluginHome]),
+      /拒绝覆盖不属于 beautiCode/,
+    );
+    assert.equal(await fs.readFile(sentinel, "utf8"), "user data");
+
+    await assert.rejects(
+      runCli(["--remove", "--dsh-home", dshHome, "--plugin-home", pluginHome]),
+      /拒绝移除不属于 beautiCode/,
+    );
+    assert.equal(await fs.readFile(sentinel, "utf8"), "user data");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("plugin upgrades stage first and retain a rollback directory", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-dsh-plugin-upgrade-"));
+  try {
+    const dshHome = path.join(root, "dsh");
+    const pluginHome = path.join(root, "plugin");
+    await runCli(["--dsh-home", dshHome, "--plugin-home", pluginHome]);
+    await fs.writeFile(path.join(pluginHome, "user-data.txt"), "keep for rollback", "utf8");
+    await fs.rm(path.join(pluginHome, "vendor", "adapter-dsh", "index.js"));
+
+    await runCli(["--dsh-home", dshHome, "--plugin-home", pluginHome]);
+    await fs.access(path.join(pluginHome, "vendor", "adapter-dsh", "index.js"));
+    await assert.rejects(() => fs.access(path.join(pluginHome, "user-data.txt")));
+    const backups = (await fs.readdir(root)).filter((name) => name.startsWith("plugin.beauticode-backup-"));
+    assert.equal(backups.length, 1);
+    assert.equal(
+      await fs.readFile(path.join(root, backups[0], "user-data.txt"), "utf8"),
+      "keep for rollback",
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

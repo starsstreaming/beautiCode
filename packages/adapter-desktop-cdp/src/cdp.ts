@@ -55,29 +55,48 @@ export async function readBoundedJson(
 export function isDesktopTarget(
   spec: DesktopCdpHostSpec,
   target: DesktopTarget,
+  browser = "",
 ): boolean {
   if (target.type !== "page") return false;
-  const url = String(target.url);
-  if (spec.kind === "cursor") {
-    // Cursor 的 workbench 页 URL 内嵌实际安装路径（每台机器不同），
-    // 严格等值会让所有非作者安装位置的用户 100% 静默失效。改为结构
-    // 匹配：锚定 scheme 前缀（targetRuntimeUrl）+ 固定的 workbench
-    // 后缀，路径段允许任意安装位置；失败关闭语义不变（不命中即拒绝）。
-    return (
-      url.startsWith(spec.targetRuntimeUrl) &&
-      /\/out\/vs\/code\/electron-sandbox\/workbench\/workbench\.html$/i.test(
-        url,
-      )
-    );
+  const identity = spec.targetIdentity;
+  if (!identity) return target.url === spec.targetUrl;
+  let parsed: URL;
+  try {
+    parsed = new URL(target.url);
+  } catch {
+    return false;
   }
-  return url === spec.targetUrl;
+  if (
+    parsed.protocol.toLowerCase() !== identity.protocol.toLowerCase() ||
+    parsed.hostname.toLowerCase() !== identity.hostname.toLowerCase()
+  ) {
+    return false;
+  }
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(parsed.pathname).replaceAll("\\", "/").toLowerCase();
+  } catch {
+    return false;
+  }
+  const suffix = identity.pathSuffix.replaceAll("\\", "/").toLowerCase();
+  if (!suffix || !pathname.endsWith(suffix)) return false;
+  const evidence = identity.hostEvidence;
+  if (!evidence) return true;
+  const hasMarker = (value: string, markers: readonly string[] | undefined) =>
+    !!markers?.length && markers.some((marker) => value.includes(String(marker).toLowerCase()));
+  return (
+    hasMarker(pathname, evidence.path) ||
+    hasMarker(String(target.title || "").toLowerCase(), evidence.targetText) ||
+    hasMarker(String(browser || "").toLowerCase(), evidence.browser)
+  );
 }
 
 export function pickDesktopTarget(
   spec: DesktopCdpHostSpec,
   targets: readonly DesktopTarget[],
+  browser = "",
 ): DesktopTarget | null {
-  return targets.find((target) => isDesktopTarget(spec, target)) ?? null;
+  return targets.find((target) => isDesktopTarget(spec, target, browser)) ?? null;
 }
 
 export function safeTargetLabel(rawUrl: string): string {
@@ -142,13 +161,14 @@ export async function probeDesktopCdp(
     const targets = targetRows(
       await readBoundedJson(`${browserUrl}/json/list`, { timeoutMs }),
     );
-    const target = pickDesktopTarget(spec, targets);
+    const browser = typeof version.Browser === "string" ? version.Browser : "";
+    const target = pickDesktopTarget(spec, targets, browser);
     if (!target?.webSocketDebuggerUrl) return null;
     assertLoopbackDebuggerUrl(target.webSocketDebuggerUrl, port);
     return {
       port,
       browserUrl,
-      browser: typeof version.Browser === "string" ? version.Browser : null,
+      browser: browser || null,
       target,
     };
   } catch {
@@ -160,9 +180,14 @@ export async function discoverDesktopCdp(
   spec: DesktopCdpHostSpec,
   ports: readonly number[] = [spec.defaultPort, ...spec.candidatePorts],
 ): Promise<DesktopCdpEndpoint | null> {
-  for (const port of [...new Set(ports)]) {
-    const endpoint = await probeDesktopCdp(spec, port);
-    if (endpoint) return endpoint;
-  }
-  return null;
+  const candidates = [...new Set(ports)].filter(
+    (port) => Number.isInteger(port) && port >= 1 && port <= 65535,
+  );
+  // A dead loopback port may consume the per-request timeout. Probe the small,
+  // explicit host allowlist concurrently, then preserve configured priority.
+  // This keeps startup latency bounded by one endpoint probe, not N probes.
+  const endpoints = await Promise.all(
+    candidates.map((port) => probeDesktopCdp(spec, port)),
+  );
+  return endpoints.find((endpoint) => endpoint !== null) ?? null;
 }

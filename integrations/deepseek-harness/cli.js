@@ -63,6 +63,81 @@ function defaultPluginHome(dshHome) {
   return path.join(path.resolve(dshHome), "plugins", pluginName);
 }
 
+function isPathRoot(target) {
+  return path.resolve(target) === path.parse(path.resolve(target)).root;
+}
+
+async function assertNoSymlinkAncestors(target) {
+  let current = path.dirname(path.resolve(target));
+  while (true) {
+    try {
+      if ((await fsp.lstat(current)).isSymbolicLink()) {
+        throw new Error(`拒绝在符号链接目录下操作插件目录：${current}`);
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+}
+
+async function isDirectory(target) {
+  try {
+    return (await fsp.stat(target)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function isManagedPluginDirectory(target) {
+  if (!(await isDirectory(target))) return false;
+  try {
+    const pkg = JSON.parse(await fsp.readFile(path.join(target, "package.json"), "utf8"));
+    return (
+      [pluginName, "@beauticode/dsh-plugin"].includes(pkg.name) &&
+      fs.existsSync(path.join(target, "index.mjs")) &&
+      fs.existsSync(path.join(target, "cordis.patch.yml")) &&
+      hasBridge(await fsp.readFile(path.join(target, "cordis.patch.yml"), "utf8"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function assertPluginHomeTarget(target, { forRemoval = false } = {}) {
+  const resolved = path.resolve(target);
+  if (isPathRoot(resolved) || resolved === path.resolve(here)) {
+    throw new Error(`拒绝使用不安全的插件目录：${resolved}`);
+  }
+  await assertNoSymlinkAncestors(resolved);
+  let stat;
+  try {
+    stat = await fsp.lstat(resolved);
+  } catch (error) {
+    if (error?.code === "ENOENT") return { exists: false, owned: false };
+    throw error;
+  }
+  if (stat.isSymbolicLink()) {
+    throw new Error(`拒绝操作符号链接插件目录：${resolved}`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`插件目录不是目录：${resolved}`);
+  }
+  const owned = await isManagedPluginDirectory(resolved);
+  if (forRemoval && !owned) {
+    throw new Error(`拒绝移除不属于 beautiCode 的插件目录：${resolved}`);
+  }
+  if (!owned) {
+    const entries = await fsp.readdir(resolved);
+    if (entries.length > 0) {
+      throw new Error(`拒绝覆盖不属于 beautiCode 的非空插件目录：${resolved}`);
+    }
+  }
+  return { exists: true, owned };
+}
+
 function legacyDefaultPluginHome() {
   return path.join(defaultDataRoot(), "plugin");
 }
@@ -96,11 +171,11 @@ function packageInsert() {
 }
 
 function hasBridge(text) {
-  return new RegExp(`^\\s*-\\s*id:\\s*${bridgeId}\\s*$`, "m").test(text);
+  return new RegExp(`^[ \\t]*-[ \\t]*id:[ \\t]*${bridgeId}[ \\t]*(?:#.*)?\\r?$`, "m").test(text);
 }
 
 function bridgeCount(text) {
-  return (String(text).match(new RegExp(`^\\s*-\\s*id:\\s*${bridgeId}\\s*$`, "gm")) || []).length;
+  return (String(text).match(new RegExp(`^[ \\t]*-[ \\t]*id:[ \\t]*${bridgeId}[ \\t]*(?:#.*)?\\r?$`, "gm")) || []).length;
 }
 
 async function backupPatch(filePath) {
@@ -111,6 +186,19 @@ async function backupPatch(filePath) {
   while (fs.existsSync(backup)) backup = `${base}-${++suffix}`;
   await fsp.copyFile(filePath, backup, fs.constants.COPYFILE_EXCL);
   return backup;
+}
+
+async function backupDirectory(target) {
+  const base = `${target}.beauticode-backup-${Date.now()}`;
+  let backup = base;
+  let suffix = 0;
+  while (await entryExists(backup)) backup = `${base}-${++suffix}`;
+  await fsp.rename(target, backup);
+  return backup;
+}
+
+async function backupDuplicatePatch(filePath) {
+  return backupPatch(filePath);
 }
 
 function stripBridge(text) {
@@ -323,52 +411,33 @@ function isBusyFsError(error) {
 }
 
 async function copyPackage(dest) {
-  if (await sameInstalledVersion(dest)) return false;
-  await assertRemovablePluginDir(dest);
-  // 原子替换：先拷到兄弟临时目录并校验完整，再换名落位。Windows 上
-  // `dsh web` 运行中会占用 vendor/*.js，先删后拷会留下半个插件目录且
-  // 摧毁原可用安装；staging 方案失败时旧目录原样保留。
-  const staging = `${dest}.tmp-${crypto.randomUUID()}`;
-  const previous = `${dest}.old-${crypto.randomUUID()}`;
-  let movedOld = false;
+  const target = path.resolve(dest);
+  await assertPluginHomeTarget(target);
+  if (await sameInstalledVersion(target)) return false;
+
+  const parent = path.dirname(target);
+  await fsp.mkdir(parent, { recursive: true });
+  const stage = path.join(
+    parent,
+    `.${path.basename(target)}.beauticode-stage-${process.pid}-${crypto.randomBytes(6).toString("hex")}`,
+  );
+  let backup = null;
   try {
-    await fsp.cp(here, staging, {
+    await fsp.cp(here, stage, {
       recursive: true,
       filter: (source) => shouldCopy(source),
     });
-    await assertStagedPlugin(staging);
-    if (fs.existsSync(dest)) {
-      await fsp.rename(dest, previous);
-      movedOld = true;
-    }
-    await fsp.rename(staging, dest);
+    await ensureEngine(stage);
+    if (await entryExists(target)) backup = await backupDirectory(target);
+    await fsp.rename(stage, target);
+    return true;
   } catch (error) {
-    if (movedOld && !fs.existsSync(dest)) {
-      const restored = await fsp
-        .rename(previous, dest)
-        .then(() => true)
-        .catch(() => false);
-      if (!restored) {
-        // 恢复也失败：绝不能删掉 previous，保留旧版本供用户手工找回
-        await fsp.rm(staging, { recursive: true, force: true }).catch(() => {});
-        throw new Error(
-          `插件安装失败且无法自动恢复原目录；旧版本保留在 ${previous}。原因：${error.message}`,
-        );
-      }
-    }
-    await fsp.rm(staging, { recursive: true, force: true }).catch(() => {});
-    if (isBusyFsError(error)) {
-      throw new Error(`插件目录被占用，请先关闭 \`dsh web\` 后重试。`);
+    await fsp.rm(stage, { recursive: true, force: true }).catch(() => {});
+    if (backup && !(await entryExists(target))) {
+      await fsp.rename(backup, target).catch(() => {});
     }
     throw error;
   }
-  try {
-    await fsp.rm(previous, { recursive: true, force: true });
-  } catch {
-    // 旧目录可能仍被运行中的 dsh web 占用：新插件已就位，残留无害，
-    // 下次安装会通过 assertRemovablePluginDir 清理路径自然处理。
-  }
-  return true;
 }
 
 async function assertStagedPlugin(dir) {
@@ -383,18 +452,11 @@ async function removeLegacyManagedPlugin(legacyHome, currentHome) {
   if (!legacyHome) return false;
   const legacy = path.resolve(legacyHome);
   if (legacy === path.resolve(currentHome) || !fs.existsSync(legacy)) return false;
-  try {
-    const pkg = JSON.parse(await fsp.readFile(path.join(legacy, "package.json"), "utf8"));
-    if (
-      ![pluginName, "@beauticode/dsh-plugin"].includes(pkg.name) ||
-      !fs.existsSync(path.join(legacy, "index.mjs"))
-    ) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-  await fsp.rm(legacy, { recursive: true, force: true });
+  const target = await assertPluginHomeTarget(legacy, { forRemoval: true });
+  if (!target.owned) return false;
+  const backup = await backupDirectory(legacy);
+  // Keep the backup: an interrupted migration can be rolled back by the user.
+  void backup;
   return true;
 }
 
@@ -469,15 +531,47 @@ async function linkPluginIntoProfile(webProfile, dest) {
   const link = pluginLinkPath(webProfile);
   const legacy = legacyPluginLinkPath(webProfile);
   if (await entryExists(legacy)) {
-    await fsp.rm(legacy, { recursive: true, force: true });
+    if (!(await isOwnedPluginLink(legacy))) {
+      throw new Error(`拒绝替换不属于 beautiCode 的插件链接：${legacy}`);
+    }
+    await removeOwnedPluginEntry(legacy);
   }
   await fsp.mkdir(path.dirname(link), { recursive: true });
   if (await entryExists(link)) {
     if (await sameLinkTarget(link, dest)) return;
-    await fsp.rm(link, { recursive: true, force: true });
+    if (!(await isOwnedPluginLink(link, dest))) {
+      throw new Error(`拒绝替换不属于 beautiCode 的插件链接：${link}`);
+    }
+    await removeOwnedPluginEntry(link);
   }
   const type = process.platform === "win32" ? "junction" : "dir";
   await fsp.symlink(path.resolve(dest), link, type);
+}
+
+async function isOwnedPluginLink(link, expectedTarget) {
+  try {
+    const stat = await fsp.lstat(link);
+    if (stat.isSymbolicLink()) {
+      if (expectedTarget) return await sameLinkTarget(link, expectedTarget);
+      const target = await fsp.realpath(link).catch(() => null);
+      return target ? await isManagedPluginDirectory(target) : false;
+    }
+    return stat.isDirectory() && (await isManagedPluginDirectory(link));
+  } catch {
+    return false;
+  }
+}
+
+async function removeOwnedPluginEntry(target) {
+  const stat = await fsp.lstat(target);
+  if (stat.isSymbolicLink()) {
+    await fsp.unlink(target);
+    return;
+  }
+  if (!stat.isDirectory() || !(await isManagedPluginDirectory(target))) {
+    throw new Error(`拒绝移除不属于 beautiCode 的插件条目：${target}`);
+  }
+  await fsp.rm(target, { recursive: true, force: true });
 }
 
 async function ensureWebPackageDep(webPackage, pluginHome) {
@@ -522,7 +616,6 @@ async function install(opts) {
   const webPackage = path.join(webProfile, "package.json");
   const homePatch = path.join(dshHome, "cordis.patch.yml");
 
-  await fsp.mkdir(dest, { recursive: true });
   const copied = await copyPackage(dest);
   await ensureEngine(dest);
   const indexFile = path.join(dest, "index.mjs");
@@ -578,6 +671,8 @@ async function uninstall(opts) {
   const webProfile = path.join(dshHome, "profiles", "web");
   const webPatch = path.join(webProfile, "cordis.patch.yml");
   const homePatch = path.join(dshHome, "cordis.patch.yml");
+  const dest = path.resolve(opts.pluginHome);
+  const pluginTarget = await assertPluginHomeTarget(dest, { forRemoval: true });
   const removed = [];
   if (await removePatch(webPatch)) {
     removed.push("web patch");
@@ -590,14 +685,15 @@ async function uninstall(opts) {
   }
   for (const link of [pluginLinkPath(webProfile), legacyPluginLinkPath(webProfile)]) {
     if (await entryExists(link)) {
-      await fsp.rm(link, { recursive: true, force: true });
-      removed.push(link);
+      const expected = link === pluginLinkPath(webProfile) ? dest : undefined;
+      if (await isOwnedPluginLink(link, expected)) {
+        await removeOwnedPluginEntry(link);
+        removed.push(link);
+      }
     }
   }
-  const dest = path.resolve(opts.pluginHome);
-  if (fs.existsSync(dest)) {
-    await assertRemovablePluginDir(dest);
-    await fsp.rm(dest, { recursive: true, force: true });
+  if (pluginTarget.exists) {
+    await removeOwnedPluginEntry(dest);
     removed.push(dest);
   }
   if (await removeLegacyManagedPlugin(opts.legacyPluginHome, dest)) {

@@ -180,6 +180,7 @@ class FakeNode {
   }
 
   getBoundingClientRect() {
+    if (this._rect) return this._rect;
     if (this.getAttribute("aria-haspopup") !== "dialog") {
       return { width: 36, height: 36, left: 8, top: 724, bottom: 760 };
     }
@@ -227,7 +228,7 @@ function mountCodexSidebar(document) {
   return { nav, explore: nav.querySelectorAll("button")[4] };
 }
 
-async function loadConsole(document) {
+async function loadConsole(document, initialState = {}) {
   const source = await fs.readFile(
     new URL("../src/renderer/console.js", import.meta.url),
     "utf8",
@@ -247,10 +248,11 @@ async function loadConsole(document) {
       ticks.push(fn);
       return ticks.length;
     },
-    getComputedStyle: (el) => ({ display: el?.style?.display || "block" }),
+    getComputedStyle: (el) => ({ display: el?.style?.display || "block", color: el?._testColor || "" }),
   };
   context.window = context;
   context.globalThis = context;
+  Object.assign(context, initialState);
   context.window.__beauticodeBridgePending = pending;
   vm.runInNewContext(source, context);
   return {
@@ -259,6 +261,21 @@ async function loadConsole(document) {
     },
   };
 }
+
+test("a previous console revision is replaced on reinjection after Codex UI upgrade", async () => {
+  const document = createConsoleDocument();
+  const { nav, explore } = mountCodexSidebar(document);
+  let stalePlacementCalls = 0;
+  const runtime = await loadConsole(document, {
+    __beauticodeConsoleLoaded: true,
+    __beauticodeConsoleRev: 4,
+    __beauticodeConsolePlace: () => { stalePlacementCalls += 1; },
+  });
+  runtime.tick();
+  assert.equal(stalePlacementCalls, 0);
+  assert.equal(document.getElementById("beauticode-console")?.parentElement?.id, nav.id);
+  assert.equal(document.getElementById("beauticode-console")?.previousElementSibling?.id, explore.id);
+});
 
 test("console mounts below 探索 in the Codex rail", async () => {
   const document = createConsoleDocument();
@@ -271,6 +288,39 @@ test("console mounts below 探索 in the Codex rail", async () => {
   assert.equal(host?.parentElement?.id, "codex-rail");
   assert.equal(host?.previousElementSibling, explore);
   assert.equal(nav.children.map((child) => child.id || child.textContent).join(","), "item-新对话,item-Pull Request,item-定时任务,item-插件,item-探索,beauticode-console");
+});
+
+test("new Codex rail mounts 背景 after the icon-only Explore dots, not a content action", async () => {
+  const document = createConsoleDocument();
+  const contentAction = document.createElement("button");
+  contentAction.textContent = "探索";
+  contentAction._rect = { width: 90, height: 36, left: 700, top: 250, bottom: 286 };
+  document.body.append(contentAction);
+
+  const rail = document.createElement("nav");
+  rail.id = "codex-rail";
+  const home = document.createElement("button");
+  home.textContent = "主页";
+  rail.append(home);
+  const dots = document.createElement("button");
+  dots.id = "sidebar-more";
+  dots.className = "sidebar-item";
+  dots.textContent = "探索"; // New icon-only button exposes this via sr-only text.
+  dots._rect = { width: 36, height: 36, left: 32, top: 580, bottom: 616 };
+  dots._testColor = "rgba(255, 255, 255, 0.498)";
+  rail.append(dots);
+  document.body.append(rail);
+
+  const runtime = await loadConsole(document);
+  runtime.tick();
+  const host = document.getElementById("beauticode-console");
+  assert.equal(host?.parentElement?.id, "codex-rail");
+  assert.equal(host?.previousElementSibling?.id, "sidebar-more");
+  assert.equal(rail.children.filter((node) => node.id === "beauticode-console").length, 1);
+  assert.equal(host.querySelector(".bc-trigger").style.color, dots._testColor);
+  dots._testColor = "rgba(20, 20, 20, 0.55)";
+  runtime.tick();
+  assert.equal(host.querySelector(".bc-trigger").style.color, dots._testColor);
 });
 
 test("console remounts after the rail wipes the 背景 entry", async () => {

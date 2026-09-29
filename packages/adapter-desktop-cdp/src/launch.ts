@@ -1,189 +1,12 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import readline from "node:readline";
 import { promisify } from "node:util";
-import {
-  discoverDesktopCdp,
-  parseRemoteDebuggingFlags,
-  probeDesktopCdp,
-} from "./cdp.js";
-import type {
-  DesktopCdpEndpoint,
-  DesktopCdpHostSpec,
-  DesktopEnsureLog,
-  DesktopProcess,
-} from "./types.js";
+import { parseRemoteDebuggingFlags, probeDesktopCdp } from "./cdp.js";
+import type { DesktopCdpHostSpec, DesktopProcess } from "./types.js";
 
 const execFileAsync = promisify(execFile);
-export const DEFAULT_DESKTOP_REPAIR_WINDOW_MS = 10_000;
-export const DEFAULT_DESKTOP_CDP_POLL_INTERVAL_MS = 150;
-
-export type DesktopStartupDecision =
-  | "repair-now"
-  | "repair-suppressed"
-  | "repair-failed"
-  | "repair-backoff"
-  | "repair-exhausted"
-  | "wait-for-cdp"
-  | "ignore-stale";
-
-export type DesktopRepairResult = "verified" | "failed" | "deferred";
-
-export function classifyDesktopStartupProcess(
-  processInfo: DesktopProcess,
-  nowMs = Date.now(),
-  repairWindowMs = DEFAULT_DESKTOP_REPAIR_WINDOW_MS,
-): DesktopStartupDecision {
-  if (processInfo.port != null) return "wait-for-cdp";
-  if (
-    processInfo.createdAtMs == null ||
-    !Number.isFinite(processInfo.createdAtMs)
-  ) {
-    return "ignore-stale";
-  }
-  const ageMs = nowMs - processInfo.createdAtMs;
-  return ageMs >= 0 && ageMs < repairWindowMs
-    ? "repair-now"
-    : "ignore-stale";
-}
-
-export class DesktopStartupRepairController {
-  private readonly handled = new Set<string>();
-  private readonly inFlight = new Set<string>();
-  private readonly retryAfter = new Map<string, number>();
-  private readonly attempts = new Map<string, number>();
-  private chain: Promise<unknown> = Promise.resolve();
-  private lastVerifiedAt = Number.NEGATIVE_INFINITY;
-
-  constructor(
-    private readonly repair: (
-      processInfo: DesktopProcess,
-    ) => Promise<DesktopRepairResult | void>,
-    private readonly now: () => number = Date.now,
-    private readonly repairWindowMs = DEFAULT_DESKTOP_REPAIR_WINDOW_MS,
-    private readonly repairSuppressionMs = 0,
-    private readonly retryBackoffMs = 1_500,
-  ) {}
-
-  observe(processInfo: DesktopProcess): Promise<DesktopStartupDecision | "repaired" | "already-handled"> {
-    const decision = classifyDesktopStartupProcess(
-      processInfo,
-      this.now(),
-      this.repairWindowMs,
-    );
-    if (decision !== "repair-now") return Promise.resolve(decision);
-    const key = `${processInfo.pid}:${processInfo.createdAtMs}`;
-    if (this.handled.has(key) || this.inFlight.has(key)) {
-      return Promise.resolve("already-handled");
-    }
-    const retryAt = this.retryAfter.get(key) ?? Number.NEGATIVE_INFINITY;
-    if (this.now() < retryAt) return Promise.resolve("repair-backoff");
-    if ((this.attempts.get(key) ?? 0) >= 2) {
-      this.handled.add(key);
-      return Promise.resolve("repair-exhausted");
-    }
-    const run = async () => {
-      this.inFlight.add(key);
-      try {
-        if (
-          this.repairSuppressionMs > 0 &&
-          this.now() - this.lastVerifiedAt < this.repairSuppressionMs
-        ) {
-          this.handled.add(key);
-          return "repair-suppressed" as const;
-        }
-        this.attempts.set(key, (this.attempts.get(key) ?? 0) + 1);
-        const result = (await this.repair(processInfo)) ?? "verified";
-        if (result !== "verified") {
-          this.retryAfter.set(key, this.now() + this.retryBackoffMs);
-          return "repair-failed" as const;
-        }
-        this.handled.add(key);
-        this.retryAfter.delete(key);
-        this.lastVerifiedAt = this.now();
-        return "repaired" as const;
-      } finally {
-        this.inFlight.delete(key);
-      }
-    };
-    const next = this.chain.then(run, run);
-    this.chain = next.then(() => undefined, () => undefined);
-    return next;
-  }
-}
-
-/**
- * Deduplicates the same process when both a host event and the persistent
- * snapshot monitor report it. A PID is allowed to re-enter after it
- * disappears, while a PID + creation-time pair is only forwarded once.
- */
-export class DesktopStartupSnapshotTracker {
-  private readonly seen = new Set<string>();
-  private readonly pending = new Map<
-    string,
-    { row: DesktopProcess; samples: number; firstSeenAt: number }
-  >();
-  private chain: Promise<void> = Promise.resolve();
-
-  constructor(
-    private readonly forward: (
-      processInfo: DesktopProcess,
-    ) => Promise<unknown> | unknown,
-    private readonly options: {
-      minStableSamples?: number;
-      stabilityMs?: number;
-      now?: () => number;
-    } = {},
-  ) {}
-
-  observeSnapshot(rows: readonly DesktopProcess[]): Promise<void> {
-    const next = this.chain.then(
-      () => this.applySnapshot(rows),
-      () => this.applySnapshot(rows),
-    );
-    this.chain = next.then(() => undefined, () => undefined);
-    return next;
-  }
-
-  private async applySnapshot(rows: readonly DesktopProcess[]): Promise<void> {
-    const now = this.options.now?.() ?? Date.now();
-    const minStableSamples = Math.max(
-      2,
-      Math.trunc(this.options.minStableSamples ?? 2),
-    );
-    const stabilityMs = Math.max(0, this.options.stabilityMs ?? 0);
-    const current = new Set<string>();
-    for (const row of rows) {
-      const pid = Number(row.pid);
-      if (!Number.isInteger(pid) || pid < 1) continue;
-      const key = `${pid}:${row.createdAtMs ?? "unknown"}`;
-      current.add(key);
-      if (this.seen.has(key)) continue;
-      const existing = this.pending.get(key);
-      const pending = existing ?? { row, samples: 0, firstSeenAt: now };
-      pending.row = row;
-      pending.samples += 1;
-      this.pending.set(key, pending);
-      if (
-        pending.samples < minStableSamples ||
-        now - pending.firstSeenAt < stabilityMs
-      ) continue;
-      const result = await this.forward(pending.row);
-      if (
-        result === "repair-failed" ||
-        result === "repair-backoff" ||
-        result === "repair-deferred"
-      ) continue;
-      this.seen.add(key);
-      this.pending.delete(key);
-    }
-    for (const key of this.pending.keys()) {
-      if (!current.has(key)) this.pending.delete(key);
-    }
-  }
-}
 
 function normalizedWinPath(value: string): string {
   try {
@@ -209,6 +32,39 @@ export function isDesktopMainProcess(
   );
 }
 
+export interface DesktopProcessSnapshotRow {
+  pid: number;
+  parentPid?: number;
+  name: string;
+  exe: string;
+  cmd: string;
+  created: number;
+}
+
+export function selectDesktopMainProcesses(
+  spec: DesktopCdpHostSpec,
+  rows: readonly DesktopProcessSnapshotRow[],
+  platform = process.platform,
+): DesktopProcess[] {
+  const sameImagePids = new Set(rows.filter((row) =>
+    row.name.toLowerCase() === spec.processName.toLowerCase(),
+  ).map((row) => row.pid));
+  return rows.filter((row) =>
+    !sameImagePids.has(row.parentPid ?? -1) &&
+    isDesktopMainProcess(spec, row.cmd, row.name, row.exe, platform),
+  ).map((row) => {
+    const flags = parseRemoteDebuggingFlags(row.cmd);
+    return {
+      pid: row.pid,
+      name: row.name,
+      executablePath: row.exe,
+      commandLine: row.cmd,
+      port: flags.safe ? flags.port : null,
+      createdAtMs: Number.isFinite(row.created) && row.created > 0 ? row.created : null,
+    };
+  });
+}
+
 export async function listDesktopProcesses(
   spec: DesktopCdpHostSpec,
 ): Promise<DesktopProcess[]> {
@@ -219,10 +75,9 @@ export async function listDesktopProcesses(
     `Get-CimInstance Win32_Process -Filter \"Name='${escapedName}'\" | ForEach-Object {`,
     "$cmd=[string]$_.CommandLine;",
     "$exe=[string]$_.ExecutablePath;",
-    "if(-not $cmd -or $cmd -match '(?:^|\\s)--type(?:=|\\s)'){return};",
     "$created=0;",
     "try{$created=([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}catch{};",
-    "$o=@{pid=$_.ProcessId;name=$_.Name;exe=$exe;cmd=$cmd;created=$created};",
+    "$o=@{pid=$_.ProcessId;parentPid=$_.ParentProcessId;name=$_.Name;exe=$exe;cmd=$cmd;created=$created};",
     "($o | ConvertTo-Json -Compress -Depth 3)",
     "}",
   ].join(" ");
@@ -232,7 +87,7 @@ export async function listDesktopProcesses(
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
       { windowsHide: true, timeout: 10_000, maxBuffer: 2 * 1024 * 1024 },
     );
-    const rows: DesktopProcess[] = [];
+    const rows: DesktopProcessSnapshotRow[] = [];
     for (const line of String(stdout ?? "").split(/\r?\n/)) {
       if (!line.trim().startsWith("{")) continue;
       let raw: Record<string, unknown>;
@@ -241,24 +96,16 @@ export async function listDesktopProcesses(
       } catch {
         continue;
       }
-      const commandLine = typeof raw.cmd === "string" ? raw.cmd : "";
-      const name = typeof raw.name === "string" ? raw.name : "";
-      const executablePath = typeof raw.exe === "string" ? raw.exe : "";
-      if (!isDesktopMainProcess(spec, commandLine, name, executablePath)) continue;
-      const flags = parseRemoteDebuggingFlags(commandLine);
       rows.push({
         pid: Number(raw.pid) || 0,
-        name,
-        executablePath,
-        commandLine,
-        port: flags.safe ? flags.port : null,
-        createdAtMs:
-          Number.isFinite(Number(raw.created)) && Number(raw.created) > 0
-            ? Number(raw.created)
-            : null,
+        parentPid: Number(raw.parentPid) || 0,
+        name: typeof raw.name === "string" ? raw.name : "",
+        exe: typeof raw.exe === "string" ? raw.exe : "",
+        cmd: typeof raw.cmd === "string" ? raw.cmd : "",
+        created: Number(raw.created) || 0,
       });
     }
-    return rows;
+    return selectDesktopMainProcesses(spec, rows);
   } catch {
     return [];
   }
@@ -315,7 +162,7 @@ export function buildDesktopLaunchCommand(
   };
 }
 
-function originalDesktopArguments(
+export function originalDesktopArguments(
   commandLine: string,
   executable: string,
 ): string {
@@ -391,9 +238,12 @@ export function buildWindowsDesktopProcessStartScript(
     `if(-not (Get-Process -Id ${Math.max(0, Math.trunc(parentPid))} -ErrorAction SilentlyContinue)){break};`,
     "$rows=@();",
     `$matches=Get-CimInstance Win32_Process -Filter \"Name='${processBase}.exe'\" -ErrorAction SilentlyContinue;`,
+    "$sameImagePids=@{};",
+    "foreach($p in @($matches)){if($null -ne $p){$sameImagePids[[int]$p.ProcessId]=$true}};",
     "foreach($p in @($matches)){",
     "$pidValue=[int]$p.ProcessId;",
     "if($null -eq $p){continue};",
+    "if($sameImagePids.ContainsKey([int]$p.ParentProcessId)){continue};",
     "$cmd=[string]$p.CommandLine;",
     "if(-not $cmd -or $cmd -match '(?:^|\\s)--type(?:=|\\s)'){continue};",
     "$exe=[string]$p.ExecutablePath;",

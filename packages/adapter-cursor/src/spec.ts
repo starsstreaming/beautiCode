@@ -1,18 +1,40 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { DesktopCdpHostSpec } from "@beauticode/adapter-desktop-cdp";
 
-function candidates(): string[] {
+interface CandidateOptions {
+  env?: NodeJS.ProcessEnv;
+  readRecord?: () => unknown;
+  exists?: (file: string) => boolean;
+  realpath?: (file: string) => string;
+}
+
+export function cursorExecutableCandidates(options: CandidateOptions = {}): string[] {
+  const env = options.env || process.env;
+  const recordPath = path.join(env.LOCALAPPDATA || "", "beauticode", "hosts", "cursor", "executable.json");
+  const readRecord = options.readRecord || (() => JSON.parse(fs.readFileSync(recordPath, "utf8")) as unknown);
+  const exists = options.exists || fs.existsSync;
+  const realpath = options.realpath || fs.realpathSync.native;
   const values = [
-    process.env.LOCALAPPDATA
-      ? path.join(process.env.LOCALAPPDATA, "Programs", "cursor", "Cursor.exe")
+    env.LOCALAPPDATA
+      ? path.join(env.LOCALAPPDATA, "Programs", "cursor", "Cursor.exe")
       : "",
-    process.env.ProgramFiles
-      ? path.join(process.env.ProgramFiles, "Cursor", "Cursor.exe")
+    env.ProgramFiles
+      ? path.join(env.ProgramFiles, "Cursor", "Cursor.exe")
       : "",
-    process.env["ProgramFiles(x86)"]
-      ? path.join(process.env["ProgramFiles(x86)"]!, "Cursor", "Cursor.exe")
+    env["ProgramFiles(x86)"]
+      ? path.join(env["ProgramFiles(x86)"]!, "Cursor", "Cursor.exe")
       : "",
   ];
+  try {
+    const record = readRecord() as { schema?: unknown; host?: unknown; path?: unknown };
+    const candidate = String(record?.path || "");
+    if (record?.schema === "beauticode.host-executable/v1" && record.host === "cursor" &&
+      path.win32.isAbsolute(candidate) && path.win32.basename(candidate).toLowerCase() === "cursor.exe" && exists(candidate)) {
+      const canonical = path.win32.normalize(realpath(candidate));
+      if (path.win32.basename(canonical).toLowerCase() === "cursor.exe") values.push(canonical);
+    }
+  } catch { /* Missing or invalid ownership record is not a process candidate. */ }
   return [...new Set(values.filter(Boolean).map((value) => path.win32.normalize(value)))];
 }
 
@@ -20,18 +42,29 @@ export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
   kind: "cursor",
   displayName: "Cursor",
   processName: "Cursor.exe",
-  executableCandidates: Object.freeze(candidates()),
+  executableCandidates: Object.freeze(cursorExecutableCandidates()),
   defaultPort: 9341,
   candidatePorts: Object.freeze([9351, 9361, 9371]),
   popupTopInset: 44,
-  // 仅作声明样例：workbench 页 URL 内嵌实际安装路径，各机器不同；
-  // Cursor 的目标页匹配走 isDesktopTarget 的结构规则（scheme 前缀 +
-  // workbench.html 固定后缀），不使用该字段的严格等值。
-  targetUrl:
-    "vscode-file://vscode-app/resources/app/out/vs/code/electron-sandbox/workbench/workbench.html",
+  // Cursor's vscode-file URL embeds the installation directory. Match its
+  // stable renderer contract structurally instead of pinning one machine's
+  // drive/path.
+  targetUrl: "vscode-file://vscode-app/",
   targetRuntimeUrl: "vscode-file://vscode-app/",
+  targetIdentity: Object.freeze({
+    protocol: "vscode-file:",
+    hostname: "vscode-app",
+    pathSuffix: "/resources/app/out/vs/code/electron-sandbox/workbench/workbench.html",
+    hostEvidence: Object.freeze({
+      path: Object.freeze(["/cursor/"]),
+      targetText: Object.freeze(["cursor"]),
+      browser: Object.freeze(["cursor"]),
+    }),
+  }),
   mount: "cursor",
-  anchorSelector: '[data-action-id="marketplace"][data-sidebar-primary-action]',
+  // Cursor's measured agent sidebar places Customize second in header actions.
+  // The exact position and label are both required; an upstream reorder fails closed.
+  anchorSelector: '[data-action-id="marketplace"][data-sidebar-primary-action], .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(2)',
   anchorText: "Customize",
   strings: Object.freeze({
     entry: "background",

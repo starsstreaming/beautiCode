@@ -15,7 +15,7 @@ const atmosphere = atmosphereSandbox.BeauticodeAtmosphere;
 test("gallery canvas asset is present", () => {
   const filePath = canvasImagePath();
   assert.ok(fs.existsSync(filePath));
-  assert.match(filePath, /bg-canvas-4k\.png$/);
+  assert.match(filePath, /bg-canvas-4k\.webp$/);
 });
 
 test("water sim rises under a poke so mouse follow can drive ripples", () => {

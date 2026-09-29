@@ -25,6 +25,8 @@
  *   .conversation-list-tab-button；asar 里的 cb-sidebar-nav 当前视图不渲染，不可用作选择器。
  */
 
+import { ensureBackgroundStage } from './background-stage.js';
+
 /** 注入节点共用的 data-bc-injected 值。 */
 export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
 
@@ -39,10 +41,12 @@ export const BACKGROUND_BAR_INJECTION: string = (function () {
   return `(function () {
 var BC = ${JSON.stringify(BACKGROUND_BAR_STYLE_ID)};
 var BUILD = ${JSON.stringify(BACKGROUND_BAR_VERSION)};
+${ensureBackgroundStage.toString()}
 
 var list = document.querySelector('.conversation-list');
 var tabs = list && list.querySelector('.conversation-list-tabs');
 if (!list || !tabs) return 'no-list-found';
+ensureBackgroundStage(document);
 
 // ── 幂等守卫（版本感知）：「存在」不等于「健康」——旧代 payload 装的按钮，
 //    闭包里攥着已被新版重装删掉的节点引用（点它 = 对空气开关，实测踩过）。
@@ -507,16 +511,7 @@ document.documentElement.setAttribute('data-bc-active', 'true');
 // 舞台引用每次实时解析：WorkBuddy 重挂/整页刷新会让闭包捕获的旧节点脱离 DOM
 //（恢复写进幽灵节点 = 看起来"没生效"，实测踩过），绝不缓存元素引用
 function stageEl() {
-  var s2 = document.getElementById('beauticode-bg-stage');
-  if (!s2 || !s2.isConnected) {
-    s2 = document.createElement('div');
-    s2.id = 'beauticode-bg-stage';
-    s2.setAttribute('data-bc-injected', BC);
-    s2.style.cssText = ['position:fixed', 'inset:0', 'z-index:0', 'overflow:hidden',
-      'pointer-events:none', 'background-color:#101114'].join(';');
-    document.documentElement.insertBefore(s2, document.body);
-  }
-  return s2;
+  return ensureBackgroundStage(document);
 }
 function media(tag) {
   var st = stageEl();

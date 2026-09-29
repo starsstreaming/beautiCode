@@ -235,16 +235,17 @@ export async function probeForeignCdp(
 }
 
 export async function discoverWorkBuddyCdp(
-  opts: { ports?: number[]; timeoutMs?: number } = {},
+  opts: { ports?: number[]; timeoutMs?: number; probe?: typeof probeWorkBuddyCdp } = {},
 ): Promise<DiscoveredWorkBuddyCdp | null> {
   const timeoutMs = opts.timeoutMs ?? 450;
+  const probe = opts.probe ?? probeWorkBuddyCdp;
   const portSet = new Set<number>();
   for (const p of opts.ports ?? DEFAULT_WORKBUDDY_CDP_PORTS) {
     if (Number.isInteger(p) && p >= 1 && p <= 65535) portSet.add(p);
   }
-  for (const port of portSet) {
-    const hit = await probeWorkBuddyCdp(port, { timeoutMs });
-    if (hit) return hit;
-  }
-  return null;
+  // Checking a dozen closed ports serially could consume most of the 10 s
+  // fresh-process repair window. Probe only the bounded candidates in parallel,
+  // then select in the configured priority order regardless of response order.
+  const hits = await Promise.all([...portSet].map((port) => probe(port, { timeoutMs })));
+  return hits.find((hit) => hit !== null) ?? null;
 }

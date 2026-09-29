@@ -16,6 +16,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const REVISION_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_BODY_BYTES = 64 * 1024;
+const LOOPBACK_HOST_PATTERN = /^(?:127\.0\.0\.1|localhost)$/i;
+const LOOPBACK_IPV6 = "[::1]";
 
 async function readBridgeIdentity() {
   try {
@@ -102,6 +104,7 @@ async function readJsonOrReject(req, res) {
 }
 
 async function authorized(req, tokenFile) {
+  if (!isAllowedLoopbackHost(req?.headers?.host)) return false;
   const match = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || "").trim());
   if (!match) return false;
   let expected;
@@ -119,53 +122,42 @@ async function authorized(req, tokenFile) {
   );
 }
 
-// 本插件全部 UI/状态端点的唯一防线（token 只覆盖 apply/mode/status），
-// 因此判定基准绝不能是 Host 头：Host 完全由请求方按所访问域名填写，
-// DNS rebinding 场景下恶意页面以 http://evil.com:<端口> 访问时 Origin 与
-// Host 天然相等，旧的「Origin === Host」校验必然通过。
-// 核心防线：Host 主机名必须是回环地址（rebinding 域名在此被拒）；
-// 监听端口已确认（ctx.webServer.port 就绪）时还要求端口一致；带 Origin
-// 的请求再单独校验回环 + 与 Host 同端口 + http。
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1"]);
-
-function parseHostHeader(raw) {
-  const hostHeader = String(raw || "").trim().toLowerCase();
-  if (!hostHeader) return null;
-  let hostname = hostHeader;
-  let port = "";
-  const bracketEnd = hostHeader.indexOf("]");
-  const colon = hostHeader.lastIndexOf(":");
-  if (colon > (bracketEnd === -1 ? 0 : bracketEnd)) {
-    hostname = hostHeader.slice(0, colon);
-    port = hostHeader.slice(colon + 1);
-  }
-  const bareHost = hostname.replace(/^\[/, "").replace(/\]$/, "");
-  const portNumber = port ? Number(port) : 80;
-  if (!LOOPBACK_HOSTNAMES.has(bareHost)) return null;
-  if (!Number.isInteger(portNumber) || portNumber <= 0) return null;
-  return { hostname: bareHost, port: portNumber };
+function parseLoopbackAuthority(value) {
+  if (typeof value !== "string" || value.trim() !== value || /[\s,]/.test(value)) return null;
+  const bracketed = /^\[([^\]]+)\](?::([0-9]{1,5}))?$/.exec(value);
+  const plain = /^(127\.0\.0\.1|localhost)(?::([0-9]{1,5}))?$/i.exec(value);
+  const hostname = bracketed ? `[${bracketed[1].toLowerCase()}]` : plain?.[1]?.toLowerCase();
+  if (hostname !== LOOPBACK_IPV6 && !LOOPBACK_HOST_PATTERN.test(hostname || "")) return null;
+  const rawPort = bracketed?.[2] ?? plain?.[2] ?? "80";
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return { hostname, port, key: `${hostname}:${port}` };
 }
 
-function isSameOrigin(req, expectedPort) {
-  const host = parseHostHeader(req.headers.host);
+function parseLoopbackOrigin(value) {
+  if (typeof value !== "string" || value === "null") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      return null;
+    }
+    return parseLoopbackAuthority(url.host);
+  } catch {
+    return null;
+  }
+}
+
+function isAllowedLoopbackHost(value) {
+  return Boolean(parseLoopbackAuthority(value));
+}
+
+export function isSameOrigin(req) {
+  const host = parseLoopbackAuthority(req?.headers?.host);
   if (!host) return false;
-  // expectedPort 为 null 表示监听端口尚未可知（如测试注入的假 webServer），
-  // 此时跳过端口一致性，仅保留回环 + Origin/Host 互证两道防线。
-  if (expectedPort != null && host.port !== expectedPort) return false;
   const origin = req.headers.origin;
   if (typeof origin === "string") {
-    let originUrl;
-    try {
-      originUrl = new URL(origin);
-    } catch {
-      return false;
-    }
-    const originPort = originUrl.port ? Number(originUrl.port) : 80;
-    return (
-      originUrl.protocol === "http:" &&
-      LOOPBACK_HOSTNAMES.has(originUrl.hostname.toLowerCase()) &&
-      originPort === host.port
-    );
+    const parsedOrigin = parseLoopbackOrigin(origin);
+    return Boolean(parsedOrigin && parsedOrigin.key === host.key);
   }
   return req.headers["sec-fetch-site"] === "same-origin";
 }
@@ -176,7 +168,9 @@ function validLoopbackMediaUrl(value) {
     const url = new URL(value);
     return (
       url.protocol === "http:" &&
-      ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname.toLowerCase()) &&
+      !url.username &&
+      !url.password &&
+      isAllowedLoopbackHost(url.host) &&
       url.searchParams.has("t")
     );
   } catch {
@@ -268,15 +262,10 @@ export function apply(ctx, config = {}) {
   const modes = { fish: false, muted: true, tone: "auto" };
   const dataRoot = path.dirname(tokenFile);
   const baseUrl = resolvePluginBaseUrl(ctx);
-  // 只传「已确认」的监听端口：ctx.webServer.port 就绪时强制一致；
-  // 尚未就绪（如测试注入的假 webServer）时传 null，退回回环 + Origin/Host
-  // 互证两道防线。不能用 resolvePluginBaseUrl 的 fallback 猜测值比对，
-  // 否则随机端口服务器会被自己的同源校验拒绝。
-  const confirmedPort =
-    Number.isInteger(ctx?.webServer?.port) && ctx.webServer.port > 0
-      ? ctx.webServer.port
-      : null;
-  const sameOrigin = (req) => isSameOrigin(req, confirmedPort);
+  // 远端实现：Host 必须是回环地址，带 Origin 时要求与 Host 的
+  // hostname:port 完全等值（key 比对），无 Origin 时要求
+  // sec-fetch-site: same-origin。DNS rebinding 的 Host 头非回环，天然被拒。
+  const sameOrigin = (req) => isSameOrigin(req);
   registerAgentSurfaces(ctx, { dataRoot, baseUrl });
   const ui = createBeauticodeUi({
     dataRoot,
@@ -313,6 +302,10 @@ export function apply(ctx, config = {}) {
         kind: "exact",
         path: "/__beauticode/version",
         handler: async (req, res) => {
+          if (!isAllowedLoopbackHost(req.headers.host)) {
+            res.writeHead(403).end();
+            return;
+          }
           if (req.method !== "GET" && req.method !== "HEAD") {
             res.writeHead(405).end();
             return;
@@ -357,7 +350,8 @@ export function apply(ctx, config = {}) {
           }
           const source = await fs.readFile(filePath);
           res.writeHead(200, {
-            "content-type": "image/png",
+            // Keep the established route while serving the selected lossless asset.
+            "content-type": filePath.endsWith(".webp") ? "image/webp" : "image/png",
             "cache-control": "public, max-age=86400",
             "content-length": source.length,
           });

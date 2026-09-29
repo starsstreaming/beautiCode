@@ -14,6 +14,9 @@ const PLUGIN_FILES = [
   "watch-host.mjs",
   "codex-watchdog.mjs",
   "lifecycle.mjs",
+  "task-wiring.mjs",
+  "health.mjs",
+  "quick-launch.mjs",
   "bin/beauticode-codex",
   "package.json",
 ];
@@ -64,11 +67,15 @@ export async function stageCodexPlugin(destRoot = defaultStageDir(), opts = {}) 
   await fsp.rm(destRoot, { recursive: true, force: true });
   await fsp.mkdir(destRoot, { recursive: true });
   for (const name of PLUGIN_FILES) {
-    const source = path.join(pluginSrc, name);
+    const source = name === "quick-launch.mjs" ? path.join(repoRoot, "scripts", name) : path.join(pluginSrc, name);
     const dest = path.join(destRoot, name);
     await fsp.mkdir(path.dirname(dest), { recursive: true });
     await fsp.copyFile(source, dest);
   }
+  await fsp.copyFile(
+    path.join(repoRoot, "scripts", "portable-runtime.mjs"),
+    path.join(destRoot, "portable-runtime.mjs"),
+  );
   const vendorAdapter = path.join(destRoot, "vendor", "adapter-codex");
   await copyTree(path.join(repoRoot, "packages", "core", "dist"), path.join(destRoot, "vendor", "core"));
   await copyTree(path.join(repoRoot, "packages", "adapter-codex", "dist"), vendorAdapter);

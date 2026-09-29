@@ -25,6 +25,7 @@ import {
   SNAPSHOT_EXPRESSION,
   type ReadinessSnapshot,
 } from "./readiness.js";
+import { selectCodexPrimaryTargets } from "./target-selection.js";
 
 export interface CodexHostApplierOptions {
   port: number;
@@ -156,7 +157,10 @@ export class CodexHostApplier implements HostApplier {
     const targets = await listPageTargets(this.port, this.browserId, {
       allowLoopbackHttp: !this.requireAppProtocol,
     });
-    const preferred = this.rankTargets(targets);
+    const preferred = selectCodexPrimaryTargets(targets, {
+      urlPrefix: this.urlPrefix,
+      requireAppProtocol: this.requireAppProtocol,
+    });
     const liveIds = new Set(preferred.map((t) => t.id));
 
     for (const [id, session] of this.sessions) {
@@ -211,48 +215,6 @@ export class CodexHostApplier implements HostApplier {
       }
     }
     return connected;
-  }
-
-  private rankTargets(targets: CdpTargetInfo[]): CdpTargetInfo[] {
-    const scored = targets
-      .map((t) => {
-        let score = 0;
-        const url = t.url ?? "";
-        const title = t.title ?? "";
-        if (
-          this.requireAppProtocol &&
-          !/^(?:app:\/\/-)(?:\/|$)/i.test(url)
-        ) {
-          return { t, score: -1_000 };
-        }
-        // Main shell only — skip chrome overlays (avatar, titlebar popouts).
-        // Injecting a full-viewport stage into those is unstable and unneeded.
-        if (
-          /avatar-overlay|titlebar|utility-overlay|detached-window|initialRoute=%2Favatar/i.test(
-            url,
-          )
-        ) {
-          return { t, score: -1_000 };
-        }
-        if (url.startsWith(this.urlPrefix)) score += 10;
-        if (url.startsWith("app://")) score += 5;
-        if (/\/index\.html(?:$|\?)/i.test(url) && !/[?&]initialRoute=/i.test(url)) {
-          score += 20;
-        }
-        if (/codex|chatgpt|openai/i.test(title)) score += 4;
-        else if (!title.trim()) score += 1;
-        return { t, score };
-      })
-      .filter((s) => s.score >= 0);
-    scored.sort((a, b) => b.score - a.score);
-    // Prefer a single primary shell when several score equally.
-    if (scored.length === 0) return [];
-    const best = scored[0]!.score;
-    return scored
-      .filter((s) => s.score === best)
-      .sort((a, b) => a.t.id.localeCompare(b.t.id))
-      .slice(0, 1)
-      .map((s) => s.t);
   }
 
   async apply(

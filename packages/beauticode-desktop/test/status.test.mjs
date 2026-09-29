@@ -40,3 +40,34 @@ test("status has an explicit read-only result for every supported host", () => {
     assert.match(statusText(result), new RegExp(host));
   }
 });
+
+test("status uses the Windows Startup folder as the canonical runner marker", () => {
+  const appData = "C:/Users/test/AppData/Roaming";
+  const startup = path.join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+  for (const host of ["workbuddy", "cursor", "doubao"]) {
+    const marker = path.join(startup, `beauticode-${host === "workbuddy" ? "wb" : host}-runner.vbs`).replaceAll("\\", "/");
+    const result = getHostStatus(host, {
+      runtimeRoot: "C:/package/runtime",
+      home: "C:/Users/test",
+      env: { APPDATA: appData },
+      platform: "win32",
+      exists: (candidate) => candidate.replaceAll("\\", "/") === marker,
+    });
+    assert.equal(result.installed, true, host);
+  }
+});
+
+test("status does not mistake the retired APPDATA-root marker for an install", () => {
+  const appData = "C:/Users/test/AppData/Roaming";
+  for (const host of ["workbuddy", "cursor", "doubao"]) {
+    const legacy = path.join(appData, `beauticode-${host === "workbuddy" ? "wb" : host}-runner.vbs`).replaceAll("\\", "/");
+    const result = getHostStatus(host, {
+      runtimeRoot: "C:/package/runtime",
+      home: "C:/Users/test",
+      env: { APPDATA: appData },
+      platform: "win32",
+      exists: (candidate) => candidate.replaceAll("\\", "/") === legacy,
+    });
+    assert.equal(result.installed, false, host);
+  }
+});

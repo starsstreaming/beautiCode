@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const CONSOLE_REV = 4;
+  const CONSOLE_REV = 6;
   if (window.__beauticodeConsoleRev === CONSOLE_REV && window.__beauticodeConsoleLoaded) {
     try {
       window.__beauticodeConsolePlace?.();
@@ -14,6 +14,7 @@
     document.getElementById("beauticode-console-pop")?.remove();
     document.getElementById("beauticode-gallery")?.remove();
     document.getElementById("beauticode-name-dialog")?.remove();
+    document.querySelectorAll('style[data-beauticode-console="true"]').forEach((node) => node.remove());
   } catch {
     /* ignore */
   }
@@ -230,15 +231,20 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
 
   function findExploreRow() {
     const nodes = [...document.querySelectorAll('button, a, [role="button"]')];
-    return (
-      nodes.find((node) => {
-        if (host.contains(node) || pop.contains(node)) return false;
-        const text = String(node.textContent || "")
-          .replace(/\s+/g, " ")
-          .trim();
-        return text === "探索" || text === "Explore";
-      }) || null
-    );
+    const candidates = nodes.filter((node) => {
+      if (host.contains(node) || pop.contains(node)) return false;
+      const text = String(node.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return text === "探索" || text === "Explore";
+    });
+    // The updated Codex rail has an icon-only Explore button with sr-only
+    // text. Do not mount after an equally named action in the content pane.
+    return candidates.find((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && rect.left >= 0 &&
+        rect.left < 120 && (rect.width <= 120 || node.classList.contains("sidebar-item"));
+    }) || null;
   }
 
   function placePop() {
@@ -293,6 +299,10 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
       else list.append(host);
     }
     host.classList.toggle("rail", row.getBoundingClientRect().width <= 56);
+    // The rail's muted icon tone belongs to the host theme, including light
+    // mode. Sample the adjacent native item so its hover/theme state follows.
+    const nativeColor = getComputedStyle(explore).color;
+    if (nativeColor && trigger.style.color !== nativeColor) trigger.style.color = nativeColor;
     if (!pop.hidden) placePop();
   }
 

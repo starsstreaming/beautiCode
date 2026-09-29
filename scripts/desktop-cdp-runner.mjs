@@ -45,7 +45,15 @@ if (args.watchdog && (args.once || args.clean)) {
 if (args.watchdog) {
   if (args.pidFile) {
     fs.mkdirSync(path.dirname(args.pidFile), { recursive: true });
-    fs.writeFileSync(args.pidFile, String(process.pid), 'utf8');
+    fs.writeFileSync(args.pidFile, JSON.stringify({
+      schema: 'beauticode.desktop-runner/v1',
+      pid: process.pid,
+      startedAtMs: Date.now(),
+      image: process.execPath,
+      host: args.host,
+      runner: fileURLToPath(import.meta.url),
+      pidFile: path.resolve(args.pidFile),
+    }) + '\n', 'utf8');
   }
   const childArgs = process.argv.slice(2).filter((arg) => arg !== '--watchdog');
   const stopSignals = new Set(['SIGINT', 'SIGTERM']);
@@ -139,21 +147,46 @@ function openWs(wsUrl) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl);
     let id = 0;
+    let opened = false;
+    let settled = false;
     const pending = new Map();
     const handlers = [];
-    const SEND_TIMEOUT_MS = 15_000;
-    // 每个请求带超时并在到时移出 pending：没有超时的话，宿主半开连接
-    // 会让 Runtime.evaluate 永不 settle，busy 卡死、tick 循环静默死亡。
-    const send = (method, params = {}, timeoutMs = SEND_TIMEOUT_MS) => new Promise((res, rej) => {
+    const rejectPending = (error) => {
+      for (const [requestId, task] of pending) {
+        pending.delete(requestId);
+        clearTimeout(task.timer);
+        task.rej(error);
+      }
+    };
+    const fail = (error) => {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      rejectPending(failure);
+      if (!settled) {
+        settled = true;
+        reject(failure);
+      }
+    };
+    const send = (method, params = {}) => new Promise((res, rej) => {
+      if (!opened || ws.readyState !== 1) {
+        rej(new Error('CDP WebSocket is not open.'));
+        return;
+      }
       const requestId = ++id;
+      pending.set(requestId, { res, rej });
       const timer = setTimeout(() => {
-        if (pending.delete(requestId)) rej(new Error(`CDP ${method} 超时（${timeoutMs}ms）。`));
-      }, timeoutMs);
-      pending.set(requestId, {
-        res: (value) => { clearTimeout(timer); res(value); },
-        rej: (error) => { clearTimeout(timer); rej(error); },
-      });
-      ws.send(JSON.stringify({ id: requestId, method, params }));
+        const task = pending.get(requestId);
+        if (!task) return;
+        pending.delete(requestId);
+        task.rej(new Error(`CDP request timed out: ${method}`));
+      }, 10_000);
+      pending.get(requestId).timer = timer;
+      try {
+        ws.send(JSON.stringify({ id: requestId, method, params }));
+      } catch (error) {
+        pending.delete(requestId);
+        clearTimeout(timer);
+        rej(error);
+      }
     });
     const failAllPending = (error) => {
       for (const task of pending.values()) task.rej(error);
@@ -165,23 +198,28 @@ function openWs(wsUrl) {
       if (message.id && pending.has(message.id)) {
         const task = pending.get(message.id);
         pending.delete(message.id);
+        clearTimeout(task.timer);
         message.error ? task.rej(new Error(message.error.message || 'CDP error')) : task.res(message.result);
       } else if (message.method) {
         for (const handler of handlers) handler(message);
       }
     });
-    ws.addEventListener('open', () => resolve({
-      ws, send,
-      onEvent: (handler) => handlers.push(handler),
-      close: () => ws.close(),
-    }));
-    ws.addEventListener('error', () => {
-      failAllPending(new Error('CDP WebSocket 连接失败。'));
-      reject(new Error('CDP WebSocket connection failed.'));
+    ws.addEventListener('open', () => {
+      opened = true;
+      settled = true;
+      resolve({
+        ws, send,
+        onEvent: (handler) => handlers.push(handler),
+        close: () => ws.close(),
+      });
     });
-    // 断开（含半开恢复）时统一定损：拒绝并清空全部挂起请求，防止
-    // Promise 永久悬挂与 pending Map 无限增长。
-    ws.addEventListener('close', () => failAllPending(new Error('CDP 连接已关闭。')));
+    ws.addEventListener('error', (event) => {
+      fail(new Error(`CDP WebSocket connection failed${event?.message ? `: ${event.message}` : '.'}`));
+    });
+    ws.addEventListener('close', () => {
+      opened = false;
+      fail(new Error('CDP WebSocket disconnected.'));
+    });
   });
 }
 
@@ -407,13 +445,27 @@ function startGallery() {
 async function applyRuntime(connection, galleryUrl) {
   const result = await evaluate(connection, buildInjection(galleryUrl));
   if (result === 'no-anchor' || result === 'anchor-text-mismatch') {
+    reportRuntimeDiagnosis(result === 'no-anchor' ? 'host-ui-updated' : 'anchor-text-mismatch');
     throw new Error(`DOM 兼容检查失败：${result}`);
   }
   if (result === 'ok') {
     const state = readState();
     if (state) await evaluate(connection, `window.__bcDesktopRestoreState(${JSON.stringify(state)})`);
+    reportRuntimeDiagnosis('ready');
   }
   return result;
+}
+
+let lastRuntimeDiagnosis = '';
+function reportRuntimeDiagnosis(state) {
+  if (state === lastRuntimeDiagnosis) return;
+  lastRuntimeDiagnosis = state;
+  if (state === 'ready') log.info('实时诊断：CDP 目标、宿主锚点与背景入口均正常。');
+  else if (state === 'host-ui-updated' || state === 'anchor-text-mismatch') {
+    log.warn(`实时诊断：${state}；宿主页面契约不匹配，已停止注入。`);
+  } else {
+    log.warn(`实时诊断：${state}；正在尝试恢复背景入口。`);
+  }
 }
 
 async function runSession(endpoint) {
@@ -452,12 +504,18 @@ async function runSession(endpoint) {
     busy = true;
     busySince = Date.now();
     try {
-      const snapshot = await evaluate(connection, `({pick:window.__bcDesktopPickRequest||0,apply:window.__bcDesktopApplyRequest||null,skin:window.__bcDesktopSkinCenterRequest||0,dirty:window.__bcDesktopPersistDirty||0,entry:!!document.getElementById('beauticode-${args.host}-background-entry'),style:!!document.getElementById('beauticode-${args.host}-background-style'),stage:!!document.getElementById('beauticode-bg-stage'),anchor:!!document.querySelector(${JSON.stringify(spec.anchorSelector)})})`);
-      if (!snapshot.anchor) {
+      const snapshot = await evaluate(connection, `(() => { const a=document.querySelector(${JSON.stringify(spec.anchorSelector)}); const t=a?String(a.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase():''; return {pick:window.__bcDesktopPickRequest||0,apply:window.__bcDesktopApplyRequest||null,skin:window.__bcDesktopSkinCenterRequest||0,dirty:window.__bcDesktopPersistDirty||0,entry:!!document.getElementById('beauticode-${args.host}-background-entry'),style:!!document.getElementById('beauticode-${args.host}-background-style'),stage:!!document.getElementById('beauticode-bg-stage'),anchor:!!a,anchorTextMatches:!!a&&t.includes(${JSON.stringify(spec.anchorText.toLowerCase())})}; })()`);
+      if (!snapshot.anchor || !snapshot.anchorTextMatches) {
+        reportRuntimeDiagnosis('host-ui-updated');
         await evaluate(connection, buildCleanup());
-        throw new Error('DOM 锚点丢失，已停止注入。');
+        return;
       }
-      if (!snapshot.entry || !snapshot.style || !snapshot.stage) await applyRuntime(connection, galleryUrl);
+      if (!snapshot.entry || !snapshot.style || !snapshot.stage) {
+        reportRuntimeDiagnosis(!snapshot.entry ? 'entry-missing' : 'partial-injection');
+        await applyRuntime(connection, galleryUrl);
+      } else {
+        reportRuntimeDiagnosis('ready');
+      }
       if (snapshot.pick && snapshot.pick !== lastPick) {
         lastPick = snapshot.pick;
         await evaluate(connection, 'window.__bcDesktopPickRequest=0');
@@ -521,7 +579,7 @@ do {
       const result = await runSession(endpoint);
       if (result === 'done') break;
     } catch (error) {
-      log.warn(error.message);
+      if (!String(error?.message || '').startsWith('DOM 兼容检查失败：')) log.warn(error.message);
       if (args.once || args.clean) { process.exitCode = 1; break; }
     }
   } else if (args.once || args.clean) {

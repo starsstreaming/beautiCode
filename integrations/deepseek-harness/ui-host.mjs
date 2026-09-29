@@ -296,12 +296,38 @@ function publicThemes(list) {
   }));
 }
 
+export function safeLoopbackHttpOrigin(value) {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const loopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
+    if (
+      !loopback ||
+      url.protocol !== "http:" ||
+      url.username ||
+      url.password ||
+      (url.pathname !== "/" && url.pathname !== "") ||
+      url.search ||
+      url.hash
+    ) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 async function canReachBridge(baseUrl) {
-  const origin = typeof baseUrl === "string" && baseUrl ? baseUrl : "http://127.0.0.1:3080";
+  const origin = safeLoopbackHttpOrigin(
+    typeof baseUrl === "string" && baseUrl ? baseUrl : "http://127.0.0.1:3080",
+  );
+  if (!origin) return false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 800);
   try {
-    const response = await fetch(new URL("__beauticode/version", origin.endsWith("/") ? origin : `${origin}/`), {
+    const response = await fetch(new URL("__beauticode/version", origin), {
       signal: controller.signal,
     });
     return response.ok;

@@ -89,7 +89,7 @@ function Get-PackageInsert {
 }
 
 function Test-PatchHasBridge([string]$Text) {
-  return [bool]($Text -match "(?m)^\s*-\s*id:\s*$bridgeId\s*$")
+  return [bool]($Text -match "(?m)^[ \t]*-[ \t]*id:[ \t]*$bridgeId[ \t]*(?:#.*)?\r?$")
 }
 
 function Backup-BridgePatch([string]$Path) {
@@ -105,34 +105,126 @@ function Backup-BridgePatch([string]$Path) {
   Write-BcLog ("Backed up beauticode bridge patch to {0}" -f $backup)
 }
 
+function Get-BridgeRewrite([string]$Raw) {
+  $eol = if ($Raw.Contains("`r`n")) { "`r`n" } elseif ($Raw.Contains("`n")) { "`n" } else { "`r`n" }
+  $hasTrailing = $Raw.EndsWith($eol)
+  $lines = if ($Raw.Length -eq 0) { @() } else { $Raw -split "\r\n|\n|\r" }
+  if ($hasTrailing -and $lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq "") {
+    if ($lines.Count -eq 1) { $lines = @() } else { $lines = $lines[0..($lines.Count - 2)] }
+  }
+  $removed = New-Object bool[] $lines.Count
+  $bridgeCount = 0
+  $removedBridgeCount = 0
+
+  for ($i = 0; $i -lt $lines.Count; $i += 1) {
+    $insert = [regex]::Match([string]$lines[$i], '^([ \t]*)-[ \t]*insert:[ \t]*(?:#.*)?$')
+    if (-not $insert.Success) { continue }
+    $insertIndent = $insert.Groups[1].Value.Length
+    $blockEnd = $i + 1
+    while ($blockEnd -lt $lines.Count) {
+      $line = [string]$lines[$blockEnd]
+      if ($line.Trim() -and (($line -replace '^([ \t]*).*$', '$1').Length -le $insertIndent)) { break }
+      $blockEnd += 1
+    }
+    $foundBridge = $false
+    $bridgeRanges = @()
+    for ($j = $i + 1; $j -lt $blockEnd; ) {
+      $bridge = [regex]::Match([string]$lines[$j], '^([ \t]*)-[ \t]*id:[ \t]*' + [regex]::Escape($bridgeId) + '[ \t]*(?:#.*)?$')
+      if (-not $bridge.Success -or $bridge.Groups[1].Value.Length -le $insertIndent) {
+        $j += 1
+        continue
+      }
+      $foundBridge = $true
+      $bridgeCount += 1
+      $itemIndent = $bridge.Groups[1].Value.Length
+      $itemEnd = $j + 1
+      while ($itemEnd -lt $blockEnd) {
+        $line = [string]$lines[$itemEnd]
+        if ($line.Trim() -and (($line -replace '^([ \t]*).*$', '$1').Length -le $itemIndent)) { break }
+        $itemEnd += 1
+      }
+      $bridgeRanges += ,@($j, $itemEnd)
+      $j = $itemEnd
+    }
+    if (-not $foundBridge) { continue }
+    foreach ($range in $bridgeRanges) {
+      $removedBridgeCount += 1
+      for ($k = $range[0]; $k -lt $range[1]; $k += 1) {
+        $removed[$k] = $true
+      }
+    }
+    $hasSibling = $false
+    for ($k = $i + 1; $k -lt $blockEnd; $k += 1) {
+      $line = [string]$lines[$k]
+      if (-not $removed[$k] -and $line.Trim() -and -not $line.TrimStart().StartsWith("#")) {
+        $hasSibling = $true
+        break
+      }
+    }
+    if (-not $hasSibling) {
+      for ($k = $i; $k -lt $blockEnd; $k += 1) { $removed[$k] = $true }
+      if ($i -gt 0 -and $lines[$i - 1].TrimEnd() -eq ($insert.Groups[1].Value + "# beauticode-bridge (installer)")) {
+        $removed[$i - 1] = $true
+      }
+    }
+    $i = $blockEnd - 1
+  }
+
+  if ($bridgeCount -eq 0) {
+    return [pscustomobject]@{ Safe = $true; Changed = $false; BridgeCount = 0; Text = $Raw }
+  }
+  if ($removedBridgeCount -ne $bridgeCount) {
+    return [pscustomobject]@{ Safe = $false; Changed = $false; BridgeCount = $bridgeCount; Text = $Raw }
+  }
+  $keptLines = @()
+  for ($i = 0; $i -lt $lines.Count; $i += 1) {
+    if (-not $removed[$i]) { $keptLines += [string]$lines[$i] }
+  }
+  $rewritten = $keptLines -join $eol
+  if ($hasTrailing -and $rewritten.Length -gt 0) { $rewritten += $eol }
+  return [pscustomobject]@{ Safe = $true; Changed = $true; BridgeCount = $bridgeCount; Text = $rewritten }
+}
+
+function Write-RecoverableText([string]$Path, [string]$Text) {
+  $dir = Split-Path -Parent $Path
+  if (-not (Test-Path -LiteralPath $dir)) {
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+  }
+  $existing = Test-Path -LiteralPath $Path -PathType Leaf
+  if ($existing) { Backup-BridgePatch $Path }
+  $temp = Join-Path $dir ([IO.Path]::GetRandomFileName())
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  try {
+    [IO.File]::WriteAllText($temp, $Text, $utf8)
+    Move-Item -LiteralPath $temp -Destination $Path -Force
+  } catch {
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+    throw
+  }
+}
+
 function Remove-BridgeFromPatch([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
   $raw = [IO.File]::ReadAllText($Path)
   if (-not (Test-PatchHasBridge $raw)) { return $false }
-  # 同缩进边界截断：子项行必须以 [ \t] 开头，末个缩进行允许无换行结尾，
-  # 避免吞掉下一个顶层条目（C-1 同源问题）。
-  $cleaned = [regex]::Replace(
-    $raw,
-    "(?ms)(?:^|\r?\n)# beauticode-bridge \(installer\)\r?\n- insert:\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|$))*",
-    "`n"
-  )
-  $cleaned = [regex]::Replace(
-    $cleaned,
-    "(?ms)(?:^|\r?\n)- insert:\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|$))*?[ \t]+-\s*id:\s*$bridgeId[ \t]*(?:\r?\n|$)(?:[ \t]+[^\r\n]*(?:\r?\n|$))*",
-    "`n"
-  )
-  $trimmed = $cleaned.Trim()
-  if ($trimmed -eq "" -or $trimmed -eq "[]") {
+  $rewrite = Get-BridgeRewrite $raw
+  if (-not $rewrite.Safe -or -not $rewrite.Changed) {
+    throw ("Unsafe DSH patch rewrite: cannot locate {0} beauticode bridge entries." -f $rewrite.BridgeCount)
+  }
+  $trimmed = $rewrite.Text.Trim()
+  $emptyOverlay = $trimmed.Length -eq 0
+  $emptyFlowOverlay = [bool]($trimmed -match '^\[\]$')
+  if ($emptyOverlay -or $emptyFlowOverlay) {
     $dir = Split-Path -Parent $Path
-    if ([IO.Path]::GetFileName($Path) -eq "cordis.patch.yml" -and
-        $dir -eq $DshHome) {
+    if (([IO.Path]::GetFileName($Path) -eq "cordis.patch.yml") -and ($dir -eq $DshHome)) {
+      Backup-BridgePatch $Path
       Remove-Item -LiteralPath $Path -Force
       return $true
     }
-    [IO.File]::WriteAllText($Path, "# Your patch layer for this dsh profile.`r`n[]`r`n")
+    Write-RecoverableText $Path "# Your patch layer for this dsh profile.`r`n[]`r`n"
     return $true
   }
-  [IO.File]::WriteAllText($Path, $trimmed.TrimEnd() + "`r`n")
+  Write-RecoverableText $Path ($trimmed.TrimEnd() + "`r`n")
   return $true
 }
 
@@ -142,36 +234,26 @@ function Write-BridgePatch([string]$Path, [string]$Body) {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
   }
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-    [IO.File]::WriteAllText($Path, $Body + "`r`n")
+    Write-RecoverableText $Path ($Body + "`r`n")
     return
   }
   $raw = [IO.File]::ReadAllText($Path)
-  # C-1：任何对用户文件的写入前无条件备份，杜绝"无备份覆盖"路径。
-  Backup-BridgePatch $Path
+  $rewrite = Get-BridgeRewrite $raw
   if (Test-PatchHasBridge $raw) {
-    # 块级替换：先匹配完整块再 Remove/Insert，两个形态分别对应
-    # ① 本脚本写入的注释标注块；② 无注释但块内含 bridge id 的块。
-    # 子项按 [ \t] 同缩进截断，末个缩进行允许无换行结尾（手工编辑的文件）。
-    $patterns = @(
-      '(?ms)(?:^|\r?\n)# beauticode-bridge \(installer\)\r?\n- insert:\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|$))*',
-      "(?ms)(?:^|\r?\n)- insert:\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|$))*?[ \t]+-[ \t]*id:[ \t]*$bridgeId[ \t]*(?:\r?\n|$)(?:[ \t]+[^\r\n]*(?:\r?\n|$))*"
-    )
-    foreach ($pattern in $patterns) {
-      $match = [regex]::Match($raw, $pattern)
-      if (-not $match.Success) { continue }
-      $updated = $raw.Remove($match.Index, $match.Length).Insert($match.Index, $Body + "`r`n")
-      [IO.File]::WriteAllText($Path, $updated.TrimEnd() + "`r`n")
-      return
+    if (-not $rewrite.Safe -or -not $rewrite.Changed) {
+      throw ("Unsafe DSH patch rewrite: cannot replace {0} beauticode bridge entries." -f $rewrite.BridgeCount)
     }
-    # 失败关闭：无法安全定位块时绝不整文件覆盖，保留原文件交由用户手工处理。
-    throw ("无法安全更新 {0} 中的 beauticode-bridge 块（格式不受支持）。原文件已保留并备份，请手工将该块替换为：`r`n{1}" -f $Path, $Body)
+    $stripped = $rewrite.Text.Trim()
+  } else {
+    $stripped = $raw.Trim()
   }
-  $stripped = $raw.Trim()
-  if ($stripped -eq "" -or $stripped -eq "[]") {
-    [IO.File]::WriteAllText($Path, $Body + "`r`n")
+  $emptyOverlay = $stripped.Length -eq 0
+  $emptyFlowOverlay = [bool]($stripped -match '^\[\]$')
+  if ($emptyOverlay -or $emptyFlowOverlay) {
+    Write-RecoverableText $Path ($Body + "`r`n")
     return
   }
-  [IO.File]::WriteAllText($Path, $stripped.TrimEnd() + "`r`n`r`n" + $Body + "`r`n")
+  Write-RecoverableText $Path ($stripped.TrimEnd() + "`r`n`r`n" + $Body + "`r`n")
 }
 
 function Ensure-PluginJunction {
@@ -221,9 +303,8 @@ function Ensure-WebPackageDep {
   $deps | Add-Member -NotePropertyName $pluginName -NotePropertyValue $linkSpec -Force
   # Windows PowerShell 5.1 Set-Content -Encoding UTF8 writes a BOM.
   # DSH reads the profile manifest with JSON.parse and rejects that.
-  $utf8 = New-Object System.Text.UTF8Encoding $false
   $text = $json | ConvertTo-Json -Depth 8
-  [IO.File]::WriteAllText($webPackage, ($text.TrimEnd() + "`n"), $utf8)
+  Write-RecoverableText $webPackage ($text.TrimEnd() + "`n")
 }
 
 function Get-BcIntegrationNoteName {
@@ -241,8 +322,7 @@ function Write-IntegrationNote([string]$Root) {
   }
   $text = [IO.File]::ReadAllText($template)
   $text = $text.Replace("{INSTALL_ROOT}", $installRoot).Replace("{PLUGIN_PATH}", $pluginPath)
-  $utf8 = New-Object System.Text.UTF8Encoding $false
-  [IO.File]::WriteAllText((Join-Path $installRoot (Get-BcIntegrationNoteName)), $text, $utf8)
+  Write-RecoverableText (Join-Path $installRoot (Get-BcIntegrationNoteName)) $text
 }
 
 if (-not (Test-Path -LiteralPath $indexFile -PathType Leaf)) {
@@ -266,9 +346,8 @@ function Remove-WebPackageDeps {
     }
   }
   if (-not $changed) { return $false }
-  $utf8 = New-Object System.Text.UTF8Encoding $false
   $text = $json | ConvertTo-Json -Depth 8
-  [IO.File]::WriteAllText($webPackage, ($text.TrimEnd() + "`n"), $utf8)
+  Write-RecoverableText $webPackage ($text.TrimEnd() + "`n")
   return $true
 }
 
@@ -312,7 +391,6 @@ if ($webExists) {
   }
   if ($pluginShipsBridge) {
     if (Test-PatchHasBridge ([IO.File]::ReadAllText($webPatch))) {
-      Backup-BridgePatch $webPatch
       [void](Remove-BridgeFromPatch $webPatch)
     }
   } else {
@@ -321,7 +399,6 @@ if ($webExists) {
   if (Test-Path -LiteralPath $homePatch -PathType Leaf) {
     $homeRaw = [IO.File]::ReadAllText($homePatch)
     if (Test-PatchHasBridge $homeRaw) {
-      Backup-BridgePatch $homePatch
       [void](Remove-BridgeFromPatch $homePatch)
     }
   }

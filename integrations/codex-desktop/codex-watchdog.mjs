@@ -1,10 +1,29 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import os from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
+import { recoverStaleCodexGuardianLock } from "./lifecycle.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const defaultHelper = path.join(here, "watch-host.mjs");
+
+export async function acquireCodexGuardianLease(home) {
+  const vendor = path.join(here, "vendor", "core", "index.js");
+  const workspace = path.join(here, "../../packages/core/dist/index.js");
+  const modulePath = fs.existsSync(vendor) ? vendor : workspace;
+  const { acquireFileLock } = await import(pathToFileURL(modulePath).href);
+  const lockPath = path.join(home, "guardian.lock");
+  const helperHome = path.dirname(path.dirname(home));
+  await recoverStaleCodexGuardianLock(lockPath, [
+    path.join(helperHome, "codex-plugin"),
+    path.join(helperHome, "runtime", "codex-plugin"),
+  ]);
+  return acquireFileLock(lockPath, {
+    purpose: "Codex guardian", staleMs: 10_000,
+  });
+}
 
 export function startCodexHelperWatchdog({
   node = process.execPath,
@@ -69,14 +88,21 @@ if (
   path.resolve(process.argv[1]).toLowerCase() ===
     fileURLToPath(import.meta.url).toLowerCase()
 ) {
-  const watchdog = startCodexHelperWatchdog({
-    log: (message) => process.stderr.write(`[codex-watchdog] ${message}\n`),
-  });
-  for (const signal of ["SIGINT", "SIGTERM"]) {
-    process.once(signal, () => {
-      watchdog.stop();
-      setTimeout(() => process.exit(0), 100);
+  try {
+    const root = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    const lease = await acquireCodexGuardianLease(path.join(root, "beautiCode", "hosts", "codex"));
+    const watchdog = startCodexHelperWatchdog({
+      log: (message) => process.stderr.write(`[codex-watchdog] ${message}\n`),
     });
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      process.once(signal, () => {
+        watchdog.stop();
+        void lease.release().finally(() => process.exit(0));
+      });
+    }
+    await new Promise(() => {});
+  } catch (error) {
+    if (/Another Codex guardian is running/.test(String(error?.message))) process.exit(0);
+    throw error;
   }
-  await new Promise(() => {});
 }

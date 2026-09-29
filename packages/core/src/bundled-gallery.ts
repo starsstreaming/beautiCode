@@ -5,7 +5,7 @@ import { effectsForPreset, type BackgroundEffects } from "./types.js";
 export const BUNDLED_GALLERY_THEME_ID = "builtin-gallery";
 export const BUNDLED_GALLERY_THEME_NAME = "画窗";
 
-const GALLERY_FILES = ["bg-canvas-4k.png", "bg-canvas.png"] as const;
+const GALLERY_FILES = ["bg-canvas-4k.webp", "bg-canvas-4k.png", "bg-canvas.png"] as const;
 
 export interface BundledThemeSpec {
   id: string;

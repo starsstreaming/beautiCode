@@ -21,6 +21,24 @@ export interface AcquireFileLockOptions {
   staleMs?: number;
 }
 
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // ESRCH is the only portable indication that the process is gone.  EPERM
+    // means the process exists but cannot be inspected (for example, because
+    // it belongs to another user), and an unknown error must be treated the
+    // same way to avoid deleting a live owner's lock.
+    return (
+      !error ||
+      typeof error !== "object" ||
+      (error as NodeJS.ErrnoException).code !== "ESRCH"
+    );
+  }
+}
+
 function parseOwner(raw: string): FileLockOwner | null {
   try {
     const value = JSON.parse(raw) as Partial<FileLockOwner>;
@@ -52,6 +70,21 @@ function parseOwnerPid(raw: string): number | null {
   } catch {
     return null;
   }
+}
+
+function isFreshOwner(
+  owner: FileLockOwner | null,
+  fileAgeMs: number,
+  staleMs: number,
+): boolean {
+  if (fileAgeMs <= staleMs) return true;
+  if (!owner) return false;
+
+  // `startedAt` is the lock-record creation time, not a portable process
+  // creation time. It still protects the startup window when a just-written
+  // lock is observed before its owner becomes visible to process.kill().
+  const startedAtMs = Date.parse(owner.startedAt);
+  return Number.isFinite(startedAtMs) && Date.now() - startedAtMs <= staleMs;
 }
 
 /**
@@ -148,7 +181,7 @@ export async function acquireFileLock(
         );
       }
     }
-    if (!existing && age <= staleMs) {
+    if (isFreshOwner(existing, age, staleMs)) {
       throw new Error(
         `Another ${opts.purpose ?? "operation"} may be starting; lock owner is not readable yet.`,
       );
