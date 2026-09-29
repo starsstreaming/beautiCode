@@ -27,6 +27,7 @@ import {
   codexInstallCandidates,
   pickAvailableCodexPort,
   ensureCodexCdp,
+  waitForAnyCodexCdp,
 } from "../dist/index.js";
 import { startMockCdp } from "./mock-cdp.js";
 import http from "node:http";
@@ -651,6 +652,25 @@ test("discoverCdpEndpoints finds mock loopback CDP", async () => {
   }
 });
 
+test("Codex target polling uses a 200ms fake-clock cadence after a 220ms probe", async () => {
+  let now = 0;
+  let calls = 0;
+  const sleeps = [];
+  const target = { port: 9335, browserUrl: "http://127.0.0.1:9335", pages: [], primaryPages: 1 };
+  const found = await waitForAnyCodexCdp([9335], 1_000, {
+    now: () => now,
+    discover: async () => {
+      calls += 1;
+      if (calls === 1) { now += 220; return []; }
+      return now >= 220 ? [target] : [];
+    },
+    sleep: async (ms) => { sleeps.push(ms); now += ms; },
+  });
+  assert.equal(found?.port, 9335);
+  assert.deepEqual(sleeps, [200]);
+  assert.equal(now, 420);
+});
+
 test("Codex auto-launch does not mistake WorkBuddy CDP for Codex", async () => {
   const mock = await startMockCdp({
     title: "WorkBuddy",
@@ -707,9 +727,19 @@ test("Codex CDP launch avoids a preferred port already used by WorkBuddy", async
   }
 });
 
-test("Windows Store Codex is launched directly so Chromium receives CDP flags", () => {
+test("Windows Store Codex uses package activation instead of its WindowsApps exe", () => {
   const executable =
     "C:\\Program Files\\WindowsApps\\OpenAI.Codex_1.0.0.0_x64__test\\app\\ChatGPT.exe";
+  const command = buildCodexLaunchCommand(9222, executable);
+  assert.equal(command.kind, "msix");
+  assert.equal(command.packageFullName, "OpenAI.Codex_1.0.0.0_x64__test");
+  assert.equal(command.executable, executable);
+  assert.equal(command.port, 9222);
+  assert.notEqual(command.file?.toLowerCase(), executable.toLowerCase());
+});
+
+test("unpackaged Codex retains direct loopback CDP flags", () => {
+  const executable = "C:\\Tools\\Codex\\ChatGPT.exe";
   const command = buildCodexLaunchCommand(9222, executable);
   assert.equal(command.file, executable);
   assert.deepEqual(command.args, [
@@ -742,8 +772,8 @@ test("fresh Codex without CDP is repaired immediately only inside the 10s window
   const blind = {
     pid: 101,
     name: "ChatGPT.exe",
-    executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_test\\app\\ChatGPT.exe",
-    commandLine: '"C:\\Program Files\\WindowsApps\\OpenAI.Codex_test\\app\\ChatGPT.exe"',
+    executablePath: "C:\\Tools\\Codex\\ChatGPT.exe",
+    commandLine: '"C:\\Tools\\Codex\\ChatGPT.exe"',
     port: null,
     createdAtMs: now - 9_999,
   };
@@ -788,6 +818,27 @@ test("Codex startup repair runs once per process generation without a CDP wait",
   assert.deepEqual(calls, [202]);
 });
 
+test("Codex does not recursively repair a blind controlled replacement", async () => {
+  let now = 20_000;
+  let calls = 0;
+  const controller = new CodexStartupRepairController({
+    now: () => now,
+    repair: async () => { calls++; return "launched"; },
+  });
+  const proc = { pid: 202, name: "ChatGPT.exe", executablePath: "C:\\Codex\\ChatGPT.exe",
+    commandLine: '"C:\\Codex\\ChatGPT.exe"', port: null, createdAtMs: now };
+  assert.equal(await controller.observe(proc), "repaired");
+  now += 100;
+  const replacement = { ...proc, pid: 203, createdAtMs: now };
+  controller.observeSnapshot([replacement]);
+  assert.equal(await controller.observe(replacement), "already-handled");
+  assert.equal(calls, 1);
+  controller.observeSnapshot([]);
+  now += 100;
+  assert.equal(await controller.observe({ ...proc, pid: 204, createdAtMs: now }), "repaired");
+  assert.equal(calls, 2);
+});
+
 test("Codex startup monitor detects new PIDs without privileged WMI events", () => {
   const source = buildWindowsCodexProcessStartScript(4321);
   assert.match(source, /Get-Process -Id 4321/);
@@ -795,6 +846,7 @@ test("Codex startup monitor detects new PIDs without privileged WMI events", () 
   assert.match(source, /Start-Sleep -Milliseconds 200/);
   assert.doesNotMatch(source, /Win32_ProcessStartTrace|Register-WmiEvent/);
   assert.match(source, /CreationDate/);
+  assert.doesNotMatch(source, /\$created=\[DateTimeOffset\]::UtcNow/);
   assert.ok(
     source.indexOf("$seen[$pidValue]=$true") >
       source.indexOf("if(-not $cmd){continue}"),
@@ -830,17 +882,37 @@ test("Codex AppX install locations are parsed without locale-dependent JSON", ()
   );
 });
 
-test("Codex installer starts the immediate watcher outside the host process tree", async () => {
+test("Codex installer starts through the owned task and retains a rollback launch", async () => {
   const source = await fs.readFile(
     new URL("../../../integrations/codex-desktop/cli.js", import.meta.url),
     "utf8",
   );
   assert.match(source, /Invoke-CimMethod/);
   assert.match(source, /Win32_Process/);
-  assert.match(source, /\$ErrorActionPreference\s*=\s*'Stop'/);
-  assert.match(source, /\$null\s+-eq\s+\$result/);
-  assert.match(source, /本次未能立即启动后台监视器/);
-  assert.match(source, /startIndependentWindows\(starter\)/);
+  assert.match(source, /installCodexWiring/);
+  assert.match(source, /createCodexTaskAdapter/);
+  assert.match(source, /resumeLegacyGuardian\(starter\)/);
+  assert.doesNotMatch(source, /writeRunKey\(/);
+});
+
+test("fresh MSIX Codex is eligible for one guarded startup repair", async () => {
+  const now = 50_000;
+  const packaged = {
+    pid: 102,
+    name: "ChatGPT.exe",
+    executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_test\\app\\ChatGPT.exe",
+    commandLine: '"C:\\Program Files\\WindowsApps\\OpenAI.Codex_test\\app\\ChatGPT.exe"',
+    port: null,
+    createdAtMs: now - 500,
+  };
+  let repairs = 0;
+  const controller = new CodexStartupRepairController({
+    now: () => now,
+    repair: async () => { repairs += 1; },
+  });
+  assert.equal(await controller.observe(packaged), "repaired");
+  assert.equal(await controller.observe(packaged), "already-handled");
+  assert.equal(repairs, 1);
 });
 
 test("BeautiSession applies image against mock CDP", async () => {
@@ -1031,6 +1103,8 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
     css,
     /aside\.app-shell-left-panel[\s\S]{0,200}background:\s*transparent !important;/,
   );
+  // New Codex scopes its 65%-opaque wash on a child, not the aside/nav.
+  assert.match(css, /#app-shell-sidebar \.sidebar-navigation\s*\{[^}]*background-color:\s*transparent !important;/);
   assert.match(css, /backdrop-filter:\s*none !important;/);
   assert.doesNotMatch(css, /backdrop-filter:\s*blur\(/);
   assert.match(css, /data-bc-dim-user/);
@@ -1064,6 +1138,10 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
   assert.match(runtime, /wantImageBlob/);
   assert.match(runtime, /videoEl\.style\.opacity = ""/);
   assert.match(runtime, /Promise\.resolve\(videoEl\.play\?\.\(\)\)/);
+  assert.match(runtime, /const imageReady =/);
+  assert.match(runtime, /const mediaReady = videoEnabled/);
+  assert.match(runtime, /waitForImageReady/);
+  assert.match(runtime, /Never make the host transparent while a replacement is still decoding/);
   assert.doesNotMatch(
     runtime,
     /Promise\.resolve\(\)\s*\.then\(apply\)\s*\.catch\([\s\S]{0,240}\)\s*;\s*return \{ installed: true/,

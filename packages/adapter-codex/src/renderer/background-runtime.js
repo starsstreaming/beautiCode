@@ -789,13 +789,23 @@
   };
 
   const setAttrs = () => {
-    const active = Boolean(
-      resolvedPoster ||
-        videoEnabled ||
-        remoteImageUrl ||
-        dataImageUrl ||
-        wantImageBlob,
-    );
+    const handoffReady =
+      videoEnabled &&
+      !videoFailed &&
+      !videoReady &&
+      Boolean(handedOffVideo?.ready && handedOffVideo.video?.parentElement);
+    // Never make the host transparent while a replacement is still decoding.
+    // A cold first launch has no previous frame to cover the gap, so native
+    // Codex chrome must remain visible until an image load or video frame is
+    // confirmed.
+    const imageReady =
+      !videoEnabled &&
+      !imageFailed &&
+      Boolean(imgEl?.isConnected && imgEl.complete && imgEl.naturalWidth > 0);
+    const mediaReady = videoEnabled
+      ? (!videoFailed && (videoReady || handoffReady))
+      : imageReady;
+    const active = mediaReady;
     if (!active) {
       root.removeAttribute("data-bc-active");
       root.removeAttribute("data-bc-media");
@@ -811,11 +821,6 @@
     root.setAttribute("data-bc-active", "true");
     // Keep media=video during handoff so CSS does not snap back to image-only
     // while the previous frame is still covering the stage.
-    const handoffReady =
-      videoEnabled &&
-      !videoFailed &&
-      !videoReady &&
-      Boolean(handedOffVideo?.ready && handedOffVideo.video?.parentElement);
     const media =
       videoEnabled && !videoFailed
         ? videoReady || handoffReady
@@ -1676,6 +1681,41 @@
     return img;
   };
 
+  const waitForImageReady = (img) =>
+    new Promise((resolve) => {
+      if (!img) {
+        resolve(false);
+        return;
+      }
+      try {
+        if (img.complete && img.naturalWidth > 0) {
+          resolve(true);
+          return;
+        }
+      } catch (_) {}
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        try {
+          img.removeEventListener("load", onLoad);
+          img.removeEventListener("error", onError);
+        } catch (_) {}
+        resolve(ok);
+      };
+      const onLoad = () => finish(true);
+      const onError = () => finish(false);
+      img.addEventListener("load", onLoad, { once: true });
+      img.addEventListener("error", onError, { once: true });
+      setTimeout(() => {
+        let ready = false;
+        try {
+          ready = img.complete && img.naturalWidth > 0;
+        } catch (_) {}
+        finish(Boolean(ready));
+      }, 2500);
+    });
+
   const apply = async () => {
     if (!remoteImageUrl && !dataImageUrl && !videoEnabled && !wantImageBlob) {
       teardownVideo();
@@ -1704,8 +1744,21 @@
     await resolvePoster();
     if (!isCurrent()) return;
 
-    ensurePosterImg(stage);
-    // Attributes first: handoffReady keeps video CSS path while pending.
+    const poster = ensurePosterImg(stage);
+    // For a real image, wait for a decoded resource before switching the host
+    // surface to transparent. Blob imports intentionally wait for their CDP
+    // file-input attach path instead.
+    if (!videoEnabled && !wantImageBlob) {
+      const loaded = await waitForImageReady(poster);
+      if (!isCurrent()) return;
+      if (!loaded) {
+        imageFailed = true;
+        setAttrs();
+        return;
+      }
+    }
+    // Video remains native/visible until startVideo reports its first frame;
+    // a ready handoff is the only permitted pending exception.
     setAttrs();
     startWorkingWatch();
 

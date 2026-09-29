@@ -1,0 +1,31 @@
+{
+  "name": "beauticode-desktop",
+  "version": "0.1.0-test.12",
+  "private": false,
+  "description": "beautiCode desktop host aggregate for DSH, Codex, WorkBuddy, Cursor, and Doubao.",
+  "type": "module",
+  "os": ["win32"],
+  "bin": {
+    "beauticode-desktop": "./bin/beauticode-desktop.mjs"
+  },
+  "exports": {
+    ".": {
+      "import": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "bin",
+    "src",
+    "runtime",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node ./bin/postinstall.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

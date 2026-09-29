@@ -27,6 +27,93 @@ export function defaultDataRoot(): string {
   return path.join(xdg, "beautiCode");
 }
 
+export type HostDataNamespace = "codex" | "dsh" | "workbuddy" | "cursor" | "doubao";
+
+/** Keep host state separate while retaining one user-visible beautiCode root. */
+export function hostDataRoot(
+  host: HostDataNamespace,
+  root: string = defaultDataRoot(),
+): string {
+  return path.join(path.resolve(root), "hosts", host);
+}
+
+const LEGACY_MIGRATION_ENTRIES = [
+  ACTIVE_DIR_NAME,
+  SAVED_DIR_NAME,
+  SNAPSHOTS_DIR_NAME,
+  RUNTIME_MEDIA_DIR_NAME,
+  "logs",
+] as const;
+
+async function copyLegacyTree(source: string, destination: string): Promise<void> {
+  const stat = await fs.lstat(source);
+  if (stat.isSymbolicLink()) {
+    throw new Error("Legacy beautiCode data must not contain symbolic links.");
+  }
+  if (stat.isDirectory()) {
+    await fs.mkdir(destination, { recursive: true });
+    for (const entry of await fs.readdir(source)) {
+      await copyLegacyTree(path.join(source, entry), path.join(destination, entry));
+    }
+    return;
+  }
+  if (!stat.isFile()) throw new Error("Legacy beautiCode data contains a non-regular entry.");
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(source, destination, fs.constants.COPYFILE_EXCL);
+}
+
+/**
+ * Copy legacy shared-root media into a host namespace exactly once. The old
+ * root is never moved, removed, or rewritten; an existing namespaced root is
+ * left untouched so a second process cannot overwrite user state.
+ */
+export async function migrateLegacyDataRoot(
+  legacyRoot: string,
+  hostRoot: string,
+): Promise<boolean> {
+  const sourceRoot = path.resolve(legacyRoot);
+  const destinationRoot = path.resolve(hostRoot);
+  if (sourceRoot === destinationRoot) return false;
+  let sourceStat;
+  try {
+    sourceStat = await fs.lstat(sourceRoot);
+  } catch (error) {
+    if ((error as { code?: string })?.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!sourceStat.isDirectory() || sourceStat.isSymbolicLink()) {
+    throw new Error("Legacy beautiCode data root must be a real directory.");
+  }
+  let destinationEntries: string[] = [];
+  try {
+    const destinationStat = await fs.lstat(destinationRoot);
+    if (!destinationStat.isDirectory() || destinationStat.isSymbolicLink()) {
+      throw new Error("Host beautiCode data root must be a real directory.");
+    }
+    destinationEntries = await fs.readdir(destinationRoot);
+  } catch (error) {
+    if ((error as { code?: string })?.code !== "ENOENT") throw error;
+  }
+  if (destinationEntries.length > 0) return false;
+
+  const available = [] as string[];
+  for (const entry of LEGACY_MIGRATION_ENTRIES) {
+    try {
+      const stat = await fs.lstat(path.join(sourceRoot, entry));
+      if (stat.isSymbolicLink()) throw new Error("Legacy beautiCode data must not contain symbolic links.");
+      available.push(entry);
+    } catch (error) {
+      if ((error as { code?: string })?.code !== "ENOENT") throw error;
+    }
+  }
+  if (available.length === 0) return false;
+  await fs.mkdir(destinationRoot, { recursive: true });
+  for (const entry of available) {
+    await copyLegacyTree(path.join(sourceRoot, entry), path.join(destinationRoot, entry));
+  }
+  return true;
+}
+
 export interface DataPaths {
   root: string;
   activeDir: string;

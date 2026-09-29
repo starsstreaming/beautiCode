@@ -6,6 +6,8 @@ import {
   MediaServerController,
   buildHostApplyPayload,
   defaultDataRoot,
+  hostDataRoot,
+  migrateLegacyDataRoot,
   isLocalBackgroundSource,
   resolveSessionBundledThemes,
   resolveBackgroundImagePath,
@@ -77,9 +79,11 @@ export class DshSession implements HostSession {
   private lastProgressWriteAt = 0;
   private lastProgressWriteSec = -1;
   private progressWriteInFlight = false;
+  private readonly legacyDataRoot: string | null;
 
   constructor(opts: DshSessionOptions = {}) {
-    this.dataRoot = opts.dataRoot ?? defaultDataRoot();
+    this.legacyDataRoot = opts.dataRoot == null ? defaultDataRoot() : null;
+    this.dataRoot = opts.dataRoot ?? hostDataRoot("dsh");
     this.verifyDeadlineMs = opts.verifyDeadlineMs ?? 30_000;
     this.pollMs = opts.pollMs ?? 2_000;
     this.honorTrayHandoff = opts.honorTrayHandoff !== false;
@@ -118,6 +122,9 @@ export class DshSession implements HostSession {
   async start(): Promise<{ port: number | null }> {
     if (this.closed) throw new Error("Session already stopped");
     if (this.releaseLock) throw new Error("Session already started");
+    if (this.legacyDataRoot) {
+      await migrateLegacyDataRoot(this.legacyDataRoot, this.dataRoot);
+    }
     await this.store.init();
     this.releaseLock = await acquireDshInjectorLock(this.dataRoot);
     try {

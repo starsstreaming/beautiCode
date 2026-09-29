@@ -2,9 +2,19 @@ import { SCHEMA_ID } from "./constants.js";
 
 export type BackgroundType = "image" | "video" | "clear";
 export type BackgroundTone = "dark" | "light" | "auto";
-export type HostKind = "codex" | "dsh" | "workbuddy";
+export type HostKind = "codex" | "dsh" | "workbuddy" | "cursor" | "doubao";
 export type MediaImportMode = "managed" | "local";
 export type AppliedSourceMode = MediaImportMode | "clear";
+
+/** Provenance for a theme installed from the trusted skin center. */
+export interface ThemeProvenance {
+  source: "hnnulwh";
+  sourceSkinId: string;
+  /** Explicit source version or normalized publication revision, not necessarily semver. */
+  sourceVersion: string;
+  /** False when the skin was removed from the online catalog. */
+  onlineAvailable?: boolean;
+}
 
 export interface ApplyTimings {
   totalMs: number;
@@ -71,6 +81,8 @@ export interface BackgroundMedia {
   source?: MediaSource;
   /** Optional live wallpaper (rain / overlay / water). Image themes only. */
   effects?: BackgroundEffects;
+  /** Optional trusted skin-center provenance; local imports do not set this. */
+  provenance?: ThemeProvenance;
 }
 
 export interface BackgroundManifest {
@@ -111,6 +123,7 @@ export type ApplyInput =
       /** local avoids browser/upload and active-media copies; managed is legacy behavior. */
       source?: MediaImportMode;
       effects?: BackgroundEffects;
+      provenance?: ThemeProvenance;
     }
   | {
       type: "video";
@@ -121,6 +134,7 @@ export type ApplyInput =
       source?: MediaImportMode;
       /** Optional initial seek used by transactional saved-theme restore. */
       startAt?: number;
+      provenance?: ThemeProvenance;
     }
   | { type: "clear" };
 

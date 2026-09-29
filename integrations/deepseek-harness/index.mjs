@@ -16,6 +16,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const REVISION_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_BODY_BYTES = 64 * 1024;
+const LOOPBACK_HOST_PATTERN = /^(?:127\.0\.0\.1|localhost)$/i;
+const LOOPBACK_IPV6 = "[::1]";
 
 async function readBridgeIdentity() {
   try {
@@ -39,7 +41,7 @@ function defaultTokenFile() {
     (process.env.LOCALAPPDATA
       ? path.join(process.env.LOCALAPPDATA, "beautiCode")
       : path.join(os.homedir(), ".beauticode"));
-  return path.join(base, "dsh-bridge.token");
+  return path.join(base, "hosts", "dsh", "dsh-bridge.token");
 }
 
 function sendJson(res, status, body) {
@@ -88,6 +90,7 @@ function readJson(req) {
 }
 
 async function authorized(req, tokenFile) {
+  if (!isAllowedLoopbackHost(req?.headers?.host)) return false;
   const match = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || "").trim());
   if (!match) return false;
   let expected;
@@ -105,9 +108,43 @@ async function authorized(req, tokenFile) {
   );
 }
 
-function isSameOrigin(req) {
+function parseLoopbackAuthority(value) {
+  if (typeof value !== "string" || value.trim() !== value || /[\s,]/.test(value)) return null;
+  const bracketed = /^\[([^\]]+)\](?::([0-9]{1,5}))?$/.exec(value);
+  const plain = /^(127\.0\.0\.1|localhost)(?::([0-9]{1,5}))?$/i.exec(value);
+  const hostname = bracketed ? `[${bracketed[1].toLowerCase()}]` : plain?.[1]?.toLowerCase();
+  if (hostname !== LOOPBACK_IPV6 && !LOOPBACK_HOST_PATTERN.test(hostname || "")) return null;
+  const rawPort = bracketed?.[2] ?? plain?.[2] ?? "80";
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return { hostname, port, key: `${hostname}:${port}` };
+}
+
+function parseLoopbackOrigin(value) {
+  if (typeof value !== "string" || value === "null") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      return null;
+    }
+    return parseLoopbackAuthority(url.host);
+  } catch {
+    return null;
+  }
+}
+
+function isAllowedLoopbackHost(value) {
+  return Boolean(parseLoopbackAuthority(value));
+}
+
+export function isSameOrigin(req) {
+  const host = parseLoopbackAuthority(req?.headers?.host);
+  if (!host) return false;
   const origin = req.headers.origin;
-  if (typeof origin === "string") return origin === `http://${req.headers.host}`;
+  if (typeof origin === "string") {
+    const parsedOrigin = parseLoopbackOrigin(origin);
+    return Boolean(parsedOrigin && parsedOrigin.key === host.key);
+  }
   return req.headers["sec-fetch-site"] === "same-origin";
 }
 
@@ -117,7 +154,9 @@ function validLoopbackMediaUrl(value) {
     const url = new URL(value);
     return (
       url.protocol === "http:" &&
-      ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname.toLowerCase()) &&
+      !url.username &&
+      !url.password &&
+      isAllowedLoopbackHost(url.host) &&
       url.searchParams.has("t")
     );
   } catch {
@@ -245,6 +284,10 @@ export function apply(ctx, config = {}) {
         kind: "exact",
         path: "/__beauticode/version",
         handler: async (req, res) => {
+          if (!isAllowedLoopbackHost(req.headers.host)) {
+            res.writeHead(403).end();
+            return;
+          }
           if (req.method !== "GET" && req.method !== "HEAD") {
             res.writeHead(405).end();
             return;
@@ -289,7 +332,8 @@ export function apply(ctx, config = {}) {
           }
           const source = await fs.readFile(filePath);
           res.writeHead(200, {
-            "content-type": "image/png",
+            // Keep the established route while serving the selected lossless asset.
+            "content-type": filePath.endsWith(".webp") ? "image/webp" : "image/png",
             "cache-control": "public, max-age=86400",
             "content-length": source.length,
           });

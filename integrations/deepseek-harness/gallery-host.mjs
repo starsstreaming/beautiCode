@@ -6,6 +6,12 @@ import { Readable } from "node:stream";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import {
+  SKIN_CENTER_ORIGIN,
+  downloadApprovedAsset,
+  getApprovedSkin,
+  listApprovedSkins,
+} from "@beauticode/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SKIN_ID = /^skin-[a-z0-9]{8,40}$/;
@@ -47,10 +53,7 @@ export async function readBundledSkinCenterUrl() {
 }
 
 export async function resolveConfiguredSkinCenterUrl() {
-  return (
-    normalizeSkinCenterUrl(process.env.BEAUTICODE_SKIN_CENTER) ??
-    (await readBundledSkinCenterUrl())
-  );
+  return SKIN_CENTER_ORIGIN;
 }
 
 export function skinUrl(center, id, part = "") {
@@ -191,49 +194,28 @@ export function createGalleryHandlers({ dataRoot, actions }) {
         res.writeHead(403).end();
         return;
       }
-      const center = await resolveConfiguredSkinCenterUrl();
-      if (!center) {
-        sendJson(res, 200, {
-          ok: false,
-          error: "尚未配置皮肤中心地址。",
-          skins: [],
-        });
-        return;
-      }
-      const incoming = new URL(req.url || "/", "http://127.0.0.1");
-      // Resolve relative to the center's own path so a base like
-      // https://host/beauticode keeps its prefix (skinUrl already does).
-      const target = new URL("api/catalog", `${center}/`);
-      target.search = incoming.search;
-      let response;
       try {
-        response = await fetch(target, {
-          headers: { accept: "application/json" },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        const incoming = new URL(req.url || "/", "http://127.0.0.1");
+        const type = incoming.searchParams.get("type");
+        const skins = await listApprovedSkins({
+          query: {
+            ...(incoming.searchParams.get("q") ? { q: incoming.searchParams.get("q") } : {}),
+            ...(type === "image" || type === "video" ? { type } : {}),
+          },
+        });
+        sendJson(res, 200, {
+          ok: true,
+          skins,
+          nextCursor: null,
+          url: SKIN_CENTER_ORIGIN,
         });
       } catch (error) {
         sendJson(res, 502, {
           ok: false,
-          error: "无法连接皮肤中心，请稍后重试。",
+          error: error instanceof Error ? error.message : "无法连接皮肤中心，请稍后重试。",
           skins: [],
         });
-        return;
       }
-      const body = await response.json().catch(() => null);
-      if (!response.ok || !body || body.ok === false) {
-        sendJson(res, 422, {
-          ok: false,
-          error: body?.error || "无法读取皮肤目录。",
-          skins: [],
-        });
-        return;
-      }
-      sendJson(res, 200, {
-        ok: true,
-        skins: Array.isArray(body.skins) ? body.skins : [],
-        nextCursor: body.nextCursor ?? null,
-        url: center,
-      });
     },
 
     async install(req, res, sendJson, isSameOrigin, readJson) {
@@ -251,12 +233,6 @@ export function createGalleryHandlers({ dataRoot, actions }) {
         sendJson(res, 400, { ok: false, error: "皮肤 ID 无效。" });
         return;
       }
-      const center = await resolveConfiguredSkinCenterUrl();
-      if (!center) {
-        sendJson(res, 422, { ok: false, error: "尚未配置皮肤中心地址。" });
-        return;
-      }
-      const origin = new URL(center).origin;
       res.writeHead(200, {
         "content-type": "application/x-ndjson; charset=utf-8",
         "cache-control": "no-store",
@@ -273,41 +249,24 @@ export function createGalleryHandlers({ dataRoot, actions }) {
       res.once("close", onClose);
       try {
         write({ phase: "fetch" });
-        const metaRes = await fetch(skinUrl(center, id), {
-          headers: { accept: "application/json" },
-          signal: AbortSignal.any([clientAbort.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
-        });
-        const meta = await metaRes.json().catch(() => null);
-        const skin = meta?.skin;
-        if (!metaRes.ok || !skin || skin.status && skin.status !== "approved") {
-          throw new Error("Skin is not available for download.");
-        }
+        const skin = await getApprovedSkin(id);
         await fsp.mkdir(tmpDir, { recursive: true });
-        const imageUrl = skinUrl(center, id, "image");
-        const imageTmp = path.join(tmpDir, "image.download");
         write({ phase: "download", part: "image" });
-        const imageDownload = await downloadToFile(imageUrl, imageTmp, {
-          maxBytes: MAX_IMAGE_BYTES,
-          expectedOrigin: origin,
+        const imageDownload = await downloadApprovedAsset(skin, "image", {
+          directory: tmpDir,
           signal: clientAbort.signal,
           onProgress: (done, total) => write({ phase: "download", part: "image", done, total }),
         });
-        const imagePath = path.join(
-          tmpDir,
-          `image${extensionForContentType(imageDownload.contentType) ?? extensionOf(imageUrl, ".png")}`,
-        );
-        await fsp.rename(imageTmp, imagePath);
+        const imagePath = imageDownload.filePath;
         let videoPath;
         if (skin.type === "video") {
-          const videoUrl = skinUrl(center, id, "video");
-          videoPath = path.join(tmpDir, "background.mp4");
           write({ phase: "download", part: "video" });
-          await downloadToFile(videoUrl, videoPath, {
-            maxBytes: MAX_VIDEO_BYTES,
-            expectedOrigin: origin,
+          const videoDownload = await downloadApprovedAsset(skin, "video", {
+            directory: tmpDir,
             signal: clientAbort.signal,
             onProgress: (done, total) => write({ phase: "download", part: "video", done, total }),
           });
+          videoPath = videoDownload.filePath;
         }
         // Skin-center media is downloaded into the store, so it is a managed
         // import. importTheme applies-and-saves atomically; the media is copied
@@ -323,11 +282,12 @@ export function createGalleryHandlers({ dataRoot, actions }) {
           ...(videoPath ? { videoPath } : {}),
           ...(skin.effects ? { effects: skin.effects } : {}),
           source: "managed",
+          provenance: {
+            source: skin.source,
+            sourceSkinId: skin.sourceSkinId,
+            sourceVersion: skin.sourceVersion,
+          },
         });
-        fetch(skinUrl(center, id, "download"), {
-          method: "POST",
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        }).catch(() => {});
         write({
           ok: true,
           phase: "done",

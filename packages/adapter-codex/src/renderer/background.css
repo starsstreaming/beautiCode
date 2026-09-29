@@ -167,6 +167,14 @@ html[data-bc-active="true"] aside[class*="_LeftPanel_"] nav {
   background: transparent !important;
 }
 
+/* Codex 26.924 paints the sidebar wash on this inner element rather than
+   the aside or nav. Keep the wallpaper at the same brightness on both sides. */
+html[data-bc-active="true"] #app-shell-sidebar .sidebar-navigation {
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
 /* ---- Main surface ---- */
 html[data-bc-active="true"] body > #root main {
   position: relative !important;

@@ -22,7 +22,7 @@
 
 ## 它是什么？
 
-beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex**。
+beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness 和 Codex**，并提供可选的 Cursor、豆包 Windows 适配。
 
 它不包含、不安装、也不启动 DSH。请先自行安装 DeepSeek Harness 并运行 `dsh web`。插件装好后，打开 DSH 的「设置」，左侧导航里会多出一项「背景」，不必再开托盘。Codex Desktop 仍走 beautiCode 托盘。可以把电脑里的：
 
@@ -83,6 +83,8 @@ npx @deepseek-ai/dsh web
 ```
 
 安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm。安装结束时会自动写入 DSH 插件。若你改过安装目录，以安装文件夹里的 `集成说明.txt` 为准。
+
+Cursor 和豆包适配默认不启用，需要分别安装后台守护。源码安装命令、卸载方式及兼容版本见 [Cursor 与豆包桌面背景适配](./docs/host-adapter-cursor-doubao.md)。
 
 自己启动 `dsh web` 后，「设置」里的「背景」即可使用。Codex Desktop 仍要开 beautiCode 托盘：选 **Codex Desktop** 会按需拉起 Codex；选 **DeepSeek Harness** 只连接你已经启动的 DSH 网页，不会替你启动 DSH。
 

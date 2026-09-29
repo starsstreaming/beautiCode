@@ -31,6 +31,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
+import { shouldApplyDefaultWallpaper } from './wb-startup-media.mjs';
+import { createWorkBuddyLogger } from './wb-runner-log.mjs';
+import { compareThemeNameStages } from './wb-theme-name-diagnostic.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -46,21 +49,27 @@ async function loadAdapter() {
   throw new Error('无法导入 @beauticode/adapter-workbuddy —— 先跑 tsc 编译该包');
 }
 const A = await loadAdapter();
+const core = await import('../packages/core/dist/index.js');
+const repairChain = new core.StartupRepairChain();
 const {
   BACKGROUND_BAR_INJECTION, BACKGROUND_BAR_CLEANUP, BACKGROUND_BAR_STYLE_ID,
   buildContractCss, readTheme,
   TOKEN_SCAN_EXPRESSION, buildTokenOverlayCss, TOKEN_OVERLAY_STYLE_ID,
   HARDCODED_SURFACE_SCAN_EXPRESSION, buildHardcodedSurfaceCss,
   buildStyleKeeperExpression,
-  pickWorkBuddyTarget, assertLoopbackDebuggerUrl, safeTargetLabel,
+  pickWorkBuddyTarget, assertLoopbackDebuggerUrl,
   ensureWorkBuddyCdp,
+  listWorkBuddyProcesses, selectWorkBuddyReconnectDelay,
+  isInitialPersistState,
 } = A;
 for (const [k, v] of Object.entries({
   BACKGROUND_BAR_INJECTION, BACKGROUND_BAR_CLEANUP, buildContractCss, readTheme,
   TOKEN_SCAN_EXPRESSION, buildTokenOverlayCss, TOKEN_OVERLAY_STYLE_ID,
   HARDCODED_SURFACE_SCAN_EXPRESSION, buildHardcodedSurfaceCss, buildStyleKeeperExpression,
-  pickWorkBuddyTarget, assertLoopbackDebuggerUrl, safeTargetLabel,
+  pickWorkBuddyTarget, assertLoopbackDebuggerUrl,
   ensureWorkBuddyCdp,
+  listWorkBuddyProcesses, selectWorkBuddyReconnectDelay,
+  isInitialPersistState,
 })) {
   if (typeof v !== 'string' && typeof v !== 'function') {
     process.stderr.write(`adapter 导出形状不对：${k}\n`); process.exit(2);
@@ -100,16 +109,21 @@ let PORT = args.port || parseInt(process.env.WORKBUDDY_REMOTE_DEBUGGING_PORT || 
 // 默认壁纸：舞台没有媒体时自动铺上（否则透明面透出的是 #101114 纯色，
 // 看起来就像"不透明没生效"——实测踩过）。--wallpaper 可换。
 const DEFAULT_WALLPAPER = args.wallpaper
-  || path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.png');
+  || (fs.existsSync(path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.webp'))
+    ? path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.webp')
+    : path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.png'));
 
-function ts() { return new Date().toISOString().slice(11, 23); }
-const log = {
-  info: (...m) => process.stderr.write(`[${ts()}] [info] ` + m.join(' ') + '\n'),
-  warn: (...m) => process.stderr.write(`[${ts()}] [warn] ` + m.join(' ') + '\n'),
-  error: (...m) => process.stderr.write(`[${ts()}] [error] ` + m.join(' ') + '\n'),
-  debug: (...m) => { if (args.verbose) process.stderr.write(`[${ts()}] [debug] ` + m.join(' ') + '\n'); },
-};
-const fp = (u) => safeTargetLabel(u);
+const log = createWorkBuddyLogger({
+  file: path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'logs', 'wb-runner.log'),
+  debug: args.verbose,
+});
+log.info('runner-started');
+const themeNameKey = crypto.randomBytes(32);
+let pendingNameDiagnostic = null;
+function safeErrorCode(error) {
+  const code = String(error?.code || 'error');
+  return /^[A-Za-z_0-9-]{1,32}$/.test(code) ? code : 'error';
+}
 
 // ── CDP ───────────────────────────────────────────────────────────────
 const MAX_CDP_JSON_BYTES = 1_000_000;
@@ -132,32 +146,44 @@ async function fetchTargets(port) {
   if (list.length > 500) throw new Error('/json/list exceeded target count safety cap');
   return list;
 }
-function openWs(wsUrl) {
+function openWs(wsUrl, openTimeoutMs = 0) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl);
     let id = 0;
     const pending = new Map();
     const handlers = [];
-    const send = (method, params = {}) => new Promise((res, rej) => {
-      const i = ++id; pending.set(i, { res, rej });
+    const send = (method, params = {}, timeoutMs = 0) => new Promise((res, rej) => {
+      const i = ++id;
+      const timer = timeoutMs ? setTimeout(() => { pending.delete(i); rej(new Error('CDP command timed out')); }, timeoutMs) : null;
+      pending.set(i, { res, rej, timer });
       ws.send(JSON.stringify({ id: i, method, params }));
     });
     ws.addEventListener('message', (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.id && pending.has(m.id)) {
         const p = pending.get(m.id); pending.delete(m.id);
+        if (p.timer) clearTimeout(p.timer);
         m.error ? p.rej(new Error(`${m.error.code || ''} ${m.error.message || ''}`.trim())) : p.res(m.result);
         return;
       }
       if (m.method) for (const cb of handlers) { try { cb(m); } catch {} }
     });
     const onEvent = (cb) => handlers.push(cb);
-    ws.addEventListener('open', () => resolve({ ws, send, onEvent, close: () => ws.close() }));
-    ws.addEventListener('error', (e) => reject(new Error(`WS error: ${e.message || e}`)));
+    let openTimer = null;
+    if (openTimeoutMs > 0) openTimer = setTimeout(() => { ws.close(); reject(new Error('CDP WebSocket open timed out')); }, openTimeoutMs);
+    ws.addEventListener('open', () => {
+      if (openTimer) clearTimeout(openTimer);
+      resolve({ ws, send, onEvent, close: () => ws.close() });
+    }, { once: true });
+    ws.addEventListener('error', (e) => { if (openTimer) clearTimeout(openTimer); reject(new Error(`WS error: ${e.message || e}`)); }, { once: true });
+    ws.addEventListener('close', () => {
+      for (const p of pending.values()) { if (p.timer) clearTimeout(p.timer); p.rej(new Error('CDP WebSocket disconnected')); }
+      pending.clear();
+    });
   });
 }
-async function evaluate(c, expression) {
-  const r = await c.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+async function evaluate(c, expression, timeoutMs = 0) {
+  const r = await c.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, timeoutMs);
   if (r.exceptionDetails) throw new Error('page exception: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text || '').slice(0, 200));
   return r.result?.value;
 }
@@ -174,51 +200,82 @@ el.textContent=css;return 'style:'+id;})()`;
 // 浏览器里点卡片 → /apply → 经 CDP 应用到 WorkBuddy 面板（__bcApplyBackgroundPath）。
 const GALLERY_PORT_BASE = 9337;
 const GALLERY_TOKEN = crypto.randomBytes(16).toString('hex');
-const SKIN_ID = /^skin-[a-f0-9]{8,40}$/i;
-const CENTER_URL = (() => {
-  try {
-    const raw = JSON.parse(fs.readFileSync(path.join(REPO, 'integrations', 'deepseek-harness', 'skin-center.json'), 'utf8')).url;
-    const parsed = new URL(String(raw || ''));
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    return parsed.href;
-  } catch { return null; }
-})();
+const SKIN_ID = core.SKIN_ID_PATTERN;
+const CENTER_URL = core.SKIN_CENTER_ORIGIN;
 const DATA_DIR = process.platform === 'win32'
   ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'beauticode')
   : path.join(os.homedir(), 'Library', 'Application Support', 'beauticode');
-const SKINS_DIR = path.join(DATA_DIR, 'skins');
+const ENV_KEY = 'WORKBUDDY_REMOTE_DEBUGGING_PORT';
+const PORT_FILE = path.join(DATA_DIR, 'workbuddy-port.json');
+const RUNNER_PID_FILE = path.join(DATA_DIR, 'wb-runner.pid');
+function readConfiguredPort() {
+  try {
+    const value = JSON.parse(fs.readFileSync(PORT_FILE, 'utf8')).port;
+    const port = Number(value);
+    return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+  } catch { return null; }
+}
+let lastPersistedPort = readConfiguredPort();
+function persistPortSelection(port) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return;
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const next = JSON.stringify({ port, updatedAt: new Date().toISOString() }) + '\n';
+  try { fs.writeFileSync(PORT_FILE, next, { encoding: 'utf8', mode: 0o600 }); } catch { /* best effort */ }
+  if (process.platform === 'win32' && lastPersistedPort !== port) {
+    lastPersistedPort = port;
+    execFile('setx', [ENV_KEY, String(port)], { windowsHide: true }, () => {});
+  }
+}
+if (!args.port) {
+  const configured = readConfiguredPort();
+  if (configured) PORT = configured;
+}
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const GALLERY_MEDIA = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.gif': 'image/gif', '.bmp': 'image/bmp', '.avif': 'image/avif',
   '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/mp4',
 };
+const VIDEO = new Set(['.mp4', '.mov']);
 let galleryConn = null;
 let galleryPort = null;
 let galleryServer = null;
 let galleryApplyFn = null;
 const skinRegistry = new Map();
 
-function buildCatalog() {
+function mediaIdentity(info) {
+  return `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+}
+
+function assertStableMedia(file, expectedIdentity) {
+  const logical = path.resolve(String(file || ''));
+  const logicalInfo = fs.lstatSync(logical);
+  if (logicalInfo.isSymbolicLink()) throw new Error('媒体路径不能是符号链接。');
+  const resolved = fs.realpathSync.native(logical);
+  const info = fs.lstatSync(resolved);
+  if (info.isSymbolicLink() || !info.isFile()) throw new Error('媒体路径不是普通文件。');
+  if (expectedIdentity && mediaIdentity(info) !== expectedIdentity) {
+    throw new Error('媒体文件在应用前发生变化。');
+  }
+  return { path: resolved, identity: mediaIdentity(info) };
+}
+
+async function validateLocalMedia(file) {
+  const logical = path.resolve(String(file || ''));
+  const ext = path.extname(logical).toLowerCase();
+  if (!GALLERY_MEDIA[ext]) throw new Error('不支持的媒体格式。');
+  const first = assertStableMedia(logical);
+  const checked = VIDEO.has(ext)
+    ? await core.validateVideoFile(first.path, { mode: 'fast' })
+    : await core.validateImageFile(first.path, { mode: 'fast' });
+  const stable = assertStableMedia(checked.filePath, first.identity);
+  return { path: stable.path, identity: stable.identity };
+}
+
+async function buildCatalog() {
   skinRegistry.clear();
-  const skins = [];
-  const add = (p, name) => {
-    const ext = path.extname(p).toLowerCase();
-    if (!GALLERY_MEDIA[ext] || !fs.existsSync(p)) return;
-    const id = 'skin-' + crypto.createHash('sha1').update(p).digest('hex').slice(0, 12);
-    skinRegistry.set(id, p);
-    skins.push({ id, name, type: ['.mp4', '.mov', '.webm', '.m4v'].includes(ext) ? 'video' : 'image' });
-  };
-  const themeDir = path.join(REPO, 'assets', 'themes', 'internal-beyond');
-  const bundled = {
-    'bg-canvas-4k.png': '内置 · 画布 4K', 'bg-canvas.png': '内置 · 画布',
-    'bg-infernal.jpg': '内置 · 炼狱', 'bg-internal.jpg': '内置 · 内在',
-  };
-  try { for (const f of fs.readdirSync(themeDir)) if (bundled[f]) add(path.join(themeDir, f), bundled[f]); } catch { /* 素材目录缺失 */ }
-  try {
-    fs.mkdirSync(SKINS_DIR, { recursive: true });
-    for (const f of fs.readdirSync(SKINS_DIR)) add(path.join(SKINS_DIR, f), f.replace(/\.[^.]+$/, ''));
-  } catch { /* 用户目录不可读 */ }
+  const skins = await core.listApprovedSkins();
+  for (const skin of skins) skinRegistry.set(skin.id, skin);
   return skins;
 }
 
@@ -314,27 +371,30 @@ function startGalleryServer(applyFn) {
     if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
     res.setHeader('content-type', 'application/json; charset=utf-8');
 
+    const tokenOk = requestToken(req, u, null) === GALLERY_TOKEN;
+    res.setHeader('referrer-policy', 'no-referrer');
+    res.setHeader('cache-control', 'no-store');
+    if (!tokenOk) { deny(res, 403, 'bad token'); return; }
+
     if (u.pathname === '/beauticode/gallery' || u.pathname === '/') {
       res.setHeader('content-type', 'text/html; charset=utf-8');
       res.end(galleryPage());
       return;
     }
 
-    const tokenOk = requestToken(req, u, null) === GALLERY_TOKEN;
-
     if (u.pathname === '/api/catalog') {
-      if (!tokenOk) { deny(res, 403, 'bad token'); return; }
-      res.end(JSON.stringify({ skins: buildCatalog() }));
+      buildCatalog().then((skins) => res.end(JSON.stringify({ skins, url: CENTER_URL }))).catch((error) => deny(res, 502, error.message));
       return;
     }
     if (u.pathname === '/media') {
-      if (!tokenOk) { deny(res, 403, 'bad token'); return; }
       const id = u.searchParams.get('id') || '';
-      if (!SKIN_ID.test(id)) { deny(res, 400, 'bad id'); return; }
-      const file = skinRegistry.get(id);
-      if (!file || !fs.existsSync(file)) { deny(res, 404, 'unknown id'); return; }
-      res.setHeader('content-type', GALLERY_MEDIA[path.extname(file).toLowerCase()] || 'application/octet-stream');
-      fs.createReadStream(file).pipe(res);
+      if (!core.isSafeSkinId(id)) { deny(res, 400, 'bad id'); return; }
+      Promise.resolve(skinRegistry.get(id) || core.getApprovedSkin(id)).then(async (skin) => {
+        skinRegistry.set(id, skin);
+        const download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(DATA_DIR, 'tmp', 'gallery') });
+        res.setHeader('content-type', download.contentType || 'application/octet-stream');
+        fs.createReadStream(download.filePath).on('close', () => fs.rmSync(download.tempDir, { recursive: true, force: true })).pipe(res);
+      }).catch((error) => deny(res, 502, error.message));
       return;
     }
     if (u.pathname === '/apply') {
@@ -346,18 +406,56 @@ function startGalleryServer(applyFn) {
         if (n > 4096) { req.destroy(); return; }
         chunks.push(c);
       });
-      req.on('end', () => {
+      req.on('end', async () => {
         let body = {};
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { body = {}; }
         if (requestToken(req, u, body) !== GALLERY_TOKEN) { deny(res, 403, 'bad token'); return; }
         const id = String(body.id || '');
-        if (!SKIN_ID.test(id)) { deny(res, 400, 'bad id'); return; }
-        const file = skinRegistry.get(id);
-        if (!file) { deny(res, 404, 'unknown id'); return; }
+        if (!core.isSafeSkinId(id)) { deny(res, 400, 'bad id'); return; }
+        const skin = skinRegistry.get(id) || await core.getApprovedSkin(id).catch((error) => { deny(res, 502, error.message); return null; });
+        if (!skin) return;
         if (!galleryConn || !galleryApplyFn) { deny(res, 503, '守护未连接 WorkBuddy'); return; }
-        galleryApplyFn(file)
-          .then(() => { log.info(`皮肤商城：已应用 ${path.basename(file)}`); res.end(JSON.stringify({ ok: true, name: path.basename(file) })); })
-          .catch((e) => { deny(res, 500, e.message); });
+        let download;
+        try {
+          download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(DATA_DIR, 'tmp', 'gallery') });
+        } catch (error) {
+          deny(res, 502, error instanceof Error ? error.message : '皮肤资源下载失败');
+          return;
+        }
+        const persistentDir = path.join(DATA_DIR, 'themes');
+        fs.mkdirSync(persistentDir, { recursive: true });
+        const persistent = path.join(persistentDir, `${skin.sourceSkinId}${path.extname(download.filePath)}`);
+        const backup = `${persistent}.previous-${process.pid}-${Date.now()}`;
+        let hadPrevious = false;
+        let committed = false;
+        try {
+          if (fs.existsSync(persistent)) { fs.renameSync(persistent, backup); hadPrevious = true; }
+          fs.renameSync(download.filePath, persistent);
+          await galleryApplyFn({
+            file: persistent,
+            name: skin.name,
+            provenance: { source: skin.source, sourceSkinId: skin.sourceSkinId, sourceVersion: skin.sourceVersion },
+          });
+          // The catalog value is held only in memory until the next state write.
+          // Never log a theme name or a stable unkeyed hash.
+          const renderer = await evaluate(galleryConn, `(() => {
+            const raw = window.__bcPersistGet && window.__bcPersistGet();
+            if (!raw) return null;
+            const state = JSON.parse(raw);
+            return state.themes?.find(t => t.id === state.activeThemeId)?.name ?? null;
+          })()`).catch(() => null);
+          pendingNameDiagnostic = { catalog: skin.name, renderer, file: persistent, at: Date.now() };
+          committed = true;
+          log.info('skin-center-applied');
+          res.end(JSON.stringify({ ok: true, name: skin.name }));
+        } catch (error) {
+          try { fs.rmSync(persistent, { force: true }); } catch {}
+          if (hadPrevious) { try { fs.renameSync(backup, persistent); } catch {} }
+          deny(res, 500, error.message);
+        } finally {
+          fs.rmSync(download.tempDir, { recursive: true, force: true });
+          if (committed || !hadPrevious) fs.rmSync(backup, { force: true });
+        }
       });
       return;
     }
@@ -376,7 +474,7 @@ function startGalleryServer(applyFn) {
       const server = createServer(galleryHandler);
       server.once('error', (e) => {
         if (e.code === 'EADDRINUSE') { log.info(`皮肤商城端口 ${port} 被占，换下一个…`); tryNext(); }
-        else { log.warn('皮肤商城服务错误：', e.message); resolve(null); }
+        else { log.warn('skin-center-service-error', safeErrorCode(e)); resolve(null); }
       });
       server.listen(port, '127.0.0.1', () => {
         galleryServer = server;
@@ -397,19 +495,45 @@ const ALPHA_VARIFY = (css) =>
   css.split(' 82%, transparent)').join(' var(--bc-surface-alpha-pct, 82%), transparent)');
 
 function isBlankPersistState(live) {
-  return !live || (
-    !live.wallpaper && !live.cleared && !live.blob &&
-    live.dim == null && live.blur == null && live.alpha == null &&
-    (!Array.isArray(live.themes) || live.themes.length === 0) &&
-    !live.activeThemeId
-  );
+  // Keep the explicit legacy-shape check here: an array containing saved
+  // themes is never considered hydration-blank, even if other fields are
+  // still at their renderer defaults.
+  const themesEmpty = !live || !Array.isArray(live.themes) || live.themes.length === 0;
+  return themesEmpty && isInitialPersistState(live);
 }
 
-async function applyAll(c) {
+function galleryConfigExpression() {
+  return `window.__bcUpdateGalleryConfig && window.__bcUpdateGalleryConfig(${JSON.stringify({
+    port: galleryPort,
+    token: GALLERY_TOKEN,
+    centerUrl: CENTER_URL,
+  })})`;
+}
+
+async function injectBackgroundUi(c) {
+  const ui = await evaluate(c, BACKGROUND_BAR_INJECTION
+    .replace(/__BC_GALLERY_PORT__/g, String(galleryPort || GALLERY_PORT_BASE))
+    .replace(/__BC_GALLERY_TOKEN__/g, JSON.stringify(GALLERY_TOKEN))
+    .replace(/__BC_CENTER_URL__/g, JSON.stringify(CENTER_URL || '')));
+  log.info('UI ✓（' + JSON.stringify(ui) + '）');
+  return ui;
+}
+
+async function updateGalleryConfig(c) {
+  if (!galleryPort) return false;
+  try {
+    return await evaluate(c, galleryConfigExpression());
+  } catch (error) {
+    log.debug('skin-center-config-error', safeErrorCode(error));
+    return false;
+  }
+}
+
+async function applyAll(c, options = {}) {
   // 1) 主题（fail-closed：读不出就不上 CSS，只上 UI 并说明原因）
   const className = await evaluate(c, 'document.documentElement.className');
   const theme = readTheme(String(className || ''));
-  if (!theme) log.warn(`读不出主题（class="${String(className).slice(0, 60)}"）—— 本轮只注入 UI，不上透明契约`);
+  if (!theme) log.warn('theme-unrecognized; UI-only');
 
   // 2) 契约 CSS（浅深两套同时烘）
   if (theme) {
@@ -467,17 +591,26 @@ async function applyAll(c) {
   //    停掉我方的，并叫停页面里已装的实例。
   await evaluate(c, "window.__bcKeepStylesLast && window.__bcKeepStylesLast.stop && window.__bcKeepStylesLast.stop(); 'keeper-stopped'");
 
-  // 6) UI（侧栏条目 + 面板 + 舞台；皮肤中心浮窗的端口/中心URL占位符在此注入）
-  const ui = await evaluate(c, BACKGROUND_BAR_INJECTION
-    .replace(/__BC_GALLERY_PORT__/g, String(galleryPort || 9337))
-    .replace(/__BC_GALLERY_TOKEN__/g, JSON.stringify(GALLERY_TOKEN))
-    .replace(/__BC_CENTER_URL__/g, JSON.stringify(CENTER_URL || '')));
-  log.info('UI ✓（' + JSON.stringify(ui) + '）');
+  // 6) UI is normally mounted before this full scan (see session()). Keep a
+  // self-healing fallback for target remounts and older callers.
+  const ui = options.injectUi === false ? 'already-mounted' : await injectBackgroundUi(c);
 
-  // 7) 默认壁纸：舞台没有媒体（既无背景图也无视频）时铺上内置壁纸。
+  let diskBeforeRestore = null;
+  try { diskBeforeRestore = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* no valid archive */ }
+  let liveBeforeRestore = null;
+  try {
+    const raw = await evaluate(c, 'window.__bcPersistGet ? window.__bcPersistGet() : null');
+    liveBeforeRestore = raw ? JSON.parse(raw) : null;
+  } catch { /* treat unreadable live state as blank */ }
+
+  // 7) 默认壁纸：仅在没有显式清除、没有保存媒体且舞台没有媒体时铺上。
   //    用户自己导入的 blob:/file:/用户路径不受影响；「清除背景」后也不会被顶回
   //    （本步只在 applyAll 时跑一次，清除后 entry 仍在、不触发重放）。
-  if (fs.existsSync(DEFAULT_WALLPAPER)) {
+  if (fs.existsSync(DEFAULT_WALLPAPER) && shouldApplyDefaultWallpaper({
+    cleared: Boolean(diskBeforeRestore?.cleared || liveBeforeRestore?.cleared),
+    wallpaper: diskBeforeRestore?.wallpaper || liveBeforeRestore?.wallpaper || null,
+    hasMedia: false,
+  })) {
     const wp = await evaluate(c, `(function(){
 var wp = ${JSON.stringify(DEFAULT_WALLPAPER)};
 var url = 'file://' + encodeURI(wp.charAt(0) === '/' ? wp : '/' + wp).replace(/#/g, '%23');
@@ -504,17 +637,12 @@ return 'default-applied';
 
   // 8) 记忆恢复：有 state.json 就把壁纸 + 三滑杆恢复到上次退出时的样子
   //    （state.wallpaper=null 且 cleared=true = 用户上次主动清除 → 连默认壁纸也撤掉）
-  let liveBeforeRestore = null;
-  try {
-    const raw = await evaluate(c, 'window.__bcPersistGet ? window.__bcPersistGet() : null');
-    liveBeforeRestore = raw ? JSON.parse(raw) : null;
-  } catch { /* treat unreadable live state as blank */ }
-  if (fs.existsSync(STATE_FILE) && isBlankPersistState(liveBeforeRestore)) {
+  if (diskBeforeRestore && isBlankPersistState(liveBeforeRestore)) {
     try {
-      const st = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+      const st = diskBeforeRestore;
       await evaluate(c, 'window.__bcRestoreState && window.__bcRestoreState(' + JSON.stringify(st) + ')');
-      log.info(`记忆恢复 ✓（壁纸=${st.wallpaper ? path.basename(st.wallpaper) : '已清除'}，阴影=${st.dim}% 磨砂=${st.blur}% 透明度=${st.alpha}%）`);
-    } catch (e) { log.warn('记忆恢复失败：', e.message); }
+      log.info(st.cleared ? 'state-restored-cleared' : 'state-restored-media');
+    } catch (e) { log.warn('state-restore-error', safeErrorCode(e)); }
   }
   return { theme, tokens: (scan.rows || []).length, ui };
 }
@@ -527,7 +655,7 @@ async function cleanupAll(c) {
       await evaluate(c, `(function(){var el=document.getElementById(${JSON.stringify(id)});if(el)el.remove();return 'removed:'+${JSON.stringify(id)};})()`);
     }
     log.info('清理完成');
-  } catch (e) { log.warn('清理失败：', e.message); }
+  } catch (e) { log.warn('cleanup-error', safeErrorCode(e)); }
 }
 
 // ── 守护轮询：entry 丢失 / 主题切换 → 重新应用 ────────────────────────
@@ -538,15 +666,25 @@ function startWatcher(c, state) {
     try {
       const v = JSON.parse(await evaluate(c, `JSON.stringify({
         entry: !!document.getElementById(${JSON.stringify(BACKGROUND_BAR_STYLE_ID + '-entry')}),
+        style: !!document.getElementById(${JSON.stringify(BACKGROUND_BAR_STYLE_ID + '-style')}),
+        stage: !!document.getElementById('beauticode-bg-stage'),
         nav: !!document.querySelector('.conversation-list-tabs'),
         theme: document.documentElement.className,
         panel: !!document.querySelector('.sidebar-next'),
         persist: window.__bcPersistGet ? window.__bcPersistGet() : null
       })`));
       const fpTheme = String(v.theme || '');
-      if (v.nav && !v.entry) {
-        log.warn('entry 丢失（侧栏重挂），重新应用完整序列');
-        await applyAll(c);
+      const compatibility = !v.nav ? 'host-ui-updated' : !v.entry ? 'entry-missing' : !v.style || !v.stage ? 'partial-injection' : 'ready';
+      if (compatibility !== state.lastCompatibilityFp) {
+        state.lastCompatibilityFp = compatibility;
+        if (compatibility === 'ready') log.info('实时诊断：WorkBuddy 锚点、背景入口与舞台正常');
+        else log.warn(`实时诊断：WorkBuddy ${compatibility}`);
+      }
+      if (v.nav && (!v.entry || !v.style || !v.stage)) {
+        log.debug('WorkBuddy 背景 DOM 缺失，尝试幂等恢复');
+        await injectBackgroundUi(c);
+        await updateGalleryConfig(c);
+        await applyAll(c, { injectUi: false });
       } else if (state.lastThemeFp && fpTheme !== state.lastThemeFp) {
         log.info('主题切换 → 重扫 token 覆盖层');
         await applyAll(c);
@@ -561,7 +699,7 @@ function startWatcher(c, state) {
         await evaluate(c, "document.documentElement.setAttribute('data-bc-panel-settling','1')");
         setTimeout(function () {
           evaluate(c, "document.documentElement.removeAttribute('data-bc-panel-settling')")
-            .catch(function (e) { log.debug('沉降幕解除失败：', e.message); });
+            .catch(function (e) { log.debug('settling-overlay-error', safeErrorCode(e)); });
         }, 1500);
       }
       state.panelOpen = panelOpen;
@@ -582,7 +720,7 @@ function startWatcher(c, state) {
         //（实测：面板参数"隔一会儿变一下"的真凶）
         try {
           await evaluate(c, 'window.__bcRestoreState && window.__bcRestoreState(' + JSON.stringify(disk) + ')');
-        } catch (e) { log.debug('记忆调和：', e.message); }
+        } catch (e) { log.debug('state-reconcile-error', safeErrorCode(e)); }
       } else if (hasArchive && disk.cleared && blankLive) {
         // 清除态 + 页面空白（刚重装）→ 恢复清除态（撤掉默认壁纸）
         await evaluate(c, 'window.__bcRestoreState && window.__bcRestoreState(' + JSON.stringify(disk) + ')');
@@ -595,11 +733,23 @@ function startWatcher(c, state) {
         if (!blankLive) {
           fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
           fs.writeFileSync(STATE_FILE, v.persist);
-          log.info('状态已保存 ✓（' + v.persist.slice(0, 110) + '）');
+          log.info('state-saved');
+          if (pendingNameDiagnostic) {
+            const pending = pendingNameDiagnostic;
+            pendingNameDiagnostic = null;
+            try {
+              const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+              if (saved.wallpaper === pending.file && Date.now() - pending.at < 10_000) {
+                const name = saved.themes?.find(t => t.id === saved.activeThemeId)?.name ?? null;
+                const check = compareThemeNameStages({ catalog: pending.catalog, renderer: pending.renderer, persisted: name }, themeNameKey);
+                log.info('theme-name-boundary', JSON.stringify(check));
+              }
+            } catch { log.warn('theme-name-boundary unavailable'); }
+          }
         }
         state.lastPersist = v.persist;
       }
-    } catch (e) { log.debug('watcher:', e.message); }
+    } catch (e) { log.debug('watcher-error', safeErrorCode(e)); }
     finally { inflight = false; }
   };
   return setInterval(tick, 1500);
@@ -688,7 +838,10 @@ function startPickWatcher(c) {
         await evaluate(c, 'window.__bcBackgroundMsg && window.__bcBackgroundMsg("已取消选择。")');
         return;
       }
-      log.info('已选择：' + picked.slice(-60));
+      const checked = await validateLocalMedia(picked);
+      picked = checked.path;
+      assertStableMedia(picked, checked.identity);
+      log.info('file-selected');
       // DSH/Codex 回落路径：不走 file://（视频/权限不可靠），
       // 用 DOM.setFileInputFiles 把真实 File 塞进隐藏 input，再派发 change，
       // 页面 applyBlob 走 blob: URL —— 与路径编码、TCC、CSP 全部解耦。
@@ -704,11 +857,12 @@ function startPickWatcher(c) {
       if (!q.result?.nodeId && !q.nodeId) throw new Error('找不到隐藏的文件输入框');
       const nodeId = q.result?.nodeId || q.nodeId;
       await c.send('DOM.setFileInputFiles', { files: [picked], nodeId });
+      assertStableMedia(picked, checked.identity);
       await evaluate(c,
         'document.querySelector(\'#beauticode-workbuddy-bg-panel [data-id="fileInput"]\')' +
         '.dispatchEvent(new Event("change", { bubbles: true }));');
       log.info('已回填并触发导入');
-    } catch (e) { log.debug('pick watcher:', e.message); }
+    } catch (e) { log.debug('picker-error', safeErrorCode(e)); }
     finally { busy = false; }
   }, 150);
 }
@@ -719,24 +873,29 @@ async function session() {
   const page = pickWorkBuddyTarget(targets);
   if (!page) throw new Error('no WorkBuddy renderer page target');
   const wsUrl = assertLoopbackDebuggerUrl(page.webSocketDebuggerUrl, PORT);
-  log.info(`target ${page.id}  url=${fp(page.url)}`);
+  log.info('target-connected');
   const c = await openWs(wsUrl);
 
   if (args.clean) { await cleanupAll(c); c.close(); process.exit(0); }
 
-  const state = { lastThemeFp: '', panelOpen: false };
+  const state = { lastThemeFp: '', panelOpen: false, lastCompatibilityFp: '' };
   galleryConn = c;
-  await startGalleryServer(async (file) => {
-    await evaluate(c, 'window.__bcApplyBackgroundPath && window.__bcApplyBackgroundPath(' + JSON.stringify(file) + ')');
+  const galleryReady = startGalleryServer(async (selection) => {
+    await evaluate(c, 'window.__bcApplyBackgroundPath && window.__bcApplyBackgroundPath(' + JSON.stringify(selection.file) + ',' + JSON.stringify({ themeName: selection.name, provenance: selection.provenance }) + ')');
   });
-  await applyAll(c);
+  // Mount the entry as soon as the target is usable. Catalog listener setup
+  // and the expensive token/surface scans continue in parallel; a late port
+  // choice is pushed into the already-mounted entry below.
+  await injectBackgroundUi(c);
+  void galleryReady.then(() => updateGalleryConfig(c));
+  await applyAll(c, { injectUi: false });
 
   if (args.once) { c.close(); process.exit(0); }
 
   c.onEvent((m) => {
     if (m.method === 'Page.loadEventFired') {
       log.info('页面重载 → 重新应用');
-      applyAll(c).catch((e) => log.warn('重应用失败：', e.message));
+      applyAll(c).catch((e) => log.warn('reapply-error', safeErrorCode(e)));
     }
   });
   const poll = startWatcher(c, state);
@@ -769,6 +928,20 @@ async function runWatchdog() {
   }
   let child = null;
   let stopping = false;
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const owner = {
+    schema: 'beauticode.wb-runner/v1', pid: process.pid,
+    startedAtMs: Date.now(), image: process.execPath,
+    runner: fileURLToPath(import.meta.url), pidFile: RUNNER_PID_FILE,
+  };
+  try { fs.writeFileSync(RUNNER_PID_FILE, JSON.stringify(owner) + '\n', 'utf8'); } catch { /* best effort */ }
+  const releasePid = () => {
+    try {
+      if (JSON.parse(fs.readFileSync(RUNNER_PID_FILE, 'utf8')).pid === process.pid) {
+        fs.rmSync(RUNNER_PID_FILE, { force: true });
+      }
+    } catch { /* already gone */ }
+  };
   const start = () => {
     if (stopping) return;
     const childArgs = process.argv.slice(2).filter((a) => a !== '--watchdog');
@@ -779,12 +952,13 @@ async function runWatchdog() {
     });
     child.on('exit', (code, signal) => {
       if (stopping) process.exit(code ?? 0);
-      log.warn(`runner 退出（${code ?? signal}），3s 后拉起`);
-      setTimeout(start, 3000);
+      log.warn(`runner 退出（${code ?? signal}），1s 后拉起`);
+      setTimeout(start, 1000);
     });
   };
   const stop = () => {
     stopping = true;
+    releasePid();
     if (child?.pid) {
       try { process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
     }
@@ -792,6 +966,7 @@ async function runWatchdog() {
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  process.on('exit', releasePid);
   start();
   await new Promise(() => {});
 }
@@ -812,43 +987,57 @@ async function main() {
         restartIfBlind: !args.noLaunch,
         repairWindowMs: 10_000,
         timeoutMs: args.once ? 15_000 : 40_000,
+        repairChain,
         log,
       });
+      const previousPort = PORT;
       PORT = ensured.port;
+      if (PORT !== previousPort) persistPortSelection(PORT);
       if (ensured.launched || ensured.restarted) {
         log.info(`WorkBuddy CDP 已就绪：127.0.0.1:${PORT}${ensured.restarted ? '（已重启）' : '（已启动）'}`);
       }
     } catch (e) {
-      if (args.once || args.noLaunch) { log.error('fatal: ' + e.message); process.exit(1); }
-      log.warn('启动检测暂未就绪：' + e.message.slice(0, 160) + ' —— 3s 后重试');
+      if (args.once || args.noLaunch) { log.error('startup-fatal', safeErrorCode(e)); process.exit(1); }
+      log.warn('startup-not-ready', safeErrorCode(e));
     }
   }
   for (;;) {
+    let reconnectDelayMs = 3_000;
     try {
       log.info(`连接 http://127.0.0.1:${PORT} …`);
       await session();
     } catch (e) {
-      if (args.once) { log.error('fatal: ' + e.message); process.exit(1); }
-      log.warn('连接断开（' + e.message.slice(0, 80) + '），3s 后重试');
+      if (args.once) { log.error('connection-fatal', safeErrorCode(e)); process.exit(1); }
+      log.warn('connection-lost', safeErrorCode(e));
       if (!args.noLaunch) {
         try {
-          const ensured = await ensureWorkBuddyCdp({
-            preferredPort: PORT,
-            launch: true,
-            launchIfMissing: false,
-            restartIfBlind: true,
-            repairWindowMs: 10_000,
-            timeoutMs: 20_000,
-            log,
-          });
-          PORT = ensured.port;
+          const processes = await listWorkBuddyProcesses();
+          repairChain.observeSnapshot(processes);
+          reconnectDelayMs = selectWorkBuddyReconnectDelay(processes);
+          // A missing process is an intentional user close: keep the idle
+          // cadence and never ask ensureWorkBuddyCdp to launch it.
+          if (processes.length > 0) {
+            const ensured = await ensureWorkBuddyCdp({
+              preferredPort: PORT,
+              launch: true,
+              launchIfMissing: false,
+              restartIfBlind: true,
+              repairWindowMs: 10_000,
+              timeoutMs: 20_000,
+              repairChain,
+              log,
+            });
+            const previousPort = PORT;
+            PORT = ensured.port;
+            if (PORT !== previousPort) persistPortSelection(PORT);
+          }
         } catch (ensureErr) {
-          log.warn('WorkBuddy 尚未恢复：' + ensureErr.message.slice(0, 120));
+          log.warn('workbuddy-not-ready', safeErrorCode(ensureErr));
         }
       }
     }
     if (args.once) process.exit(0);
-    await new Promise((r) => setTimeout(r, 3000));
+    await new Promise((r) => setTimeout(r, reconnectDelayMs));
   }
 }
-main().catch((e) => { log.error('fatal: ' + (e.stack || e.message)); process.exit(1); });
+main().catch((e) => { log.error('runner-fatal', safeErrorCode(e)); process.exit(1); });

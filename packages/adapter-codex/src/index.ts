@@ -47,6 +47,7 @@ export {
   type CodexHostApplierOptions,
   type ConnectedTarget,
 } from "./host-applier.js";
+export { selectCodexPrimaryTargets } from "./target-selection.js";
 
 export {
   acquireInjectorLock,
@@ -80,12 +81,14 @@ export {
 export {
   DEFAULT_CODEX_CDP_PORT,
   DEFAULT_CODEX_REPAIR_WINDOW_MS,
+  DEFAULT_CODEX_CDP_POLL_INTERVAL_MS,
   codexInstallCandidates,
   findCodexExecutable,
   listCodexProcesses,
   isLoopbackPortFree,
   pickAvailableCodexPort,
   ensureCodexCdp,
+  waitForAnyCodexCdp,
   classifyCodexStartupProcess,
   CodexStartupRepairController,
   buildWindowsCodexProcessStartScript,

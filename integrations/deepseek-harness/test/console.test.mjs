@@ -545,11 +545,11 @@ test("console page includes a dim slider and restore-default control", async () 
   assert.match(control[1], /<svg/, "the control is an icon");
   assert.doesNotMatch(control[1], /[\u4e00-\u9fff]/, "and it carries no words");
   assert.match(control[0], /aria-label="恢复默认"/, "but it is labelled for assistive tech");
-  assert.equal(page.querySelector(".bc-dim-value")?.textContent, "0%");
+  assert.equal(page.querySelector(".bc-dim-value")?.textContent, "49%");
   assert.equal(
     page.querySelector(".bc-dim-slider")?.value,
-    "0",
-    "the background shadow ships at zero until someone moves the slider",
+    "49",
+    "the background shadow starts at the shared 49% default",
   );
 });
 
@@ -585,9 +585,9 @@ test("the reset arrow writes the default value instead of an auto state", async 
   assert.equal(page.querySelector(".bc-dim-slider")?.value, "25");
 
   page.querySelector('[data-act="dim-reset"]').click();
-  assert.deepEqual(calls, [["set", 0]], "reset writes 0% through and never clears");
-  assert.equal(page.querySelector(".bc-dim-value")?.textContent, "0%");
-  assert.equal(page.querySelector(".bc-dim-slider")?.value, "0");
+  assert.deepEqual(calls, [["set", 0.49]], "reset writes 49% through and never clears");
+  assert.equal(page.querySelector(".bc-dim-value")?.textContent, "49%");
+  assert.equal(page.querySelector(".bc-dim-slider")?.value, "49");
 });
 
 /**

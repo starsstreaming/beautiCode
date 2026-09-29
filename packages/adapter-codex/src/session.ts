@@ -5,6 +5,8 @@ import {
   BackgroundStore,
   MediaServerController,
   defaultDataRoot,
+  hostDataRoot,
+  migrateLegacyDataRoot,
   buildHostApplyPayload,
   resolveSessionBundledThemes,
   isLocalBackgroundSource,
@@ -120,9 +122,11 @@ export class BeautiSession implements HostSession {
   private onError: ((err: Error) => void) | null;
   private onStatus: ((msg: string) => void) | null;
   private consoleHost: ReturnType<typeof createConsoleHost>;
+  private readonly legacyDataRoot: string | null;
 
   constructor(opts: BeautiSessionOptions = {}) {
-    this.dataRoot = opts.dataRoot ?? defaultDataRoot();
+    this.legacyDataRoot = opts.dataRoot == null ? defaultDataRoot() : null;
+    this.dataRoot = opts.dataRoot ?? hostDataRoot("codex");
     this.port = opts.port ?? null;
     this.verifyDeadlineMs = opts.verifyDeadlineMs ?? 30_000;
     this.requireAppProtocol = opts.requireAppProtocol ?? true;
@@ -179,6 +183,9 @@ export class BeautiSession implements HostSession {
 
   async start(): Promise<{ port: number | null }> {
     this.assertOpenable();
+    if (this.legacyDataRoot) {
+      await migrateLegacyDataRoot(this.legacyDataRoot, this.dataRoot);
+    }
     await this.store.init();
 
     // Hold the single-owner lock early (port 0 = not yet bound to a CDP port).
