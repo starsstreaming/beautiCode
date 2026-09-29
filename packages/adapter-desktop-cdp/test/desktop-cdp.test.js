@@ -24,8 +24,13 @@ const spec = {
   defaultPort: 9341, candidatePorts: [9351],
   popupTopInset: 44,
   // 结构匹配锚定 workbench 固定后缀，mock 也要贴近真实 URL 形态
-  targetUrl: 'vscode-file://vscode-app/measured/out/vs/code/electron-sandbox/workbench/workbench.html',
+  targetUrl: 'vscode-file://vscode-app/measured/resources/app/out/vs/code/electron-sandbox/workbench/workbench.html',
   targetRuntimeUrl: 'vscode-file://vscode-app/', mount: 'cursor',
+  targetIdentity: {
+    protocol: 'vscode-file:',
+    hostname: 'vscode-app',
+    pathSuffix: '/resources/app/out/vs/code/electron-sandbox/workbench/workbench.html',
+  },
   anchorSelector: '[data-action-id="marketplace"]', anchorText: 'Customize',
   strings: {},
   theme: {

@@ -62,12 +62,16 @@ function rewriteWorkbuddyRunner(text) {
 }
 
 function rewriteWorkbuddySetup(text) {
+  // 融合远端流程后的 wb-setup.mjs 结构：PACKAGED_RUNTIME 块 → install 链
+  // （prepareStableRuntime/installWin）→ startDaemon()。打包版删除 else 的
+  // 源码回退构建分支（打包产物没有可构建的 repo，BEAUTICODE_PACKAGED_RUNTIME=1
+  // 时也不会走到），保留 if 骨架与 install/startDaemon 主流程。
   const rewritten = text.replace(
-    /if \(PACKAGED_RUNTIME\) \{[\s\S]*?^\}\r?\n\r?\nstartDaemon\(\);/m,
-    "if (PACKAGED_RUNTIME) {\n  log('  ✓ 使用包内预构建 WorkBuddy adapter');\n}\n\nstartDaemon();",
+    /^\} else if \(!fs\.existsSync\(path\.join\(REPO, 'package-lock\.json'\)\)\) \{[\s\S]*?log\(build\.status === 0 [^\n]*\n\}/m,
+    "}",
   );
-  // 复审 I-2：正则失配时 String.replace 静默返回原文，打包产物会退化成
-  // 「每次启动跑 npm run build」且无任何信号。必须断言替换真的发生。
+  // 复审 I-2：正则失配时 String.replace 静默返回原文，打包产物会保留一段
+  // 必然失败的源码构建分支。必须断言替换真的发生。
   if (rewritten === text) {
     throw new Error(
       "rewriteWorkbuddySetup 未命中 PACKAGED_RUNTIME 块；wb-setup.mjs 模板已漂移，请同步更新聚合脚本。",

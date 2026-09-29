@@ -10,6 +10,10 @@ const START_TIME_TOLERANCE_MS = 30_000;
 /**
  * True when `pid` refers to a process that still exists. Mirrors the PID check
  * callers perform before consulting a recorded process identity.
+ *
+ * Fail-closed: only ESRCH proves the process is gone. EPERM and unknown
+ * errors must be treated as "alive" so a lock is never reclaimed while the
+ * recorded owner might still be running.
  */
 function isPidAlive(pid: number): boolean {
   try {
@@ -17,9 +21,9 @@ function isPidAlive(pid: number): boolean {
     return true;
   } catch (error) {
     return (
-      Boolean(error) &&
-      typeof error === "object" &&
-      (error as NodeJS.ErrnoException).code === "EPERM"
+      !error ||
+      typeof error !== "object" ||
+      (error as NodeJS.ErrnoException).code !== "ESRCH"
     );
   }
 }
