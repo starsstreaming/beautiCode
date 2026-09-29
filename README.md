@@ -44,109 +44,35 @@ beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness 和 Cod
 
 ### 一键安装插件（推荐）
 
-只要给 DeepSeek Harness 加背景，装插件即可，不必 fork 仓库、不必下 Windows 安装包，也不必开托盘。请先自己装好 DSH 和 Node.js。
+```sh
+npm install -g beauticode-desktop --foreground-scripts
+beauticode-desktop all install
+```
+
+`--foreground-scripts` 会显示安装提示。npm 7 及更新版本默认隐藏提示；`postinstall` 只显示说明，不会自动安装守护。`all install` 为当前 Windows 用户安装后台集成，并为已检测到的宿主创建开始菜单快捷方式；它不会启动客户端。
+
+首次启用 CDP 时，请用后台快捷方式启动客户端。如果客户端已经运行但没有 CDP，请先正常关闭，再使用快捷方式启动。DSH 使用插件，不需要 CDP 快捷方式。
+
+项目内安装：
 
 ```sh
-npx beauticode-dsh
+npm install beauticode-desktop --foreground-scripts
+npm exec -- beauticode-desktop all install
 ```
 
-`npx beauticode-dsh` 会从 npm 下载插件并写入你的 DSH profile，**不需要 pnpm，也不需要再执行 `dsh plugin add`**。已把 `dsh` 装到 PATH 时，第二行也可以写成 `dsh web`。
-
-打开网页后，点开「设置」，左侧导航里的「背景」即可：可从文件夹选图片或 MP4 / MOV、清除、开关声音、切换已保存主题，也可以进入全屏，把浏览器的标签页和地址栏收起来。已保存主题里自带「画窗」。网页控制台没有摸鱼。外观浅色/深色仍用 DSH 自己的设置。下次启动会恢复上次背景。
-
-也可以用 `/bg`、`/bg-theme`、`/bg-clear`，或直接跟 AI 说把本机图片/视频设成背景。
-
-已有 pnpm 时，也可以让 DSH 自己装这个 npm 包：
+### 检查与单独管理
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add beauticode-dsh
-npx @deepseek-ai/dsh web
+beauticode-desktop all status
+beauticode-desktop all health
+beauticode-desktop <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall|health>
 ```
 
-卸载：
+`all status` 和 `all health` 都是只读命令；health 会检查守护、宿主进程、CDP 连接和背景注入状态。`all install` 会跳过未安装的宿主，并继续处理其他宿主；`installed` 表示插件或守护已通过检查，不代表客户端已启动。需要单独卸载时使用宿主命令，例如 `beauticode-desktop codex uninstall`。
 
-```sh
-npx beauticode-dsh --remove
-```
+守护只会对启动不足 10 秒且已确认身份的单个进程尝试一次受控重启；不会终止较旧或身份不明的进程，也不会无限重启。
 
-
-### Windows 安装包
-
-需要 Codex Desktop、系统托盘或懒得留源码时，再下 [Windows 安装包](https://github.com/starsstreaming/beautiCode/releases/latest)。
-
-然后自己启动：
-
-```sh
-dsh web
-# 未把 dsh 装到 PATH 时：
-npx @deepseek-ai/dsh web
-```
-
-安装包自带 Node.js，不需要另外安装 Node.js、npm 或 pnpm。安装结束时会自动写入 DSH 插件。若你改过安装目录，以安装文件夹里的 `集成说明.txt` 为准。
-
-Cursor 和豆包适配默认不启用，需要分别安装后台守护。源码安装命令、卸载方式及兼容版本见 [Cursor 与豆包桌面背景适配](./docs/host-adapter-cursor-doubao.md)。
-
-自己启动 `dsh web` 后，「设置」里的「背景」即可使用。Codex Desktop 仍要开 beautiCode 托盘：选 **Codex Desktop** 会按需拉起 Codex；选 **DeepSeek Harness** 只连接你已经启动的 DSH 网页，不会替你启动 DSH。
-
-若自动写入失败，把路径换成实际安装目录（默认是 `%LOCALAPPDATA%\Programs\beautiCode`）：
-
-```sh
-dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
-npx @deepseek-ai/dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beautiCode\integrations\deepseek-harness
-```
-
-之后在托盘里：
-
-* 点「应用或重新应用」：DSH 路径只连接已启动的网页（网页关了会重新打开，DSH 没运行则提示你先 `dsh web`）；Codex 路径与原来一样
-* 更换图片或视频
-* 清除背景、开关声音、摸鱼、保存和切换主题
-
-退出托盘不会结束 DeepSeek Harness，避免打断正在进行的工作。
-
-当前安装包尚未进行商业代码签名，Windows 可能显示 SmartScreen 提示。
-用户导入的图片、视频和已保存主题位于
-`%LOCALAPPDATA%\beautiCode`，卸载程序默认保留这些数据。
-
-<p align="center">
-  <img width="320" alt="Windows 安装包" src="https://github.com/user-attachments/assets/8c16eeb9-94d0-4f19-a816-b32fba8a110c" />
-</p>
-
-### 从源码运行
-
-源码开发需要 Node.js 22 或更高版本。在项目目录执行：
-
-```bash
-npm install
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-dsh-plugin.ps1
-npx @deepseek-ai/dsh web
-# 托盘只在要用 Codex 或摸鱼热键时再开：
-# npm run tray
-```
-
-或手动把本地插件目录加进 DSH（需要 pnpm）：
-
-```sh
-npx @deepseek-ai/dsh plugin --profile web add file:%CD%/integrations/deepseek-harness
-npx @deepseek-ai/dsh web
-```
-
-或打开宿主选择器：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-beauticode.ps1
-```
-
-构建 Windows 安装包：
-
-```powershell
-npm run installer:windows
-```
-
-输出位于：
-
-```text
-artifacts\windows\installer\
-```
+**Codex MSIX：**本包使用程序包感知启动。MSIX 的 CDP 修复仍待原始图标重启测试验证，验证前请视为未经确认。
 
 通过托盘菜单可以：
 
