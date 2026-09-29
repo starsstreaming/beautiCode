@@ -42,8 +42,11 @@
 #beauticode-console-page .bc-blur-slider::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
 #beauticode-console-page .bc-blur-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
 #beauticode-console-page .bc-blur-value{min-width:2.6em;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;text-align:right}
-#beauticode-console-page .bc-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
-#beauticode-console-page .bc-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+/* Both reset buttons share one appearance. bc-dim-reset used to be missing from
+   this sheet entirely, so the shadow row rendered a raw UA button next to the
+   styled blur row; keep the two selectors together so they cannot drift again. */
+#beauticode-console-page .bc-dim-reset,#beauticode-console-page .bc-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
+#beauticode-console-page .bc-dim-reset:hover,#beauticode-console-page .bc-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
 #beauticode-console-page .bc-dim-slider{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
 #beauticode-console-page .bc-dim-slider::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
 #beauticode-console-page .bc-dim-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}

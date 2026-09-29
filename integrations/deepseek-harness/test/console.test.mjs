@@ -591,6 +591,61 @@ test("the reset arrow writes the default value instead of an auto state", async 
 });
 
 /**
+ * The reset arrows are <button> elements inside a flex control, so they carry no
+ * user-agent affordance of their own: with no rule of their own they render as
+ * raw UA buttons next to the styled pill controls. bc-dim-reset shipped that way
+ * — the shadow row showed a grey box while the identical blur row below it
+ * looked right.
+ *
+ * The check reads the class name out of the markup and then looks for a rule for
+ * exactly that class, so a future control cannot ship unstyled either.
+ */
+test("every reset arrow in the page markup has a rule in the injected sheet", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  await loadConsole(document);
+
+  const page = pageEl(document);
+  const sheet = document.head.querySelector("style")?.textContent ?? "";
+  assert.ok(sheet.includes("#beauticode-console-page"), "the console ships its own sheet");
+
+  const classes = [...page.innerHTML.matchAll(/class="(bc-[\w-]*reset)"/g)].map((m) => m[1]);
+  assert.deepEqual(
+    classes.sort(),
+    ["bc-blur-reset", "bc-dim-reset"],
+    "both rows expose a reset arrow",
+  );
+  // The sheet writes the pair as a selector list (`.bc-dim-reset,.bc-blur-reset{…}`)
+  // precisely so the two cannot drift, so locate the declaration block by finding
+  // the class name and then reading forward to its braces: a regex anchored on
+  // `\.name\{` would only accept the one-class-per-rule shape.
+  const decl = (name, suffix = "") => {
+    // Require a selector boundary after the name. A bare indexOf would accept
+    // `.bc-dim-reset:hover` as the base rule for `.bc-dim-reset`, so dropping the
+    // base rule while keeping the hover rule would still pass.
+    const match = sheet.match(new RegExp(`\\.${name}${suffix}(?=\\s*[,{])`));
+    if (!match) return undefined;
+    const open = sheet.indexOf("{", match.index);
+    const close = sheet.indexOf("}", open);
+    if (open < 0 || close < 0) return undefined;
+    return sheet.slice(open + 1, close);
+  };
+  for (const name of classes) {
+    const base = decl(name);
+    assert.ok(base, `${name} has a base rule`);
+    assert.match(base, /cursor:pointer/, `${name} keeps the hand cursor`);
+    assert.ok(decl(name, ":hover"), `${name} has a hover rule`);
+  }
+  // Same affordance, so the two must not drift apart again.
+  assert.equal(
+    decl("bc-dim-reset"),
+    decl("bc-blur-reset"),
+    "the reset arrows share one appearance",
+  );
+  assert.equal(decl("bc-dim-reset", ":hover"), decl("bc-blur-reset", ":hover"));
+});
+
+/**
  * Fullscreen is the only thing a page may call to hide the browser's own chrome
  * (tab strip, address bar), and browsers only honour the request from inside the
  * user gesture — the same constraint the file picker has. Esc exits without ever
