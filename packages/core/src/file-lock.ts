@@ -21,24 +21,6 @@ export interface AcquireFileLockOptions {
   staleMs?: number;
 }
 
-function isPidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // ESRCH is the only portable indication that the process is gone.  EPERM
-    // means the process exists but cannot be inspected (for example, because
-    // it belongs to another user), and an unknown error must be treated the
-    // same way to avoid deleting a live owner's lock.
-    return (
-      !error ||
-      typeof error !== "object" ||
-      (error as NodeJS.ErrnoException).code !== "ESRCH"
-    );
-  }
-}
-
 function parseOwner(raw: string): FileLockOwner | null {
   try {
     const value = JSON.parse(raw) as Partial<FileLockOwner>;
