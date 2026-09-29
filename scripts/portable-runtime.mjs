@@ -131,7 +131,14 @@ export function renderRuntimeLauncherPs1({ host, startupLogPath } = {}) {
 }
 
 export function renderWindowsStartupVbs({ launcher, args = [] }) {
+  // Windows 11 将 Windows Terminal 设为默认终端后，WT 会收养所有控制台进程，
+  // 且忽略 STARTUPINFO 的 SW_HIDE 与 -WindowStyle Hidden，导致本应静默的
+  // 常驻守护每次开机弹出黑色终端窗口。用 conhost.exe --headless 显式创建
+  // 无头控制台宿主，让进程完全脱离 WT 收养链（conhost --headless 需
+  // Windows 10 1809+；老系统上 conhost 会忽略未知参数，行为退化为原样）。
   const command = [
+    "conhost.exe",
+    "--headless",
     "powershell.exe",
     "-NoProfile",
     "-WindowStyle",
