@@ -1,10 +1,9 @@
 import { execFile } from "node:child_process";
 
 /**
- * How close a process's actual start time must be to the recorded start time
- * before we treat them as the same process. PID reuse yields a completely
- * different start time, so a generous window is safe while still rejecting
- * recycled PIDs.
+ * Allow this much clock skew when comparing the OS process start with the
+ * creation time of a control/claim record. The record can be written long
+ * after the process starts; only a process born after the record is recycled.
  */
 const START_TIME_TOLERANCE_MS = 30_000;
 
@@ -63,13 +62,13 @@ function processStartTimeMs(pid: number): Promise<number | null> {
 }
 
 /**
- * True when `pid` is alive AND its real start time matches `recordedIso` (the
- * startedAt value a control/claim file captured when the process launched).
+ * True when `pid` is alive AND its real start time is no later than
+ * `recordedIso` (the creation time captured by a control/claim file).
  *
  * Falls back to optimistic `true` when there is no recorded timestamp or the
  * platform helper is unavailable, so an unverifiable check never marks a live
  * tray/session as dead. Returns `false` when the PID no longer exists or its
- * start time clearly differs (PID reuse).
+ * start time is newer than the record (PID reuse).
  */
 export async function isRecordedPidLive(
   pid: number,
@@ -91,5 +90,5 @@ export async function isRecordedPidLive(
   // No helper result means "cannot verify" — keep the optimistic PID check.
   if (actualMs == null) return true;
 
-  return Math.abs(actualMs - recordedMs) <= START_TIME_TOLERANCE_MS;
+  return actualMs <= recordedMs + START_TIME_TOLERANCE_MS;
 }

@@ -12,6 +12,7 @@ import {
   createWindowsMediaPicker,
   parseImportFilename,
   parseImportThemeName,
+  safeLoopbackHttpOrigin,
 } from "../ui-host.mjs";
 import {
   writeDshControlFile,
@@ -22,6 +23,21 @@ const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+test("bridge reachability accepts only an HTTP loopback origin", () => {
+  assert.equal(safeLoopbackHttpOrigin("http://127.0.0.1:3080")?.host, "127.0.0.1:3080");
+  assert.equal(safeLoopbackHttpOrigin("http://localhost:3080")?.host, "localhost:3080");
+  assert.equal(safeLoopbackHttpOrigin("http://[::1]:3080")?.host, "[::1]:3080");
+  for (const value of [
+    "http://evil.example:3080",
+    "http://127.0.0.1.evil.example:3080",
+    "https://127.0.0.1:3080",
+    "http://127.0.0.1:3080/private",
+    "http://user:pass@127.0.0.1:3080",
+  ]) {
+    assert.equal(safeLoopbackHttpOrigin(value), null, value);
+  }
+});
 
 class FakeWebServer {
   routes = new Map();

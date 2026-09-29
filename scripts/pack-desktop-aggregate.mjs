@@ -96,16 +96,32 @@ function rewriteCodexWatchHost(text) {
 async function copyDesktopRuntime(destRoot) {
   const desktop = path.join(destRoot, "runtime", "desktop");
   await copyText(
+    path.join(sourceRoot, "src", "windows-host-install.mjs"),
+    path.join(desktop, "packages", "beauticode-desktop", "src", "windows-host-install.mjs"),
+  );
+  await copyText(
     path.join(repoRoot, "scripts", "desktop-cdp-runner.mjs"),
     path.join(desktop, "scripts", "desktop-cdp-runner.mjs"),
     rewriteDesktopRunner,
   );
+  await copyText(path.join(repoRoot, "scripts", "quick-launch.mjs"), path.join(desktop, "scripts", "quick-launch.mjs"));
   await copyText(
     path.join(repoRoot, "scripts", "desktop-cdp-setup.mjs"),
     path.join(desktop, "scripts", "desktop-cdp-setup.mjs"),
   );
+  await copyText(
+    path.join(repoRoot, "scripts", "desktop-runner-identity.mjs"),
+    path.join(desktop, "scripts", "desktop-runner-identity.mjs"),
+  );
+  await copyText(path.join(repoRoot, "scripts", "guardian-process.mjs"), path.join(desktop, "scripts", "guardian-process.mjs"));
+  await copyText(
+    path.join(repoRoot, "scripts", "portable-runtime.mjs"),
+    path.join(desktop, "scripts", "portable-runtime.mjs"),
+  );
   await copyJsTree(path.join(repoRoot, "packages", "core", "dist"), path.join(desktop, "packages", "core", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-desktop-cdp", "dist"), path.join(desktop, "packages", "adapter-desktop-cdp", "dist"));
+  const startupRepair = path.join(desktop, "packages", "adapter-desktop-cdp", "dist", "startup-repair.js");
+  await fsp.writeFile(startupRepair, rewriteDesktopAdapter(await fsp.readFile(startupRepair, "utf8")), "utf8");
   await copyJsTree(path.join(repoRoot, "packages", "adapter-cursor", "dist"), path.join(desktop, "packages", "adapter-cursor", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-doubao", "dist"), path.join(desktop, "packages", "adapter-doubao", "dist"));
   for (const name of ["adapter-cursor", "adapter-doubao"]) {
@@ -121,17 +137,28 @@ async function copyWorkbuddyRuntime(destRoot) {
     path.join(workbuddy, "scripts", "wb-cdp-runner.mjs"),
     rewriteWorkbuddyRunner,
   );
+  await copyText(path.join(repoRoot, "scripts", "quick-launch.mjs"), path.join(workbuddy, "scripts", "quick-launch.mjs"));
+  for (const name of ["wb-startup-media.mjs", "wb-runner-log.mjs", "wb-theme-name-diagnostic.mjs"]) {
+    await copyText(path.join(repoRoot, "scripts", name), path.join(workbuddy, "scripts", name));
+  }
   await copyText(
     path.join(repoRoot, "scripts", "wb-setup.mjs"),
     path.join(workbuddy, "scripts", "wb-setup.mjs"),
     rewriteWorkbuddySetup,
   );
+  await copyText(path.join(repoRoot, "scripts", "guardian-process.mjs"), path.join(workbuddy, "scripts", "guardian-process.mjs"));
+  await copyText(
+    path.join(repoRoot, "scripts", "portable-runtime.mjs"),
+    path.join(workbuddy, "scripts", "portable-runtime.mjs"),
+  );
   await copyJsTree(path.join(repoRoot, "packages", "core", "dist"), path.join(workbuddy, "packages", "core", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-workbuddy", "dist"), path.join(workbuddy, "packages", "adapter-workbuddy", "dist"));
+  const workbuddyLaunch = path.join(workbuddy, "packages", "adapter-workbuddy", "dist", "launch.js");
+  await fsp.writeFile(workbuddyLaunch, rewriteDesktopAdapter(await fsp.readFile(workbuddyLaunch, "utf8")), "utf8");
   await copyTree(
     path.join(repoRoot, "assets", "themes", "internal-beyond"),
     path.join(workbuddy, "assets", "themes", "internal-beyond"),
-    (name, entry) => entry.isDirectory() || name === "bg-canvas-4k.png" || name === "NOTICE.md",
+    (name, entry) => entry.isDirectory() || name === "bg-canvas-4k.webp" || name === "NOTICE.md",
   );
 }
 
@@ -165,7 +192,7 @@ export async function stageDesktopAggregate(destRoot = defaultStageDir(), opts =
 
 async function main() {
   const dest = await stageDesktopAggregate();
-  process.stdout.write(`Staged beauticode-desktop@0.1.0-test.2 at ${dest}\n`);
+  process.stdout.write(`Staged beauticode-desktop@0.1.0-test.12 at ${dest}\n`);
 }
 
 const launchedDirectly =

@@ -13,6 +13,7 @@ import {
   parseRemoteDebuggingFlags,
   probeDesktopCdp,
   repairDesktopProcess,
+  selectDesktopMainProcesses,
   waitForDesktopCdp,
 } from '../dist/index.js';
 
@@ -61,6 +62,24 @@ test('startup repair deduplicates a PID and creation-time pair', async () => {
   assert.equal(calls, 1);
 });
 
+test('a blind process created by a controlled relaunch is not restarted again', async () => {
+  let now = 1_000;
+  let calls = 0;
+  const controller = new DesktopStartupRepairController(
+    async () => { calls++; return 'launched'; }, () => now,
+  );
+  assert.equal(await controller.observe(processRow(now)), 'repaired');
+  now += 100;
+  const replacement = withPid(processRow(now), 43);
+  controller.observeSnapshot([replacement]);
+  assert.equal(await controller.observe(replacement), 'repair-suppressed');
+  assert.equal(calls, 1);
+  controller.observeSnapshot([]);
+  now += 100;
+  assert.equal(await controller.observe(withPid(processRow(now), 44)), 'repaired');
+  assert.equal(calls, 2);
+});
+
 test('a failed repair does not long-suppress a different process generation', async () => {
   let now = 1_000;
   let calls = 0;
@@ -79,7 +98,7 @@ test('a failed repair does not long-suppress a different process generation', as
   assert.equal(calls, 2);
 });
 
-test('a failed repair gets at most one bounded retry for the same process generation', async () => {
+test('a failed repair never restarts the same process generation twice', async () => {
   let now = 1_000;
   let calls = 0;
   const row = processRow(now);
@@ -92,10 +111,21 @@ test('a failed repair gets at most one bounded retry for the same process genera
   );
   assert.equal(await controller.observe(row), 'repair-failed');
   now += 100;
-  assert.equal(await controller.observe(row), 'repair-failed');
+  assert.equal(await controller.observe(row), 'already-handled');
   now += 100;
-  assert.equal(await controller.observe(row), 'repair-exhausted');
-  assert.equal(calls, 2);
+  assert.equal(await controller.observe(row), 'already-handled');
+  assert.equal(calls, 1);
+});
+
+test('event and snapshot after a failed repair share the same one-attempt decision', async () => {
+  let calls = 0;
+  const row = processRow(1_000);
+  const controller = new DesktopStartupRepairController(async () => { calls++; return 'failed'; }, () => 1_001);
+  const tracker = new DesktopStartupSnapshotTracker((observed) => controller.observe(observed));
+  assert.equal(await controller.observe(row), 'repair-failed');
+  await tracker.observeSnapshot([row]);
+  await tracker.observeSnapshot([row]);
+  assert.equal(calls, 1);
 });
 
 test('persistent snapshots wait for a stable PID and creation-time pair', async () => {
@@ -151,7 +181,7 @@ test('repair transaction absorbs a replacement no-CDP PID before controlled laun
     now: () => 1001,
     exists: () => true,
   });
-  assert.equal(result, 'verified');
+  assert.equal(result, 'launched');
   assert.deepEqual(killed, ['42:1000', '43:1001']);
   assert.equal(events.at(-1), 'launch');
   assert.equal(launchArgs, '--start_time=123');
@@ -171,7 +201,7 @@ test('repair waits for two empty snapshots before controlled launch', async () =
     now: () => 1001,
     exists: () => true,
   });
-  assert.equal(result, 'verified');
+  assert.equal(result, 'launched');
   assert.equal(reads, 4);
 });
 
@@ -191,7 +221,7 @@ test('repair escalates to force-kill only after graceful close leaves the same g
     now: () => now,
     exists: () => true,
   });
-  assert.equal(result, 'verified');
+  assert.equal(result, 'launched');
   assert.deepEqual(events, ['graceful', 'force', 'launch']);
 });
 
@@ -208,7 +238,7 @@ test('repair transaction fails closed when forwarded CDP port never opens', asyn
     now: () => 1001,
     exists: () => true,
   });
-  assert.equal(result, 'failed');
+  assert.equal(result, 'launched');
   assert.deepEqual(events, ['kill', 'launch']);
 });
 
@@ -246,6 +276,16 @@ test('main-process matching is exact and excludes child processes', () => {
   assert.equal(isDesktopMainProcess(spec, rowCmd(), 'Cursor.exe', 'D:\\Cursor\\Cursor.exe', 'win32'), false);
   assert.equal(isDesktopMainProcess(spec, rowCmd(), 'powershell.exe', 'C:\\Apps\\Cursor\\Cursor.exe', 'win32'), false);
   assert.equal(isDesktopMainProcess(spec, rowCmd(), 'Cursor.exe', 'C:\\Apps\\Cursor\\Cursor.exe', 'linux'), false);
+});
+
+test('same-image descendants without --type are not treated as another main process', () => {
+  const exe = 'C:\\Apps\\Cursor\\Cursor.exe';
+  const rows = [
+    { pid: 100, parentPid: 50, name: 'Cursor.exe', exe, cmd: `"${exe}" --remote-debugging-address=127.0.0.1 --remote-debugging-port=9341`, created: 1000 },
+    { pid: 101, parentPid: 100, name: 'Cursor.exe', exe, cmd: `"${exe}" --type=utility`, created: 1001 },
+    { pid: 102, parentPid: 101, name: 'Cursor.exe', exe, cmd: `"${exe}" --dns-result-order=ipv4first`, created: 1002 },
+  ];
+  assert.deepEqual(selectDesktopMainProcesses(spec, rows, 'win32').map((row) => row.pid), [100]);
 });
 
 function rowCmd() { return '"C:\\Apps\\Cursor\\Cursor.exe"'; }
@@ -338,4 +378,11 @@ test('desktop renderer has an explicit host theme contract and idempotent live r
   assert.match(source, /--bc-panel-border/);
   assert.match(source, /--bc-panel-text/);
   assert.match(source, /data-bc-active="true"/);
+});
+
+test('desktop runners fail closed on stale identities and preserve video skin types', () => {
+  const source = fs.readFileSync(new URL('../../../scripts/desktop-cdp-runner.mjs', import.meta.url), 'utf8');
+  assert.match(source, /assertStableMedia\(resolved, checked\.identity\)/);
+  assert.match(source, /downloadApprovedAsset\(item, item\.type/);
+  assert.match(source, /createElement\(s\.type==='video'\?'video':'img'\)/);
 });

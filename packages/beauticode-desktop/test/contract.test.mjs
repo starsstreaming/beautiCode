@@ -11,7 +11,7 @@ const root = path.resolve(here, "..");
 test("desktop aggregate manifest is a public test package with one CLI", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
   assert.equal(manifest.name, "beauticode-desktop");
-  assert.equal(manifest.version, "0.1.0-test.2");
+  assert.equal(manifest.version, "0.1.0-test.12");
   assert.equal(manifest.private, false);
   assert.deepEqual(manifest.os, ["win32"]);
   assert.equal(manifest.bin["beauticode-desktop"], "./bin/beauticode-desktop.mjs");
@@ -31,6 +31,7 @@ test("CLI help exposes all supported hosts and lifecycle commands", () => {
   for (const command of ["install", "status", "uninstall"]) {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
+  assert.match(result.stdout, /all <install\|status\|health>/);
 });
 
 test("public route parser accepts only the five hosts and three lifecycle commands", async () => {
@@ -39,6 +40,9 @@ test("public route parser accepts only the five hosts and three lifecycle comman
   assert.deepEqual(parseCommand(["--help"]), { kind: "help" });
   assert.deepEqual(parseCommand(["cursor", "status"]), { kind: "host", host: "cursor", command: "status" });
   assert.deepEqual(parseCommand(["dsh", "install"]), { kind: "host", host: "dsh", command: "install" });
+  assert.deepEqual(parseCommand(["all", "install"]), { kind: "all", command: "install" });
+  assert.deepEqual(parseCommand(["all", "status"]), { kind: "all", command: "status" });
+  assert.throws(() => parseCommand(["all", "uninstall"]), /仅支持/);
   assert.throws(() => parseCommand(["unknown", "status"]), /宿主/);
   assert.throws(() => parseCommand(["codex", "restart"]), /命令/);
 });

@@ -8,11 +8,68 @@ import {
   classifyCodexLock,
   isCodexHelperCommand,
   recoverStaleCodexLock,
+  recoverStaleCodexGuardianLock,
 } from "../../../integrations/codex-desktop/lifecycle.mjs";
-import { startCodexHelperWatchdog } from "../../../integrations/codex-desktop/codex-watchdog.mjs";
+import { acquireCodexGuardianLease, startCodexHelperWatchdog } from "../../../integrations/codex-desktop/codex-watchdog.mjs";
 import { classifyCodexStartupProcess } from "../dist/launch.js";
 
 const HELPER_HOME = "C:\\Users\\me\\AppData\\Local\\beautiCode\\codex-plugin";
+
+test("second outer guardian cannot acquire a live lease", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-guardian-"));
+  try {
+    const first = await acquireCodexGuardianLease(root);
+    try {
+      await assert.rejects(() => acquireCodexGuardianLease(root), /running/);
+    } finally {
+      await first.release();
+    }
+    const second = await acquireCodexGuardianLease(root);
+    await second.release();
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("guardian lock with a reused unrelated live PID is reclaimable", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-guardian-stale-"));
+  const lockPath = path.join(root, "hosts", "codex", "guardian.lock");
+  try {
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(lockPath, lock(process.pid));
+    assert.equal(await recoverStaleCodexGuardianLock(lockPath, HELPER_HOME, {
+      pidAlive: () => true,
+      commandLine: () => 'node C:\\unrelated\\script.mjs',
+    }), true);
+    await assert.rejects(() => fs.access(lockPath));
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test("a live guardian launched from the versioned runtime retains its lease", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-guardian-versioned-"));
+  const lockPath = path.join(root, "hosts", "codex", "guardian.lock");
+  try {
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(lockPath, lock(12345));
+    const runtime = path.join(root, "runtime", "codex-plugin", "versions", "v1", "codex-watchdog.mjs");
+    assert.equal(await recoverStaleCodexGuardianLock(lockPath, [HELPER_HOME, path.join(root, "runtime", "codex-plugin")], {
+      pidAlive: () => true,
+      commandLine: () => `node "${runtime}"`,
+    }), false);
+    assert.equal((await fs.readFile(lockPath, "utf8")).length > 0, true);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test("fresh partial guardian lock is never reclaimed", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-guardian-partial-"));
+  const lockPath = path.join(root, "hosts", "codex", "guardian.lock");
+  try {
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(lockPath, "");
+    assert.equal(await recoverStaleCodexGuardianLock(lockPath, HELPER_HOME), false);
+    assert.equal(await fs.readFile(lockPath, "utf8"), "");
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
 
 function lock(pid) {
   return JSON.stringify({

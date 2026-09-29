@@ -1,7 +1,7 @@
 import type { DesktopCdpHostSpec } from "./types.js";
 
 export const DESKTOP_BACKGROUND_SCHEMA = "beauticode.desktop-background.v1";
-export const DESKTOP_BACKGROUND_VERSION = "v1.3";
+export const DESKTOP_BACKGROUND_VERSION = "v1.4";
 
 /**
  * Host-parameterized renderer payload. Media bytes never cross Runtime.evaluate:
@@ -40,16 +40,16 @@ document.querySelectorAll('[data-bc-desktop="'+CFG.kind+'"]').forEach(function(n
 
 var anchor=document.querySelector(CFG.anchorSelector);
 if(!anchor)return 'no-anchor';
-var anchorLabel=CFG.mount==='cursor'?anchor.querySelector('.ui-sidebar-menu-button-label'):anchor.querySelector('span.font-medium');
+var anchorLabel=CFG.mount==='cursor'?(anchor.querySelector('.ui-sidebar-menu-button-label')||anchor.querySelector('.agent-sidebar-cell-text')):anchor.querySelector('span.font-medium');
 if(!anchorLabel||anchorLabel.textContent.trim()!==CFG.anchorText)return 'anchor-text-mismatch';
 
 function node(tag,cls,text){var n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n}
 function icon(){var ns='http://www.w3.org/2000/svg',s=document.createElementNS(ns,'svg');[['viewBox','0 0 24 24'],['width','20'],['height','20'],['fill','none'],['stroke','currentColor'],['stroke-width','1.8'],['stroke-linecap','round'],['stroke-linejoin','round'],['aria-hidden','true']].forEach(function(a){s.setAttribute(a[0],a[1])});var r=document.createElementNS(ns,'rect');[['x','3'],['y','4'],['width','18'],['height','16'],['rx','2']].forEach(function(a){r.setAttribute(a[0],a[1])});var p=document.createElementNS(ns,'path');p.setAttribute('d','m7 15 3-3 2.5 2.5L15 12l3 3');var c=document.createElementNS(ns,'circle');[['cx','8'],['cy','9'],['r','1']].forEach(function(a){c.setAttribute(a[0],a[1])});s.append(r,p,c);return s}
 var entry;
 if(CFG.mount==='cursor'){
-  entry=anchor.cloneNode(true);entry.id=ENTRY;entry.removeAttribute('data-active');entry.setAttribute('data-action-id','beauticode-background');entry.setAttribute('aria-label',CFG.strings.entry);
-  var label=entry.querySelector('.ui-sidebar-menu-button-label');label.textContent=CFG.strings.entry;
-  var iw=entry.querySelector('.ui-sidebar-menu-button-icon-wrapper');if(iw)iw.replaceChildren(icon());
+  entry=anchor.cloneNode(true);entry.id=ENTRY;entry.setAttribute('role','button');entry.setAttribute('tabindex','0');entry.setAttribute('aria-label',CFG.strings.entry);entry.setAttribute('data-selected','false');entry.setAttribute('data-action-id','beauticode-background');
+  var label=entry.querySelector('.ui-sidebar-menu-button-label')||entry.querySelector('.agent-sidebar-cell-text');if(label)label.textContent=CFG.strings.entry;
+  var iw=entry.querySelector('.ui-sidebar-menu-button-icon-wrapper')||entry.querySelector('.agent-sidebar-cell-icon');if(iw)iw.replaceChildren(icon());
 }else{
   entry=anchor.cloneNode(false);entry.id=ENTRY;entry.removeAttribute('data-expand');entry.setAttribute('data-testid','beauticode-background-entry');
   var navRow=anchor.firstElementChild.cloneNode(false);navRow.setAttribute('role','button');navRow.setAttribute('tabindex','0');var outer=node('div','flex w-full items-center justify-between'),inner=node('div','truncate ml-[8px] flex-1 min-w-0 s-font-small flex items-center'),entryLabel=node('span','font-medium',CFG.strings.entry);inner.appendChild(entryLabel);outer.appendChild(inner);navRow.append(icon(),outer);

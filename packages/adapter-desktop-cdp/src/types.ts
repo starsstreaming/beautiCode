@@ -81,12 +81,27 @@ export interface DesktopCdpHostSpec {
   popupTopInset: number;
   targetUrl: string;
   targetRuntimeUrl: string;
+  targetIdentity?: DesktopTargetIdentity;
   mount: "cursor" | "doubao";
   anchorSelector: string;
   anchorText: string;
   strings: DesktopHostStrings;
   contract: DesktopBackgroundContract;
   theme: DesktopThemeContract;
+}
+
+/** Structured identity for hosts whose renderer URL contains an install path. */
+export interface DesktopTargetIdentity {
+  protocol: string;
+  hostname: string;
+  pathSuffix: string;
+  /** At least one marker must be present in the target URL path, title, or
+   * /json/version Browser value. */
+  hostEvidence?: Readonly<{
+    path?: readonly string[];
+    targetText?: readonly string[];
+    browser?: readonly string[];
+  }>;
 }
 
 export interface DesktopTarget {

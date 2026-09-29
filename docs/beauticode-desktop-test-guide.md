@@ -1,6 +1,18 @@
-# beauticode-desktop 0.1.0-test.2 Windows 测试指南
+# beauticode-desktop 0.1.0-test.9 Windows 测试指南
 
-本文对应测试包 beauticode-desktop@0.1.0-test.2。它是 Windows-only 的聚合测试包，内置 DSH、Codex Desktop、WorkBuddy、Cursor、豆包五套已编译运行时；安装后不需要 beautiCode 源码仓库、workspace package 或 pnpm。
+> Codex MSIX 的直接启动路径已改为安全拦截，并加入包激活接入；但本版尚未通过原图标受控重开验收。测试期间不要把 Codex MSIX 的自动 CDP 修复视为已验证；如果测试失败，请保留诊断结果并正常关闭后手动重开。其余四个宿主不受此项限制。
+
+> 版本边界：下面的 tgz、大小和 SHA-256 只适用于 `0.1.0-test.9`；不要拿这里的哈希验证其他版本。
+
+本版包含聚合安装的守护存活验收、可信 Windows 注册路径识别、单次 CDP 启动修复和逐宿主结果。执行一条显式 `all install` 命令后，程序等待用户从原始图标打开客户端，不会替用户启动官方客户端。只有准确识别的、年龄小于 10 秒的单一主进程可受控重启一次；旧进程、用户主动关闭、多主进程或上游拒绝 CDP 时不会无限重启。`installed` 表示接线与守护已验证，不等于当前页面已显示背景。DSH 不使用 CDP 守护；本机已有开发 Junction 时会报告 `conflict` 并保留原链接。
+
+本版增量验收：Codex 安装改为当前用户低权限登录计划任务 `beautiCode Codex Guardian`，`beauticode-desktop codex status` 仍只检查安装标记，新增 `beauticode-desktop codex health` 只读分层报告 `installation / guardian / host / cdp / entry / action`。任务只有登录触发、IgnoreNew、无限执行时限和有限失败重试；用户主动关闭 Codex 后不应自动重开。旧的无 CDP 进程超过 10 秒只提示用户自行重开，不由健康检查结束进程。卸载只删除归属本产品的任务和旧 Run 值，保留媒体与主题。
+
+test.9 增量修复：Codex 计划任务用当前 Windows 账户名注册，并在回读时解析 SID；任务所有权只按 SID 与启动脚本校验，不因用户名相同而接管其他任务。DSH 仅接受指向安装器管理目录的精确 Junction；第三方、失效或不可检查的链接会 fail-closed 并给出不同诊断原因。Windows 计划任务注册/回读已在本机通过；普通登录后的守护长期驻留仍需按第 7 节实机验收。
+
+WorkBuddy 在导航挂载时预建舞台。显式清除态和已保存媒体优先于内置默认壁纸；首次无媒体且未清除时才铺默认图。守护直接向 `%LOCALAPPDATA%\beauticode\logs\wb-runner.log` 写有限大小日志并保留一份 `.previous`；登录 VBS 无标准流转发时仍应有启动记录。`workbuddy status` 只读显示日志存在性、可写性和最后更新时间，不以空日志判断进程生死。皮肤中心中文名称只记录每次进程内的 HMAC/UTF-8 长度差异，不自动改写旧名称。实际安装后须按无状态首启、图片/视频恢复、清除后重启、侧栏重挂和约 800 MB 有效视频逐项验收。
+
+本文对应测试包 beauticode-desktop@0.1.0-test.9。它是 Windows-only 的聚合测试包，内置 DSH、Codex Desktop、WorkBuddy、Cursor、豆包五套已编译运行时；安装后不需要 beautiCode 源码仓库、workspace package 或 pnpm。内置 4K 壁纸改为像素一致的无损 WebP；原图仍保留在源码仓库，不在测试包中重复携带。
 
 这是测试版操作说明，不代表正式发布承诺。请先在非关键环境验证；宿主客户端升级后，DOM 锚点、CDP 行为或启动参数可能变化。
 
@@ -9,20 +21,20 @@
 从当前工作区取得的 tgz：
 
 ~~~text
-C:\Users\29468\.codex\worktrees\cursor-doubao-backgrounds\beautiCode\artifacts\beauticode-desktop-0.1.0-test.2.tgz
+C:\Users\29468\.codex\worktrees\cursor-doubao-backgrounds\beautiCode\artifacts\beauticode-desktop-0.1.0-test.9.tgz
 ~~~
 
-SHA-256（应完全一致）：
+SHA-256（应完全一致；包大小 21,545,293 字节，小于 25,000,000 字节）：
 
 ~~~text
-5E0F109767C809AF6F6A7C2C1C8E627BD9FFD6DF24E474CE463712AD459B5030
+40C8A16E1BDD354F5D2946729E645F1FD5B7C9079FB9714A3495F4BF0E5A0E3E
 ~~~
 
 在 PowerShell 中核对（Get-FileHash 只读）：
 
 ~~~powershell
-$pkg = 'C:\Users\29468\.codex\worktrees\cursor-doubao-backgrounds\beautiCode\artifacts\beauticode-desktop-0.1.0-test.2.tgz'
-$expected = '5E0F109767C809AF6F6A7C2C1C8E627BD9FFD6DF24E474CE463712AD459B5030'
+$pkg = 'C:\Users\29468\.codex\worktrees\cursor-doubao-backgrounds\beautiCode\artifacts\beauticode-desktop-0.1.0-test.9.tgz'
+$expected = '40C8A16E1BDD354F5D2946729E645F1FD5B7C9079FB9714A3495F4BF0E5A0E3E'
 $actual = (Get-FileHash -LiteralPath $pkg -Algorithm SHA256).Hash
 $actual
 if ($actual -ne $expected) { throw "SHA256 不匹配：$actual" }
@@ -45,10 +57,18 @@ npm --version
 
 ## 3. 安装测试版 CLI
 
+若要用一条 PowerShell 命令为本机检测到的受支持客户端安装或更新背景功能，使用本地 tgz：
+
+~~~powershell
+npm exec --yes --ignore-scripts --package='C:\Users\29468\.codex\worktrees\cursor-doubao-backgrounds\beautiCode\artifacts\beauticode-desktop-0.1.0-test.9.tgz' -- beauticode-desktop all install
+~~~
+
+这条命令会逐项输出 installed / skipped / conflict / failed。未检测到的宿主会跳过；某项冲突或失败不会阻止后续宿主，但命令以非零状态结束。若五项全跳过，也以非零状态结束，不会假报成功。它会注册并验证 beautiCode 自己的守护，不主动打开缺失的客户端；新近启动、缺少 CDP 的 Codex/Cursor/豆包/WorkBuddy 可能被守护受控重启一次。已有 DSH 开发 Junction 会保留并报告冲突；若你要保留它，其他四宿主成功后不必为该非零退出码卸载重装。Cursor 自定义安装位置可通过经过验证的 Windows 卸载注册信息识别；无法识别的路径仍须排查，不应猜测进程。此命令不会在当前 shell 永久安装 CLI；需要长期使用 CLI 时按下方全局安装。
+
 npm install -g --ignore-scripts 会修改当前用户的 npm 全局目录（写入包文件和 beauticode-desktop 命令），因此这是有副作用的命令；不会修改宿主客户端安装目录。使用本地 tgz，不要把测试包误当成 registry 正式版本：
 
 ~~~powershell
-npm install -g --ignore-scripts 'C:\Users\29468\.codex\worktrees\cursor-doubao-backgrounds\beautiCode\artifacts\beauticode-desktop-0.1.0-test.2.tgz'
+npm install -g --ignore-scripts 'C:\Users\29468\.codex\worktrees\cursor-doubao-backgrounds\beautiCode\artifacts\beauticode-desktop-0.1.0-test.9.tgz'
 ~~~
 
 确认命令解析到预期全局安装：
@@ -58,10 +78,11 @@ Get-Command beauticode-desktop
 beauticode-desktop --help
 ~~~
 
-预期帮助文本只接受下面的二级命令，不要自行添加 --host、--port 等参数：
+预期帮助文本接受下面的二级命令，不要自行添加 --host、--port 等参数：
 
 ~~~text
 beauticode-desktop <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall>
+beauticode-desktop all <install|status>
 ~~~
 
 卸载 CLI 本身（可选，会修改 npm 全局目录；不会按宿主卸载后台接线）：
@@ -83,6 +104,8 @@ beauticode-desktop <host> uninstall
 | status | 否（只读） | 读取包内运行时文件和宿主接线标记，输出 JSON；不会启动、重启、停止宿主或守护。它不等于 CDP 页面已连接。 |
 | install | 是 | 调用对应包内 runtime，可能写用户配置/启动项、写状态目录并启动 beautiCode 守护；不修改官方宿主安装文件。 |
 | uninstall | 是 | 调用对应 runtime 移除 beautiCode 自己的接线/启动项；不会删除用户原始媒体。由脚本管理的 beautiCode 守护会按宿主实现停止。 |
+| all install | 是 | 仅对检测到的受支持宿主逐项安装或更新；缺失宿主跳过，失败逐项报告。不会自动卸载已成功安装的其他宿主。 |
+| all status | 否（只读） | 汇总五宿主包内运行时和安装标记；不检测页面是否已注入。 |
 
 建议先逐宿主执行一次 status，保存原始 JSON；测试结束后对同一宿主执行 uninstall。不要用 taskkill /F、结束任务树或强杀官方客户端；如果需要关闭宿主，请从宿主自己的菜单或原始图标正常退出。
 
@@ -96,7 +119,7 @@ beauticode-desktop <host> uninstall
 | Cursor | beauticode-desktop cursor install | 检查 beauticode-cursor-runner.vbs 标记；不证明目标页契约匹配 | beauticode-desktop cursor uninstall；停止受管理 runner、清理注入并删除自启，保留 state/媒体 | 启动文件夹 VBS |
 | 豆包 | beauticode-desktop doubao install | 检查 beauticode-doubao-runner.vbs 标记；不证明目标页契约匹配 | beauticode-desktop doubao uninstall；停止受管理 runner、清理注入并删除自启，保留 state/媒体 | 启动文件夹 VBS |
 
-逐项 smoke 命令（status 不会写入用户状态）：
+一次查看五项只读状态：`beauticode-desktop all status`。逐项 smoke 命令（status 不会写入用户状态）：
 
 ~~~powershell
 beauticode-desktop dsh status
@@ -199,7 +222,7 @@ node --version
 
 ## 11. 测试版与 Codex 当前运行态限制
 
-- 0.1.0-test.2 是本地 tgz 测试包；npm install -g 只更新 CLI 和包内运行时文件，不会把改动热注入已经运行的 Codex Desktop、其他宿主页面或已启动 watcher。
+- 0.1.0-test.9 是本地 tgz 测试包；npm install -g 只更新 CLI 和包内运行时文件，不会把改动热注入已经运行的 Codex Desktop、其他宿主页面或已启动 watcher。
 - Codex install 会把 watcher/runtime 复制到 %LOCALAPPDATA%\beautiCode\codex-plugin。已经运行的 watcher 可能继续使用旧的已加载代码；升级测试包后，应按正常流程执行 beauticode-desktop codex uninstall，安装新 tgz，再正常打开/关闭 Codex 或重新执行 beauticode-desktop codex install，用 watch.log 和页面入口确认新运行态。
 - codex uninstall 的公开语义是取消开机自动注入；不要把它理解成强制终止当前 Codex 或删除所有用户数据。当前 Codex/旧 watcher 请通过正常应用退出路径结束。
 - 当前运行的 Codex 页面不会因为 npm install 自动刷新 CSS、UI、皮肤中心或 adapter。需要验证新包时必须在正常宿主生命周期后重新观察，不要用强杀命令制造“已更新”的假象。
@@ -207,7 +230,7 @@ node --version
 ## 12. 脱敏反馈模板
 
 ~~~text
-包版本：beauticode-desktop@0.1.0-test.2
+包版本：beauticode-desktop@0.1.0-test.9
 Windows 版本：<仅填大版本/构建号，勿填用户名>
 Node：<node --version>
 宿主及版本：<dsh/Codex/WorkBuddy/Cursor/豆包 + 版本>
@@ -218,4 +241,4 @@ Node：<node --version>
 日志片段：<3–10 行，移除用户名、绝对路径、URL query、token、账号和媒体文件名>
 ~~~
 
-本指南只覆盖测试包实际暴露的 dsh|codex|workbuddy|cursor|doubao 与 install|status|uninstall 合约；需要更底层的 runner 参数或源码开发流程时，请回到仓库内对应宿主文档，不要把未公开参数当作稳定 CLI 接口。
+本指南只覆盖测试包实际暴露的五宿主 install|status|uninstall，以及 all install|status 合约；需要更底层的 runner 参数或源码开发流程时，请回到仓库内对应宿主文档，不要把未公开参数当作稳定 CLI 接口。

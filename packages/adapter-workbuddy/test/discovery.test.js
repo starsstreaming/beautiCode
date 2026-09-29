@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
+import { StartupRepairChain } from "@beauticode/core";
 import {
   DEFAULT_WORKBUDDY_CDP_PORT,
   WORKBUDDY_CDP_ENV_KEY,
   classifyWorkBuddyStartupProcess,
+  discoverWorkBuddyCdp,
   isWorkBuddyMainProcess,
   parsePsElapsedSeconds,
   parseRemoteDebuggingFlags,
@@ -24,6 +26,28 @@ test("WorkBuddy uses a dedicated fallback when Codex owns the default port", () 
   assert.deepEqual(workBuddyCdpPortCandidates(9335).slice(0, 2), [9335, 9336]);
   assert.equal(selectWorkBuddyCdpPort(9335, new Set([9335])), 9336);
   assert.equal(selectWorkBuddyCdpPort(9335, new Set([9335, 9336])), 9222);
+});
+
+test("bounded CDP ports are probed concurrently but retain priority order", async () => {
+  let active = 0;
+  let peak = 0;
+  const seen = [];
+  const result = await discoverWorkBuddyCdp({
+    ports: [9336, 9335, 9222],
+    probe: async (port) => {
+      active++;
+      peak = Math.max(peak, active);
+      seen.push(port);
+      await new Promise((resolve) => setTimeout(resolve, port === 9336 ? 20 : 2));
+      active--;
+      return port === 9222 || port === 9336
+        ? { port, browserUrl: `http://127.0.0.1:${port}`, source: "probe" }
+        : null;
+    },
+  });
+  assert.equal(peak, 3);
+  assert.deepEqual(seen, [9336, 9335, 9222]);
+  assert.equal(result?.port, 9336);
 });
 
 test("port selection skips a foreign CDP owner and keeps WorkBuddy identity checks", async () => {
@@ -85,6 +109,36 @@ test("ensure repairs a fresh foreign-port WorkBuddy process onto 9336", async ()
   assert.deepEqual(launched, [9336]);
   assert.equal(waitCalls, 2);
   assert.deepEqual(result, { ...target, launched: true, restarted: true });
+});
+
+test("WorkBuddy reconnect cannot restart a blind replacement of its own failed repair", async () => {
+  let pid = 42;
+  let closed = false;
+  let stops = 0;
+  const chain = new StartupRepairChain();
+  const hooks = {
+    discover: async () => null,
+    listProcesses: async () => closed ? [] : [{
+      pid, name: "WorkBuddy.exe", executablePath: "C:\\Apps\\WorkBuddy.exe",
+      commandLine: '"C:\\Apps\\WorkBuddy.exe"', port: null, createdAtMs: Date.now(),
+    }],
+    stopFresh: async () => { stops++; return true; },
+    findExecutable: () => "C:\\Apps\\WorkBuddy.exe",
+    pickPort: async () => 9336,
+    launchWithCdp: async () => {},
+    waitForCdp: async () => null,
+  };
+  const options = { repairChain: chain, launchIfMissing: false, hooks };
+  await assert.rejects(ensureWorkBuddyCdp(options), /未出现本机 CDP/);
+  pid = 43;
+  await assert.rejects(ensureWorkBuddyCdp(options), (error) => error.code === "WB_REPAIR_SUPPRESSED");
+  assert.equal(stops, 1);
+  closed = true;
+  await assert.rejects(ensureWorkBuddyCdp(options), /等待用户从原始图标启动/);
+  closed = false;
+  pid = 44;
+  await assert.rejects(ensureWorkBuddyCdp(options), /未出现本机 CDP/);
+  assert.equal(stops, 2);
 });
 
 test("foreign CDP identity skips the 2s settling grace before fresh repair", async () => {
@@ -159,6 +213,18 @@ test("ensure never repairs an old or multi-process WorkBuddy session", async () 
     /没有 WorkBuddy 目标页/,
   );
   assert.equal(stopped, 0);
+});
+
+test("unsafe fresh repair failures carry a safe diagnostic code", async () => {
+  const fresh = {
+    pid: 42, name: "WorkBuddy.exe",
+    executablePath: "C:\\Program Files\\WorkBuddy\\WorkBuddy.exe",
+    commandLine: '"C:\\Program Files\\WorkBuddy\\WorkBuddy.exe"',
+    port: null, createdAtMs: Date.now(),
+  };
+  const hooks = { discover: async () => null, listProcesses: async () => [fresh, { ...fresh, pid: 43 }] };
+  await assert.rejects(ensureWorkBuddyCdp({ hooks }), (error) => error.code === "WB_REPAIR_AMBIGUOUS");
+  await assert.rejects(ensureWorkBuddyCdp({ hooks: { ...hooks, listProcesses: async () => [{ ...fresh, createdAtMs: Date.now() - 30_000 }] } }), (error) => error.code === "WB_REPAIR_STALE");
 });
 
 test("ensure does not launch when the user has closed WorkBuddy", async () => {

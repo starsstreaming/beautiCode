@@ -262,7 +262,7 @@ foreach ($relativeFile in @(
     "assets\themes\internal-beyond\bg-internal.jpg",
     "assets\themes\internal-beyond\bg-infernal.jpg",
     "assets\themes\internal-beyond\bg-canvas.png",
-    "assets\themes\internal-beyond\bg-canvas-4k.png",
+    "assets\themes\internal-beyond\bg-canvas-4k.webp",
     "assets\themes\internal-beyond\NOTICE.md",
     "integrations\deepseek-harness\cordis.patch.example.yml",
     "integrations\deepseek-harness\README.zh-CN.md",

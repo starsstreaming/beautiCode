@@ -9,13 +9,29 @@ import { stageDesktopAggregate } from "../../../scripts/pack-desktop-aggregate.m
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+test("packed Codex and WorkBuddy runtimes include new recovery modules", async () => {
+  const dest = await fs.mkdtemp(path.join(os.tmpdir(), "bc-recovery-pack-"));
+  try {
+    await stageDesktopAggregate(dest, { build: false });
+    for (const relative of [
+      "codex/task-wiring.mjs", "codex/health.mjs",
+      "desktop/packages/beauticode-desktop/src/windows-host-install.mjs",
+      "desktop/scripts/desktop-runner-identity.mjs",
+      "workbuddy/scripts/wb-startup-media.mjs",
+      "workbuddy/scripts/wb-runner-log.mjs",
+      "workbuddy/scripts/wb-theme-name-diagnostic.mjs",
+      "workbuddy/packages/adapter-workbuddy/dist/background-stage.js",
+    ]) await fs.access(path.join(dest, "runtime", relative));
+  } finally { await fs.rm(dest, { recursive: true, force: true }); }
+});
+
 test("staging produces one self-contained runtime for all five hosts", async () => {
   const dest = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-desktop-pack-"));
   try {
     await stageDesktopAggregate(dest, { build: false });
     const pkg = JSON.parse(await fs.readFile(path.join(dest, "package.json"), "utf8"));
     assert.equal(pkg.name, "beauticode-desktop");
-    assert.equal(pkg.version, "0.1.0-test.2");
+    assert.equal(pkg.version, "0.1.0-test.12");
     assert.equal(pkg.private, false);
     assert.equal(pkg.bin["beauticode-desktop"], "./bin/beauticode-desktop.mjs");
     for (const [host, config] of Object.entries(HOST_RUNTIME)) {
@@ -23,6 +39,13 @@ test("staging produces one self-contained runtime for all five hosts", async () 
         await fs.access(path.join(dest, "runtime", relative));
       }
       assert.ok(host);
+    }
+    for (const hostRoot of ["dsh/themes/internal-beyond", "workbuddy/assets/themes/internal-beyond"]) {
+      const themeDir = path.join(dest, "runtime", hostRoot);
+      const webp = await fs.readFile(path.join(themeDir, "bg-canvas-4k.webp"));
+      assert.equal(webp.toString("ascii", 0, 4), "RIFF");
+      assert.equal(webp.toString("ascii", 8, 12), "WEBP");
+      await assert.rejects(fs.access(path.join(themeDir, "bg-canvas-4k.png")), { code: "ENOENT" });
     }
 
     const sourceFiles = [];

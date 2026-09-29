@@ -1,11 +1,38 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { renderRuntimeLauncherPs1 } from "../../../scripts/portable-runtime.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../../..");
+
+test("machine status is read-only JSON and does not infer a runner from an install marker", { skip: process.platform !== "win32" }, async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "bc-wb-machine-status-"));
+  try {
+    const result = spawnSync(process.execPath, [path.join(repo, "scripts", "wb-setup.mjs"), "status", "--machine-status"], {
+      env: { ...process.env, LOCALAPPDATA: root, APPDATA: path.join(root, "Roaming") },
+      encoding: "utf8", windowsHide: true, timeout: 15_000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const status = JSON.parse(result.stdout);
+    assert.equal(status.installed, false);
+    assert.equal(status.running, false);
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});
+
+test("only WorkBuddy launcher records bounded early startup errors", () => {
+  const ordinary = renderRuntimeLauncherPs1({ host: "cursor" });
+  const workbuddy = renderRuntimeLauncherPs1({ host: "workbuddy", startupLogPath: "C:\\Users\\me\\AppData\\Local\\beauticode\\logs\\wb-runner.log" });
+  assert.doesNotMatch(ordinary, /launcher-failure/);
+  assert.match(workbuddy, /launcher-failure/);
+  assert.match(workbuddy, /wb-runner\.log/);
+  assert.doesNotMatch(workbuddy, /\$_.Exception.Message/);
+});
 
 test("Windows file picker is launched in STA with a TopMost owner", () => {
   const source = fs.readFileSync(path.join(repo, "scripts", "wb-cdp-runner.mjs"), "utf8");
@@ -34,6 +61,16 @@ test("wb-setup persists env, installs a watchdog runner, and logs under LocalApp
   assert.match(source, /9336/);
   assert.match(source, /--watchdog/);
   assert.match(source, /['"]beauticode['"],\s*['"]logs['"]/);
+  assert.match(source, /detached: true, stdio: \['ignore', 'ignore', 'ignore'\], windowsHide: true/);
+  assert.doesNotMatch(source, /stdio:\s*\['ignore', out, out\], windowsHide: true/);
+  assert.match(source, /spawn\('wscript\.exe', \['\/\/B', STARTUP_VBS\]/);
+  assert.doesNotMatch(source, /spawn\('powershell\.exe', \['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', runtime\.launcher/);
+});
+
+test("the stable WorkBuddy runner resolves core without workspace node_modules", () => {
+  const source = fs.readFileSync(path.join(repo, "scripts", "wb-cdp-runner.mjs"), "utf8");
+  assert.match(source, /import\(['"]\.\.\/packages\/core\/dist\/index\.js['"]\)/);
+  assert.doesNotMatch(source, /await import\(['"]@beauticode\/core['"]\)/);
 });
 
 test("runner/setup preserve the selected port and never trust a reused watchdog PID", () => {

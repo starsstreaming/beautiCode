@@ -24,11 +24,23 @@
  */
 
 import { spawn, spawnSync, execSync } from 'node:child_process';
+import { isManagedWorkBuddyRunner, readWindowsProcess } from './guardian-process.mjs';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  activateStableRuntime,
+  discardStableRuntime,
+  hostRuntimeRoot,
+  renderWindowsStartupVbs,
+  resolveNodeExecutable,
+  stableRuntimeRoot,
+  startupDirectory,
+  syncStableRuntime,
+  writeTextAtomic,
+} from './portable-runtime.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUNNER = path.join(REPO, 'scripts', 'wb-cdp-runner.mjs');
@@ -148,10 +160,48 @@ function broadcastWindowsEnvironment() {
   });
 }
 
+const WB_RUNTIME_PREFIXES = [
+  'scripts/wb-cdp-runner.mjs',
+  'scripts/quick-launch.mjs',
+  'scripts/wb-startup-media.mjs',
+  'scripts/wb-runner-log.mjs',
+  'scripts/wb-theme-name-diagnostic.mjs',
+  'packages/core/dist/',
+  'packages/adapter-workbuddy/dist/',
+  'assets/themes/internal-beyond/',
+];
+function wbRuntimeFilter(relative, entry) {
+  const normalized = relative.replaceAll('\\', '/');
+  return entry.isDirectory()
+    ? WB_RUNTIME_PREFIXES.some((prefix) => prefix.startsWith(normalized) || normalized.startsWith(prefix))
+    : WB_RUNTIME_PREFIXES.some((prefix) => prefix.endsWith('/') ? normalized.startsWith(prefix) : normalized === prefix);
+}
+
+async function prepareStableRuntime() {
+  const runtime = await syncStableRuntime({
+    sourceRoot: REPO,
+    stableRoot: STABLE_ROOT,
+    host: 'workbuddy',
+    entrypoint: 'scripts/wb-cdp-runner.mjs',
+    filter: wbRuntimeFilter,
+    activate: false,
+  });
+  try {
+    await resolveNodeExecutable({ stableRoot: runtime.hostRoot });
+    return await activateStableRuntime(runtime, { startupLogPath: WIN_LOG });
+  } catch (error) {
+    await discardStableRuntime(runtime);
+    throw error;
+  }
+}
+
 // ── 各平台路径与实现 ──────────────────────────────────────────────────
 const LAUNCHER_MAC = path.join(home, 'Library/LaunchAgents/com.beauticode.wb-runner.plist');
 const MAC_LOG = path.join(home, 'Library/Logs/beauticode-wb-runner.log');
-const STARTUP_VBS = path.join(home, 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/beauticode-wb-runner.vbs');
+const STABLE_ROOT = stableRuntimeRoot(process.env, home);
+const STABLE_HOST_ROOT = hostRuntimeRoot(STABLE_ROOT, 'workbuddy');
+const STARTUP_VBS = path.join(startupDirectory(process.env, home), 'beauticode-wb-runner.vbs');
+const LEGACY_STARTUP_VBS = path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'beauticode-wb-runner.vbs');
 const WIN_LOG = path.join(
   process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'),
   'beauticode', 'logs', 'wb-runner.log',
@@ -159,7 +209,7 @@ const WIN_LOG = path.join(
 const LINUX_ENV = path.join(home, '.config/environment.d/beauticode-wb.conf');
 const LINUX_DESKTOP = path.join(home, '.config/autostart/beauticode-beauticode-wb-runner.desktop');
 const PID_FILE = PLAT === 'win32'
-  ? path.join(home, 'AppData', 'Roaming', 'beauticode', 'wb-runner.pid')
+  ? path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'beauticode', 'wb-runner.pid')
   : PLAT === 'darwin'
     ? path.join(home, 'Library', 'Logs', 'beauticode-wb-runner.pid')
     : '/tmp/beauticode-wb-runner.pid';
@@ -181,7 +231,7 @@ const macPlist = () => `<?xml version="1.0" encoding="UTF-8"?>
 function vbsString(value) {
   return `"${String(value).replace(/"/g, '""')}"`;
 }
-const winVbs = () => `CreateObject("WScript.Shell").Run ${vbsString(`"${NODE}" "${RUNNER}" --watchdog`)}, 0, False`;
+const winVbs = (launcher) => renderWindowsStartupVbs({ launcher, args: ['--watchdog'] });
 
 function shSingleQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
@@ -223,27 +273,42 @@ function statusMac() {
   log(`  LaunchAgent：${fs.existsSync(LAUNCHER_MAC) ? '已安装' : '未安装'}${loaded ? '（已装载）' : ''}`);
 }
 
-function installWin() {
+async function installWin(runtime) {
   const r = spawnSync('setx', [ENV_KEY, port], { encoding: 'utf8' });
   log(r.status === 0 ? '  ✓ setx 已持久化用户环境变量（点图标启动的 WorkBuddy 自带 CDP）'
                      : `  ✗ setx 失败：${r.stderr}`);
   broadcastWindowsEnvironment();
   log('  ✓ 已广播环境变更（无需注销即可让后续原图标启动继承端口）');
   fs.mkdirSync(path.dirname(STARTUP_VBS), { recursive: true });
-  fs.writeFileSync(STARTUP_VBS, winVbs());
-  log('  ✓ 已写入「启动」文件夹 VBS（登录自启、隐藏窗口）');
+  const startupContent = winVbs(runtime.launcher);
+  let currentStartupContent = null;
+  try { currentStartupContent = fs.readFileSync(STARTUP_VBS, 'utf8'); }
+  catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  if (currentStartupContent !== startupContent) await writeTextAtomic(STARTUP_VBS, startupContent);
+  if (path.resolve(LEGACY_STARTUP_VBS) !== path.resolve(STARTUP_VBS)) fs.rmSync(LEGACY_STARTUP_VBS, { force: true });
+  log(currentStartupContent === startupContent
+    ? '  ✓「启动」文件夹 VBS 已是当前配置（跳过无变化替换）'
+    : '  ✓ 已写入「启动」文件夹 VBS（登录自启、隐藏窗口）');
   if (process.env[ENV_KEY] !== port) {
     log('  ⚠ 当前会话还没继承新 env：注销重登一次，或先手动带 env 启动一次 WorkBuddy');
   }
 }
 function uninstallWin() {
   fs.rmSync(STARTUP_VBS, { force: true });
+  fs.rmSync(LEGACY_STARTUP_VBS, { force: true });
   run(`reg delete "HKCU\\Environment" /v ${ENV_KEY} /f`);
   log('  ✓ 已拆除启动项并删除用户环境变量');
 }
 function statusWin() {
   log(`  用户 env：${run('reg query "HKCU\\Environment" /v ' + ENV_KEY).out.includes(ENV_KEY) ? '已设置' : '未设置'}`);
   log(`  启动项：${fs.existsSync(STARTUP_VBS) ? '已安装' : '未安装'}`);
+  let state = '不存在';
+  try {
+    const info = fs.statSync(WIN_LOG);
+    const writable = (() => { try { fs.accessSync(WIN_LOG, fs.constants.W_OK); return true; } catch { return false; } })();
+    state = `${writable ? '可写' : '不可写'}，最后更新 ${info.mtime.toISOString()}`;
+  } catch { /* read-only status: missing is not proof the runner stopped */ }
+  log(`  守护日志：${state}`);
 }
 
 function installLinux() {
@@ -263,16 +328,18 @@ function statusLinux() {
   log(`  autostart：${fs.existsSync(LINUX_DESKTOP) ? '已安装' : '未安装'}`);
 }
 
-function findWindowsRunnerPids() {
+function findWindowsRunnerPids(nodeOnly = false) {
   if (PLAT !== 'win32') return [];
   // Never trust a stale/reused PID file on Windows. Restrict discovery to the
   // exact runner path and watchdog mode, so install/uninstall cannot kill a
   // user's unrelated process (or WorkBuddy/Codex) after a PID was recycled.
   const runner = String(RUNNER).replace(/'/g, "''");
+  const stable = String(STABLE_HOST_ROOT).replace(/'/g, "''");
   const script = [
     `$runner='${runner}'`,
-    '$needle=$runner.ToLowerInvariant()',
-    "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^node(\\.exe)?$' -and $_.CommandLine -and $_.CommandLine.ToLowerInvariant().Contains($needle) -and $_.CommandLine -match '--watchdog' } | Select-Object -ExpandProperty ProcessId",
+    `$stable='${stable}'`,
+    '$needle=$runner.ToLowerInvariant(); $stableNeedle=$stable.ToLowerInvariant()',
+    `Get-CimInstance Win32_Process | Where-Object { $_.Name -match '${nodeOnly ? '^node(\\.exe)?$' : '^(node|powershell)(\\.exe)?$'}' -and $_.CommandLine -and ( $_.CommandLine.ToLowerInvariant().Contains($needle) -or $_.CommandLine.ToLowerInvariant().Contains($stableNeedle) ) -and $_.CommandLine -match '--watchdog' } | Select-Object -ExpandProperty ProcessId`,
   ].join('; ');
   const result = spawnSync('powershell.exe', [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script,
@@ -281,6 +348,18 @@ function findWindowsRunnerPids() {
   return String(result.stdout || '').split(/\s+/)
     .map((value) => Number.parseInt(value, 10))
     .filter((value) => Number.isInteger(value) && value > 0);
+}
+
+function managedWindowsRunnerProcess() {
+  if (PLAT !== 'win32') return null;
+  let record;
+  try { record = JSON.parse(fs.readFileSync(PID_FILE, 'utf8')); }
+  catch { return null; }
+  const pid = Number(record?.pid);
+  const current = readWindowsProcess(pid);
+  return isManagedWorkBuddyRunner(record, current, {
+    stableHostRoot: STABLE_HOST_ROOT, sourceRunner: RUNNER, pidFile: PID_FILE,
+  }) ? current : null;
 }
 
 function stopManagedDaemon() {
@@ -306,15 +385,25 @@ function startDaemon() {
   const logFile = PLAT === 'darwin' ? MAC_LOG : PLAT === 'win32' ? WIN_LOG : '/tmp/beauticode-wb-runner.log';
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
-  const out = fs.openSync(logFile, 'a');
-  const child = spawn(NODE, [RUNNER, '--watchdog'], {
+  // The Windows runner rotates this file itself. An inherited open handle
+  // prevents rename on Windows and can leave an unbounded old log behind.
+  const out = PLAT === 'win32' ? null : fs.openSync(logFile, 'a');
+  const child = PLAT === 'win32'
+    // Use the same VBS as login startup. Its asynchronous Run detaches from
+    // installer job lifetime; a direct PowerShell child can vanish on exit.
+    ? spawn('wscript.exe', ['//B', STARTUP_VBS], {
+      detached: true, stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true,
+      env: { ...process.env, [ENV_KEY]: port },
+    })
+    : spawn(NODE, [RUNNER, '--watchdog'], {
     detached: true, stdio: ['ignore', out, out],
     env: { ...process.env, [ENV_KEY]: port },
     windowsHide: true,
   });
+  if (out !== null) fs.closeSync(out);
   child.unref();
-  fs.writeFileSync(PID_FILE, String(child.pid));
-  log(`  ✓ 守护已启动（pid ${child.pid}，日志 ${logFile}）`);
+  if (PLAT !== 'win32') fs.writeFileSync(PID_FILE, String(child.pid));
+  log(`  ✓ 守护启动器已调用（pid ${child.pid}，日志 ${logFile}）`);
 }
 
 async function cdpUp() {
@@ -327,6 +416,20 @@ if (!fs.existsSync(RUNNER)) {
 }
 
 if (cmd === 'status') {
+  if (PLAT === 'win32' && process.argv.includes('--machine-status')) {
+    let health = { state: 'probe-failed' };
+    try {
+      const adapterUrl = pathToFileURL(path.join(REPO, 'packages', 'adapter-workbuddy', 'dist', 'index.js')).href;
+      const adapter = await import(adapterUrl);
+      health = await adapter.inspectWorkBuddyUiHealth();
+    } catch { /* report a sanitized failure instead of spawning the long-lived runner */ }
+    process.stdout.write(JSON.stringify({
+      installed: fs.existsSync(STARTUP_VBS),
+      running: Boolean(managedWindowsRunnerProcess()),
+      health,
+    }) + '\n');
+    process.exit(0);
+  }
   log(`平台：${PLAT}   端口：${port}`);
   if (PLAT === 'darwin') statusMac(); else if (PLAT === 'win32') statusWin(); else statusLinux();
   log(`  CDP：${(await cdpUp()) ? '在线（WorkBuddy 正带着调试端口运行）' : '离线（WorkBuddy 未启动，或本次启动还没带 CDP）'}`);
@@ -342,19 +445,23 @@ if (cmd === 'uninstall') {
   process.exit(0);
 }
 
-// install
-log(`安装 beautiCode × WorkBuddy（${PLAT}，端口 ${port}）：`);
-writeConfiguredPort(port);
-if (PLAT === 'darwin') installMac(); else if (PLAT === 'win32') installWin(); else installLinux();
-
 if (PACKAGED_RUNTIME) {
   log('  ✓ 使用包内预构建 WorkBuddy adapter');
+} else if (!fs.existsSync(path.join(REPO, 'package-lock.json'))) {
+  throw new Error('包内 WorkBuddy runtime 不完整：缺少预构建 adapter；拒绝访问源码或临时 npm 缓存。');
 } else {
   const build = spawnSync('npm', ['run', 'build', '-w', '@beauticode/adapter-workbuddy'], {
     cwd: REPO, encoding: 'utf8', shell: PLAT === 'win32',
   });
   log(build.status === 0 ? '  ✓ adapter 编译通过' : `  ✗ adapter 编译失败：\n${(build.stderr || build.stdout || '').slice(0, 400)}`);
 }
+
+// install — resolve and stage first; startup wiring is only replaced after
+// the stable runtime and verified Node are ready.
+log(`安装 beautiCode × WorkBuddy（${PLAT}，端口 ${port}）：`);
+const stableRuntime = PLAT === 'win32' ? await prepareStableRuntime() : null;
+writeConfiguredPort(port);
+if (PLAT === 'darwin') installMac(); else if (PLAT === 'win32') await installWin(stableRuntime); else installLinux();
 
 startDaemon();
 

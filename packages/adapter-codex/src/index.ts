@@ -47,6 +47,7 @@ export {
   type CodexHostApplierOptions,
   type ConnectedTarget,
 } from "./host-applier.js";
+export { selectCodexPrimaryTargets } from "./target-selection.js";
 
 export {
   acquireInjectorLock,

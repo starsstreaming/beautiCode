@@ -34,7 +34,7 @@ const PLUGIN_FILES = [
 ];
 
 const THEME_FILES = [
-  "bg-canvas-4k.png",
+  "bg-canvas-4k.webp",
   "bg-canvas.png",
   "bg-internal.jpg",
   "bg-infernal.jpg",

@@ -51,12 +51,12 @@ function pidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return error?.code !== "ESRCH";
   }
 }
 
-function processCommandLine(pid) {
+export function processCommandLine(pid) {
   if (process.platform !== "win32") return "";
   try {
     const script =
@@ -96,6 +96,34 @@ export async function recoverStaleCodexLock(lockPath, helperHome) {
   });
   if (state.status === "owned") return false;
 
+  return quarantineUnchanged(lockPath, raw);
+}
+
+/** A reused PID is safe to reclaim only when its actual command is unrelated. */
+export async function recoverStaleCodexGuardianLock(lockPath, helperHomes, probes = {}) {
+  if (!isCodexNamespaceLock(lockPath, "guardian.lock")) return false;
+  let raw;
+  try { raw = await fs.readFile(lockPath, "utf8"); }
+  catch (error) { if (error?.code === "ENOENT") return false; throw error; }
+  const owner = parseCodexLockOwner(raw);
+  if (!owner) {
+    const info = await fs.stat(lockPath).catch(() => null);
+    if (!info || Date.now() - info.mtimeMs < 10_000) return false;
+  }
+  const alive = probes.pidAlive ?? pidAlive;
+  const readCommand = probes.commandLine ?? processCommandLine;
+  if (owner && alive(owner.pid)) {
+    const command = readCommand(owner.pid);
+    if (!command) return false;
+    const normalized = command.replaceAll("\\", "/").toLowerCase();
+    const homes = (Array.isArray(helperHomes) ? helperHomes : [helperHomes])
+      .map((home) => path.resolve(home).replaceAll("\\", "/").toLowerCase());
+    if (homes.some((home) => normalized.includes(`${home}/`) && normalized.includes("/codex-watchdog.mjs"))) return false;
+  }
+  return quarantineUnchanged(lockPath, raw);
+}
+
+async function quarantineUnchanged(lockPath, raw) {
   const quarantine = `${lockPath}.stale-${process.pid}-${crypto.randomUUID()}`;
   try {
     await fs.rename(lockPath, quarantine);
@@ -116,11 +144,42 @@ export function shouldRestartCodexHelper({ stopping = false } = {}) {
   return !stopping;
 }
 
-function isCodexNamespaceLock(lockPath) {
+/** Stop only verified installed beautiCode guardian processes, never Codex. */
+export function stopInstalledCodexGuardians(helperHome, stableHostRoot) {
+  if (process.platform !== "win32") return 0;
+  const allowed = [
+    path.join(helperHome, "start-watch.ps1"),
+    path.join(helperHome, "codex-watchdog.mjs"),
+    path.join(helperHome, "watch-host.mjs"),
+    path.join(stableHostRoot, "launcher.ps1"),
+  ].map((value) => path.resolve(value).replaceAll("\\", "/").toLowerCase());
+  const versionPrefix = path.join(stableHostRoot, "versions").replaceAll("\\", "/").toLowerCase() + "/";
+  const script = "$p=Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('node.exe','powershell.exe','pwsh.exe') }; $p | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress";
+  let rows;
+  try {
+    const raw = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8", windowsHide: true, timeout: 5_000, maxBuffer: 1024 * 1024,
+    }).trim();
+    rows = raw ? JSON.parse(raw) : [];
+  } catch { return 0; }
+  let stopped = 0;
+  for (const row of Array.isArray(rows) ? rows : [rows]) {
+    const pid = Number(row?.ProcessId);
+    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue;
+    const command = String(row?.CommandLine || "").replaceAll("\\", "/").toLowerCase();
+    const versionedGuardian = command.includes(versionPrefix) &&
+      (command.includes("/codex-watchdog.mjs") || command.includes("/watch-host.mjs"));
+    if (!versionedGuardian && !allowed.some((scriptPath) => command.includes(scriptPath))) continue;
+    try { process.kill(pid); stopped++; } catch { /* already stopped */ }
+  }
+  return stopped;
+}
+
+function isCodexNamespaceLock(lockPath, name = "injector.lock") {
   const resolved = path.resolve(String(lockPath ?? ""));
   const namespace = path.dirname(resolved);
   return (
-    path.basename(resolved).toLowerCase() === "injector.lock" &&
+    path.basename(resolved).toLowerCase() === name &&
     path.basename(namespace).toLowerCase() === "codex" &&
     path.basename(path.dirname(namespace)).toLowerCase() === "hosts"
   );

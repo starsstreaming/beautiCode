@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { HOSTS, resolveRoute, runHostCommand } from "../src/index.mjs";
+import { HOSTS, parseCommand, resolveRoute, runHostCommand } from "../src/index.mjs";
+
+test("per-host health commands are read-only", () => {
+  assert.deepEqual(parseCommand(["codex", "health"]), { kind: "host", host: "codex", command: "health" });
+  assert.deepEqual(parseCommand(["workbuddy", "health"]), { kind: "host", host: "workbuddy", command: "health" });
+  assert.deepEqual(resolveRoute("codex", "health"), { host: "codex", command: "health", readOnly: true });
+});
 
 test("each host resolves install and uninstall to a package-local script", () => {
   for (const host of HOSTS) {
