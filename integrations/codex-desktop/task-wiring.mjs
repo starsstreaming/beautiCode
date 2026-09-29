@@ -28,7 +28,13 @@ function taskOwner(record, starter, sid) {
   const sameUser = expectedSid.startsWith("s-1-") && actualSid === expectedSid;
   const command = String(record.execute).replaceAll("/", "\\").toLowerCase();
   const argument = String(record.arguments).replaceAll("/", "\\").toLowerCase();
-  return sameUser && path.win32.basename(command) === "powershell.exe" &&
+  // Windows 11 默认终端（WT）会收养控制台进程并忽略 -WindowStyle Hidden，
+  // 因此任务 action 允许两种归属形态：裸 powershell.exe，或
+  // conhost.exe --headless 包裹版（无头控制台，开机不弹黑窗）。
+  const barePowershell = path.win32.basename(command) === "powershell.exe";
+  const headlessConhost = path.win32.basename(command) === "conhost.exe" &&
+    argument.includes("--headless");
+  return sameUser && (barePowershell || headlessConhost) &&
     argument.includes(`-file "${path.win32.resolve(starter).toLowerCase()}"`);
 }
 
@@ -54,10 +60,11 @@ export function createCodexTaskAdapter(starter, { taskName = CODEX_TASK_NAME, ru
     assertOwned,
     async register() {
       const user = identity();
-      const args = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${starter}"`;
+      const args = `--headless powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${starter}"`;
       // Task Scheduler accepts account names consistently; readback resolves to SID, which alone authorizes ownership.
       // Keep the CDP recovery observer active when a laptop switches to battery power.
-      runPowerShell(`$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ${quote(args)}; ` +
+      // conhost.exe --headless：脱离 WT 收养链，开机登录不再弹出黑色终端窗口。
+      runPowerShell(`$a=New-ScheduledTaskAction -Execute 'conhost.exe' -Argument ${quote(args)}; ` +
         `$t=New-ScheduledTaskTrigger -AtLogOn -User ${quote(user.name)}; ` +
         `$p=New-ScheduledTaskPrincipal -UserId ${quote(user.name)} -LogonType Interactive -RunLevel Limited; ` +
         "$s=New-ScheduledTaskSettingsSet -Hidden -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; " +
