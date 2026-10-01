@@ -46,8 +46,6 @@ beautiCode 是一个本地动态皮肤工具：把图片、视频或带氛围特
 | **Cursor** | 桌面 CDP 守护 | Windows | ✅ 支持（基线 3.18.9） |
 | **豆包** | 桌面 CDP 守护 | Windows | ✅ 支持（基线 2.29.12） |
 
-各客户端的能力略有差异：摸鱼模式（隐藏界面只看壁纸）目前只在 DSH 和 Codex 上提供；明暗压暗（tone）支持 DSH、Codex、WorkBuddy。
-
 beautiCode 不会修改任何客户端的安装文件，也不替厂商发布补丁——DSH 走官方插件接口，桌面客户端走 `127.0.0.1` 本机调试端口注入，可随时干净卸载。
 
 ## 皮肤与主题
@@ -70,22 +68,9 @@ beautiCode 不会修改任何客户端的安装文件，也不替厂商发布补
 
 保存当前背景为主题、随时切换、删除；视频主题按主题记录播放进度，切回来时接着上次的位置播。
 
-### 摸鱼模式
-
-`Ctrl+Shift+Space` 或托盘菜单一键进入：隐藏客户端界面，只留壁纸全亮度铺满。再按一次退出。仅 DSH 与 Codex 提供。
-
 ## 安装
 
-### 只给 DeepSeek Harness 用（最省事）
-
-```sh
-npx beauticode-dsh
-dsh web
-```
-
-装好插件后，打开 DSH「设置」，左侧导航会多出「背景」一项，不需要托盘。也可以在对话里输入 `/bg <文件路径>`、`/bg-theme <名称>`、`/bg-clear`，或直接让 AI 帮你换背景。
-
-### 一个命令接管所有已装客户端（Windows）
+### 一个命令接管所有已装客户端（Windows）（最省事）
 
 ```sh
 npm install -g beauticode-desktop --foreground-scripts
@@ -93,6 +78,15 @@ beauticode-desktop all install
 ```
 
 `all install` 会检测本机已安装的客户端，逐一套上后台接线，并为已检测到的客户端创建带背景的开始菜单快捷方式；它不会替你启动客户端。首次启用 CDP 的客户端请用新快捷方式启动一次。
+
+### 只给 DeepSeek Harness 用
+
+```sh
+npx beauticode-dsh
+dsh web
+```
+
+装好插件后，打开 DSH「设置」，左侧导航会多出「背景」一项，不需要托盘。也可以在对话里输入 `/bg <文件路径>`、`/bg-theme <名称>`、`/bg-clear`，或直接让 AI 帮你换背景。
 
 ### Windows 安装包
 
