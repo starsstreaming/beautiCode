@@ -73,10 +73,7 @@ beautiCode 不会修改任何客户端的安装文件，也不替厂商发布补
 ### 直接复制发给你的Agent（最省事）
 
 ```sh
-请在我的电脑上安装 最新版beauticode-desktop，保留工作内容。
-遇到异常请处理，确保适配层的守护自动注入。
-安装成功应返回 ok:true；客户端未打开时“等待启动”属于正常状态。
-最后简短告诉我安装结果、未解决的问题，以及如何打开背景。
+请在我的电脑上运行 npm install -g beauticode-desktop --foreground-scripts && beauticode-desktop all install 安装最新版 beautiCode，不要关闭正在运行的客户端、保留工作内容。异常请用 beauticode-desktop all status / all health 诊断并处理，确保各宿主的守护已安装并能自动注入。返回 ok:true 即成功；未安装的客户端显示 skipped、客户端未启动显示 wait-for-launch 均属正常。最后简短汇报：安装结果、未解决的问题、以及如何打开背景。
 ```
 
 ### 一个命令接管所有已装客户端（Windows）（手动安装）
