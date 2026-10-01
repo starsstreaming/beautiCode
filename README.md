@@ -4,61 +4,99 @@
   <p>
     <strong>中文</strong> · <a href="./README.en.md">English</a>
   </p>
-  <img width="1672" height="941" alt="ChatGPT Image 2026年8月16日 10_58_15" src="https://github.com/user-attachments/assets/c943a0fb-ff48-4361-9e6f-c4b1521aee2b" />
+
+  <img width="1672" height="941" alt="ba6a554d-08c1-4d99-abd0-b0ce94478c73" src="https://github.com/user-attachments/assets/d010a8ce-b131-47ef-a1aa-3a473290a4f8" />
 
 </div>
 
 <p align="center">
-  <strong>把你喜欢的画面，放进 vibe coding 的每一分钟。</strong>
+  <strong>给 AI 编程客户端换皮肤的本地工具。</strong>
 </p>
 
 <p align="center">
-  为 DeepSeek Harness 添加图片与视频背景，也支持 Codex Desktop。<br>
-  可以是一张壁纸，也可以是一部番剧、一个壁纸，或者一段陪你度过漫长工作的风景。
+  一张壁纸、一部番剧、一段会下雨的窗景——放进 DeepSeek Harness、Codex Desktop、<br>
+  WorkBuddy、Cursor、豆包的对话窗口背后，安静地待在那里。
 </p>
+
+
+https://github.com/user-attachments/assets/f1b52d41-aea4-4330-80e1-5a90c344360e
+
 
 ---
 
-
 ## 它是什么？
 
-beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness 和 Codex**，并提供可选的 Cursor、豆包 Windows 适配。
+beautiCode 是一个本地动态皮肤工具：把图片、视频或带氛围特效的壁纸，注入到你正在使用的 AI 编程客户端界面背后。代码、输入框和按钮照常工作——它不是把窗口变成播放器，而是让画面待在对话和工作区后面。
 
-它不包含、不安装、也不启动 DSH。请先自行安装 DeepSeek Harness 并运行 `dsh web`。插件装好后，打开 DSH 的「设置」，左侧导航里会多出一项「背景」，不必再开托盘。Codex Desktop 仍走 beautiCode 托盘。可以把电脑里的：
+皮肤有两个来源：
 
-* 图片
-* 动态壁纸
-* MP4 / MOV 视频
-* 番剧
+* **皮肤中心**：在线目录，浏览、搜索、一键安装经过审核的皮肤，下载到本机后自动应用
+* **本地导入**：从系统文件夹里挑你自己的图片或视频（JPG / JPEG / PNG / WebP / AVIF，MP4 / MOV）
 
-直接设成 DeepSeek Harness 网页背后的背景。
-
-它不会把工作窗口变成一个播放器，而是让画面安静地待在对话和工作区后面。
-
-代码、输入框和按钮仍然可以正常使用。
-
-<img width="1280" height="714" alt="QQ20260818-205802" src="https://github.com/user-attachments/assets/a9a18412-4c62-4083-ab49-d127f05e61c3" />
+导入的内容都可以存成命名主题，随时切换；视频主题会记住上次播放进度。
 
 
-## 使用方式
+## 支持的客户端
 
-### 一键安装插件（推荐）
+| 客户端 | 接入方式 | 平台 | 状态 |
+|---|---|---|---|
+| **DeepSeek Harness** | Cordis 插件，设置页内嵌「背景」面板 | Windows | ✅ 推荐，无需托盘 |
+| **Codex Desktop** | 托盘 or 本机 CDP 注入 | Windows | ✅ 支持 |
+| **WorkBuddy** | 官方 CDP 开关 + 守护注入 | Windows / macOS | ✅ 支持 |
+| **Cursor** | 桌面 CDP 守护 | Windows | ✅ 支持（基线 3.18.9） |
+| **豆包** | 桌面 CDP 守护 | Windows | ✅ 支持（基线 2.29.12） |
+
+各客户端的能力略有差异：摸鱼模式（隐藏界面只看壁纸）目前只在 DSH 和 Codex 上提供；明暗压暗（tone）支持 DSH、Codex、WorkBuddy。
+
+beautiCode 不会修改任何客户端的安装文件，也不替厂商发布补丁——DSH 走官方插件接口，桌面客户端走 `127.0.0.1` 本机调试端口注入，可随时干净卸载。
+
+## 皮肤与主题
+
+### 皮肤中心
+
+打开客户端内的「皮肤中心」（DSH 设置页 / 各客户端注入面板里的入口），可以按名称搜索、按图片或视频筛选，点卡片即安装：下载 → 写入本机主题 → 应用到当前窗口，进度实时可见。上传与审核在皮肤中心网站进行；只有审核通过的皮肤会出现在目录里，来源与版本会记录在主题信息里。
+
+### 本地导入
+
+从系统原生文件选择器挑一个文件，起一个名字（1–80 字符），即成主题。主题只记录名称、类型和原始路径——文件移动或删除后会提示不可用，清除背景不会删掉已存主题。
+
+### 动态皮肤
+
+* **视频背景**：MP4 / MOV 循环播放，默认静音，可手动开声；自动播放被拦时会保持静音播放并提示
+* **氛围特效**：内置「画窗」等预设，在图片上叠雨丝、水波、光效层，让静态壁纸动起来
+* **智能压暗**：首页保持壁纸原亮度；进入工作状态后自动压暗，保证文字可读（DSH / Codex / WorkBuddy）
+
+### 主题管理
+
+保存当前背景为主题、随时切换、删除；视频主题按主题记录播放进度，切回来时接着上次的位置播。
+
+### 摸鱼模式
+
+`Ctrl+Shift+Space` 或托盘菜单一键进入：隐藏客户端界面，只留壁纸全亮度铺满。再按一次退出。仅 DSH 与 Codex 提供。
+
+## 安装
+
+### 只给 DeepSeek Harness 用（最省事）
+
+```sh
+npx beauticode-dsh
+dsh web
+```
+
+装好插件后，打开 DSH「设置」，左侧导航会多出「背景」一项，不需要托盘。也可以在对话里输入 `/bg <文件路径>`、`/bg-theme <名称>`、`/bg-clear`，或直接让 AI 帮你换背景。
+
+### 一个命令接管所有已装客户端（Windows）
 
 ```sh
 npm install -g beauticode-desktop --foreground-scripts
 beauticode-desktop all install
 ```
 
-`--foreground-scripts` 会显示安装提示。npm 7 及更新版本默认隐藏提示；`postinstall` 只显示说明，不会自动安装守护。`all install` 为当前 Windows 用户安装后台集成，并为已检测到的宿主创建开始菜单快捷方式；它不会启动客户端。
+`all install` 会检测本机已安装的客户端，逐一套上后台接线，并为已检测到的客户端创建带背景的开始菜单快捷方式；它不会替你启动客户端。首次启用 CDP 的客户端请用新快捷方式启动一次。
 
-首次启用 CDP 时，请用后台快捷方式启动客户端。如果客户端已经运行但没有 CDP，请先正常关闭，再使用快捷方式启动。DSH 使用插件，不需要 CDP 快捷方式。
+### Windows 安装包
 
-项目内安装：
-
-```sh
-npm install beauticode-desktop --foreground-scripts
-npm exec -- beauticode-desktop all install
-```
+从 [Releases](https://github.com/starsstreaming/beautiCode/releases/latest) 下载安装包。安装包自带 Node.js，不需要单独装 Node / npm / pnpm，结束时自动接线 DSH 插件。安装器暂无商业代码签名，Windows 可能弹 SmartScreen 提示。
 
 ### 检查与单独管理
 
@@ -68,42 +106,18 @@ beauticode-desktop all health
 beauticode-desktop <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall|health>
 ```
 
-`all status` 和 `all health` 都是只读命令；health 会检查守护、宿主进程、CDP 连接和背景注入状态。`all install` 会跳过未安装的宿主，并继续处理其他宿主；`installed` 表示插件或守护已通过检查，不代表客户端已启动。需要单独卸载时使用宿主命令，例如 `beauticode-desktop codex uninstall`。
+`status` / `health` 为只读；`install` 会跳过未安装的客户端；单独卸载用宿主命令，例如 `beauticode-desktop cursor uninstall`。
 
-守护只会对启动不足 10 秒且已确认身份的单个进程尝试一次受控重启；不会终止较旧或身份不明的进程，也不会无限重启。
+## 安全边界
 
-**Codex MSIX：**本包使用程序包感知启动。MSIX 的 CDP 修复仍待原始图标重启测试验证，验证前请视为未经确认。
+* 所有注入只走 `127.0.0.1` 本机调试端口或官方插件接口，不改客户端二进制
+* 应用前校验、应用后回读验证，失败自动回滚，不会静默画坏页面
+* 守护只对启动不足 10 秒且已确认身份的进程做一次受控重启，不会无限重启、不碰无关进程
+* 导入媒体只读你主动选择的本地文件；控制通道使用随机令牌
 
-通过托盘菜单可以：
+## 关于本地媒体
 
-* 更换图片
-* 更换视频
-* 清除背景
-* 打开或关闭视频声音
-* 进入摸鱼模式
-* 保存当前主题
-* 切换已保存主题
-* 删除主题
-
-
-## 当前支持情况
-
-目前主要支持：
-
-* Windows
-* DeepSeek Harness（推荐）
-* Codex Desktop
-* JPG、JPEG、PNG、WebP 图片
-* MP4 / MOV 视频
-
-
-## 关于本地视频
-
-beautiCode 只读取你主动选择的本地图片和视频。
-
-项目不会提供番剧、电影或其他受版权保护的内容。
-
-请只导入你拥有或有权使用的媒体文件，并遵守当地法律与内容版权要求。
+beautiCode 只读取你主动选择的本地图片和视频。项目不提供番剧、电影或其他受版权保护的内容。请只导入你拥有或有权使用的媒体文件，并遵守当地法律与内容版权要求。
 
 ---
 
@@ -111,17 +125,9 @@ beautiCode 只读取你主动选择的本地图片和视频。
 
 因为代码工具不一定只能是冰冷、统一和毫无个性的。
 
-有人喜欢极简黑色。
+有人喜欢极简黑色。有人喜欢雨夜城市。有人喜欢动漫。有人喜欢在漫长的构建过程中，重新看一遍熟悉的电影。
 
-有人喜欢雨夜城市。
-
-有人喜欢动漫。
-
-有人喜欢在漫长的构建过程中，重新看一遍熟悉的电影。
-
-工具应该帮助人完成工作。
-
-但好的工具，也应该允许人把自己带进工作里。
+工具应该帮助人完成工作。但好的工具，也应该允许人把自己带进工作里。
 
 > **我们每天花很多时间面对代码。
 > beautiCode 想做的，只是让这些时间更像生活，而不只是等待完成的任务。**
@@ -133,19 +139,16 @@ beautiCode 只读取你主动选择的本地图片和视频。
 beautiCode 的部分媒体处理思路与实现经验参考并改编自：
 
 * Codex Dream Skin
-L站的支持：
-https://linux.do/
-画窗参考：
-https://github.com/Sui-IB/InternalBeyond
-相关开源许可、代码来源和修改说明见：
 
-```text
-THIRD_PARTY_NOTICES.md
-```
+L站的支持：https://linux.do/
 
-beautiCode 是非官方项目，与 DeepSeek、OpenAI、Codex 或其他应用厂商没有隶属或合作关系。
+画窗参考：https://github.com/Sui-IB/InternalBeyond
 
-DeepSeek Harness 的接入说明见 [`docs/deepseek-harness.md`](docs/deepseek-harness.md)。
+相关开源许可、代码来源和修改说明见 `THIRD_PARTY_NOTICES.md`。
+
+beautiCode 是非官方项目，与 DeepSeek、OpenAI、Codex、字节跳动、腾讯或其他应用厂商没有隶属或合作关系。
+
+各客户端的接入细节见 `docs/`：[`deepseek-harness.md`](docs/deepseek-harness.md)、[`host-adapter-cursor-doubao.md`](docs/host-adapter-cursor-doubao.md)、[`host-adapter-workbuddy.md`](docs/host-adapter-workbuddy.md)。
 
 ---
 
