@@ -88,9 +88,12 @@ dsh web
 
 装好插件后，打开 DSH「设置」，左侧导航会多出「背景」一项，不需要托盘。也可以在对话里输入 `/bg <文件路径>`、`/bg-theme <名称>`、`/bg-clear`，或直接让 AI 帮你换背景。
 
-### Windows 安装包
+###直接复制发给你的Agent：
 
-从 [Releases](https://github.com/starsstreaming/beautiCode/releases/latest) 下载安装包。安装包自带 Node.js，不需要单独装 Node / npm / pnpm，结束时自动接线 DSH 插件。安装器暂无商业代码签名，Windows 可能弹 SmartScreen 提示。
+请在我的电脑上安装 最新版beauticode-desktop，保留工作内容。
+遇到异常请处理，确保适配层的守护自动注入。
+安装成功应返回 ok:true；客户端未打开时“等待启动”属于正常状态。
+最后简短告诉我安装结果、未解决的问题，以及如何打开背景。
 
 ### 检查与单独管理
 
