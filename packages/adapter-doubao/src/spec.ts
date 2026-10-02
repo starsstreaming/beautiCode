@@ -1,27 +1,54 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { DesktopCdpHostSpec } from "@beauticode/adapter-desktop-cdp";
 
-function candidates(): string[] {
+interface CandidateOptions {
+  env?: NodeJS.ProcessEnv;
+  readRecord?: () => unknown;
+  exists?: (file: string) => boolean;
+  realpath?: (file: string) => string;
+}
+
+export function doubaoExecutableCandidates(options: CandidateOptions = {}): string[] {
+  const env = options.env || process.env;
+  const recordPath = path.join(env.LOCALAPPDATA || "", "beauticode", "hosts", "doubao", "executable.json");
+  const readRecord = options.readRecord || (() => JSON.parse(fs.readFileSync(recordPath, "utf8")) as unknown);
+  const exists = options.exists || fs.existsSync;
+  const realpath = options.realpath || fs.realpathSync.native;
   const values = [
-    process.env.LOCALAPPDATA
-      ? path.join(process.env.LOCALAPPDATA, "Doubao", "Doubao.exe")
+    env.LOCALAPPDATA
+      ? path.join(env.LOCALAPPDATA, "Doubao", "Doubao.exe")
       : "",
-    process.env.LOCALAPPDATA
-      ? path.join(process.env.LOCALAPPDATA, "Programs", "Doubao", "Doubao.exe")
+    env.LOCALAPPDATA
+      ? path.join(env.LOCALAPPDATA, "Programs", "Doubao", "Doubao.exe")
       : "",
-    process.env.ProgramFiles
-      ? path.join(process.env.ProgramFiles, "Doubao", "Doubao.exe")
+    env.ProgramFiles
+      ? path.join(env.ProgramFiles, "Doubao", "Doubao.exe")
       : "",
     "D:\\Doubao\\app\\Doubao.exe",
   ];
-  return [...new Set(values.filter(Boolean).map((value) => path.win32.normalize(value)))];
+  try {
+    const record = readRecord() as { schema?: unknown; host?: unknown; path?: unknown };
+    const candidate = typeof record?.path === "string" ? record.path : "";
+    if (record?.schema === "beauticode.host-executable/v1" && record.host === "doubao" &&
+      path.win32.isAbsolute(candidate) && path.win32.basename(candidate).toLowerCase() === "doubao.exe" && exists(candidate)) {
+      const canonical = path.win32.normalize(realpath(candidate));
+      if (path.win32.basename(canonical).toLowerCase() === "doubao.exe") values.push(canonical);
+    }
+  } catch { /* Missing or invalid ownership records must not change default discovery. */ }
+  const unique = new Map<string, string>();
+  for (const value of values.filter(Boolean)) {
+    const normalized = path.win32.normalize(value);
+    if (!unique.has(normalized.toLowerCase())) unique.set(normalized.toLowerCase(), normalized);
+  }
+  return [...unique.values()];
 }
 
 export const DOUBAO_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
   kind: "doubao",
   displayName: "豆包",
   processName: "Doubao.exe",
-  executableCandidates: Object.freeze(candidates()),
+  executableCandidates: Object.freeze(doubaoExecutableCandidates()),
   defaultPort: 9342,
   candidatePorts: Object.freeze([9352, 9362, 9372]),
   popupTopInset: 12,
