@@ -10,7 +10,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { recoverStaleCodexLock, stopInstalledCodexGuardians } from "./lifecycle.mjs";
-import { createCodexRunKeyAdapter, createCodexTaskAdapter, installCodexWiring, uninstallCodexWiring } from "./task-wiring.mjs";
+import { createCodexRunKeyAdapter, createCodexTaskAdapter, uninstallCodexWiring } from "./task-wiring.mjs";
 import { probeLocalCodexHealth } from "./health.mjs";
 
 function findPackageRoot(startDir) {
@@ -122,14 +122,24 @@ function startHidden(node, script) {
   child.unref();
 }
 
-function resumeLegacyGuardian(starter) {
-  const command = `powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${starter}"`;
-  const literal = `'${command.replaceAll("'", "''")}'`;
-  const script = `$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=${literal}}; if(-not $r -or $r.ReturnValue -ne 0){exit 1}`;
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], {
-    stdio: "ignore", windowsHide: true, timeout: 5_000,
-  });
+function psQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function startIndependentWindows(starter) {
+  const commandLine =
+    `powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${JSON.stringify(starter)}`;
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${psQuote(commandLine)} }`,
+    "if ($null -eq $result) { throw 'Win32_Process.Create returned no result' }",
+    "if ([int]$result.ReturnValue -ne 0) { exit [int]$result.ReturnValue }",
+  ].join("; ");
+  execFileSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { stdio: "pipe", windowsHide: true },
+  );
 }
 
 export function parseCodexCliMode(argv) {
@@ -180,7 +190,6 @@ export async function runCli(argv = process.argv.slice(2)) {
     filter: codexRuntimeFilter,
     activate: false,
   });
-  const oldPointer = await fsp.readFile(runtime.pointerPath, "utf8").catch(() => null);
   try {
     await portable.resolveNodeExecutable({ stableRoot: runtime.hostRoot });
     await portable.activateStableRuntime(runtime);
@@ -194,23 +203,15 @@ export async function runCli(argv = process.argv.slice(2)) {
   const namespaceLock = path.join(home, "..", "hosts", "codex", "injector.lock");
   await recoverStaleCodexLock(namespaceLock, home).catch(() => false);
   if (process.platform === "win32") {
+    const runKey = createCodexRunKeyAdapter(starter);
+    await runKey.read();
+    await runKey.restore(`powershell.exe -NoProfile -WindowStyle Hidden -File "${starter}"`);
     try {
-      await installCodexWiring({
-        task: createCodexTaskAdapter(starter),
-        runKey: createCodexRunKeyAdapter(starter),
-        stopOld: async () => stopInstalledCodexGuardians(home, runtime.hostRoot),
-        rollbackRuntime: async () => {
-          if (oldPointer !== null) await portable.writeTextAtomic(runtime.pointerPath, oldPointer);
-          else await fsp.rm(runtime.pointerPath, { force: true });
-        },
-        resumeOld: async () => resumeLegacyGuardian(starter),
-        starter,
-      });
+      startIndependentWindows(starter);
     } catch (error) {
-      if (oldPointer !== null) await portable.writeTextAtomic(runtime.pointerPath, oldPointer);
-      else await fsp.rm(runtime.pointerPath, { force: true });
-      await portable.discardStableRuntime(runtime);
-      throw error;
+      console.warn(
+        `本次未能立即启动后台监视器：${error instanceof Error ? error.message : String(error)}。下次登录时会自动启动。`,
+      );
     }
   } else {
     const node = await portable.resolveNodeExecutable({ stableRoot: runtime.hostRoot });

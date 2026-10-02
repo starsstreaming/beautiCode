@@ -38,7 +38,7 @@ function buildWindowsPickerScript(kind: "image" | "video"): string {
     "$dialog.CheckFileExists = $true",
     "$dialog.RestoreDirectory = $true",
     "$dialog.Title = '选择 beautiCode 背景文件'",
-    "try { [void]$owner.Show(); [void]$owner.Hide(); [void]$owner.Show(); $result = $dialog.ShowDialog($owner); if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.FileName) } } finally { $dialog.Dispose(); $owner.Close(); $owner.Dispose() }",
+    "try { [void]$owner.Show(); [void]$owner.Hide(); [void]$owner.Show(); [void]$owner.Activate(); [void]$owner.BringToFront(); [System.Windows.Forms.Application]::DoEvents(); $result = $dialog.ShowDialog($owner); if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.FileName) } } finally { $dialog.Dispose(); $owner.Close(); $owner.Dispose() }",
   ].join("; ");
 }
 

@@ -7,6 +7,7 @@ import { registerAgentSurfaces } from "./agent.mjs";
 import { resolvePluginBaseUrl } from "./host-apply.mjs";
 import { createBeauticodeUi } from "./ui-host.mjs";
 import { canvasImagePath, iceFrostImagePath, normalizeAtmosphere } from "./presets.mjs";
+import { createBrowserInjection, isAllowedLoopbackHost } from "./browser-injection.mjs";
 
 export const name = "beauticode-bridge";
 export const inject = ["webServer"];
@@ -16,8 +17,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const REVISION_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_BODY_BYTES = 64 * 1024;
-const LOOPBACK_HOST_PATTERN = /^(?:127\.0\.0\.1|localhost)$/i;
-const LOOPBACK_IPV6 = "[::1]";
 
 async function readBridgeIdentity() {
   try {
@@ -106,46 +105,6 @@ async function authorized(req, tokenFile) {
     actualBuffer.length === expectedBuffer.length &&
     crypto.timingSafeEqual(actualBuffer, expectedBuffer)
   );
-}
-
-function parseLoopbackAuthority(value) {
-  if (typeof value !== "string" || value.trim() !== value || /[\s,]/.test(value)) return null;
-  const bracketed = /^\[([^\]]+)\](?::([0-9]{1,5}))?$/.exec(value);
-  const plain = /^(127\.0\.0\.1|localhost)(?::([0-9]{1,5}))?$/i.exec(value);
-  const hostname = bracketed ? `[${bracketed[1].toLowerCase()}]` : plain?.[1]?.toLowerCase();
-  if (hostname !== LOOPBACK_IPV6 && !LOOPBACK_HOST_PATTERN.test(hostname || "")) return null;
-  const rawPort = bracketed?.[2] ?? plain?.[2] ?? "80";
-  const port = Number(rawPort);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
-  return { hostname, port, key: `${hostname}:${port}` };
-}
-
-function parseLoopbackOrigin(value) {
-  if (typeof value !== "string" || value === "null") return null;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-      return null;
-    }
-    return parseLoopbackAuthority(url.host);
-  } catch {
-    return null;
-  }
-}
-
-function isAllowedLoopbackHost(value) {
-  return Boolean(parseLoopbackAuthority(value));
-}
-
-export function isSameOrigin(req) {
-  const host = parseLoopbackAuthority(req?.headers?.host);
-  if (!host) return false;
-  const origin = req.headers.origin;
-  if (typeof origin === "string") {
-    const parsedOrigin = parseLoopbackOrigin(origin);
-    return Boolean(parsedOrigin && parsedOrigin.key === host.key);
-  }
-  return req.headers["sec-fetch-site"] === "same-origin";
 }
 
 function validLoopbackMediaUrl(value) {
@@ -241,6 +200,8 @@ function publicStatus(current, modes, clients, clientStates) {
 }
 
 export function apply(ctx, config = {}) {
+  const browserInjection = createBrowserInjection();
+  const isSameOrigin = (req) => browserInjection.isSameOrigin(req);
   const tokenFile = path.resolve(config.tokenFile || defaultTokenFile());
   const clients = new Map();
   const clientStates = new Map();
@@ -267,19 +228,28 @@ export function apply(ctx, config = {}) {
   };
 
   ctx.effect(() => {
-    const disposeTap = ctx.webServer.tapIndex((html) => {
-      if (html.includes("data-beauticode-bridge")) return html;
-      const script =
-        '<script defer src="/__beauticode/atmosphere.js"></script>' +
-        '<script defer src="/__beauticode/client.js" data-beauticode-bridge></script>' +
-        '<script defer src="/__beauticode/console.js"></script>' +
-        '<script defer src="/__beauticode/gallery.js"></script>';
-      return html.includes("</body>")
-        ? html.replace("</body>", `${script}</body>`)
-        : `${html}${script}`;
+    const disposeInjection = ctx.on("webserver/index-inject", (table) => {
+      browserInjection.contribute(table);
     });
 
     const disposers = [
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/transport.js",
+        handler: async (req, res) => {
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            res.writeHead(405).end();
+            return;
+          }
+          const source = await fs.readFile(path.join(here, "transport.js"));
+          res.writeHead(200, {
+            "content-type": "text/javascript; charset=utf-8",
+            "cache-control": "no-store",
+            "content-length": source.length,
+          });
+          res.end(req.method === "HEAD" ? undefined : source);
+        },
+      }),
       ctx.webServer.register({
         kind: "exact",
         path: "/__beauticode/version",
@@ -332,7 +302,6 @@ export function apply(ctx, config = {}) {
           }
           const source = await fs.readFile(filePath);
           res.writeHead(200, {
-            // Keep the established route while serving the selected lossless asset.
             "content-type": filePath.endsWith(".webp") ? "image/webp" : "image/png",
             "cache-control": "public, max-age=86400",
             "content-length": source.length,
@@ -682,7 +651,7 @@ export function apply(ctx, config = {}) {
     ];
 
     return () => {
-      disposeTap();
+      if (typeof disposeInjection === "function") disposeInjection();
       for (const dispose of disposers) dispose();
       for (const response of clients.values()) response.destroy();
       clients.clear();

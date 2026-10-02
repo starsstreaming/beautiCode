@@ -9,6 +9,22 @@ import { selectCodexPrimaryTargets } from "../dist/index.js";
 const ready = () => ({ runtimeReady: true, taskOwned: true });
 const guardian = () => "running";
 
+test("independent watcher installation recognizes owned Run startup wiring", async () => {
+  const result = await probeCodexHealth({
+    installation: () => ({ runtimeReady: true, taskOwned: false, runKeyOwned: true }),
+    guardian, host: () => [],
+  });
+  assert.equal(result.installation, "ready");
+  assert.equal(result.taskOwned, false);
+  assert.equal(result.runKeyOwned, true);
+  assert.equal(result.action, "wait-for-launch");
+  const unowned = await probeCodexHealth({
+    installation: () => ({ runtimeReady: true, taskOwned: false, runKeyOwned: false }),
+    guardian, host: () => [],
+  });
+  assert.equal(unowned.installation, "incomplete");
+});
+
 test("closed Codex is normal idle and never triggers a launch", async () => {
   const result = await probeCodexHealth({ installation: ready, guardian, host: () => [], cdp: () => { throw Error("not called"); }, entry: () => { throw Error("not called"); } });
   assert.equal(result.host, "closed");

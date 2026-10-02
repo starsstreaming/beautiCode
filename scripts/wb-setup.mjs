@@ -200,7 +200,7 @@ const LAUNCHER_MAC = path.join(home, 'Library/LaunchAgents/com.beauticode.wb-run
 const MAC_LOG = path.join(home, 'Library/Logs/beauticode-wb-runner.log');
 const STABLE_ROOT = stableRuntimeRoot(process.env, home);
 const STABLE_HOST_ROOT = hostRuntimeRoot(STABLE_ROOT, 'workbuddy');
-const STARTUP_VBS = path.join(startupDirectory(process.env, home), 'beauticode-wb-runner.vbs');
+const STARTUP_VBS = path.join(home, 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/beauticode-wb-runner.vbs');
 const LEGACY_STARTUP_VBS = path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'beauticode-wb-runner.vbs');
 const WIN_LOG = path.join(
   process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'),
@@ -228,9 +228,6 @@ const macPlist = () => `<?xml version="1.0" encoding="UTF-8"?>
   <key>StandardErrorPath</key><string>${MAC_LOG}</string>
 </dict></plist>`;
 
-function vbsString(value) {
-  return `"${String(value).replace(/"/g, '""')}"`;
-}
 const winVbs = (launcher) => renderWindowsStartupVbs({ launcher, args: ['--watchdog'] });
 
 function shSingleQuote(value) {
@@ -385,17 +382,8 @@ function startDaemon() {
   const logFile = PLAT === 'darwin' ? MAC_LOG : PLAT === 'win32' ? WIN_LOG : '/tmp/beauticode-wb-runner.log';
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
-  // The Windows runner rotates this file itself. An inherited open handle
-  // prevents rename on Windows and can leave an unbounded old log behind.
-  const out = PLAT === 'win32' ? null : fs.openSync(logFile, 'a');
-  const child = PLAT === 'win32'
-    // Use the same VBS as login startup. Its asynchronous Run detaches from
-    // installer job lifetime; a direct PowerShell child can vanish on exit.
-    ? spawn('wscript.exe', ['//B', STARTUP_VBS], {
-      detached: true, stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true,
-      env: { ...process.env, [ENV_KEY]: port },
-    })
-    : spawn(NODE, [RUNNER, '--watchdog'], {
+  const out = fs.openSync(logFile, 'a');
+  const child = spawn(NODE, [RUNNER, '--watchdog'], {
     detached: true, stdio: ['ignore', out, out],
     env: { ...process.env, [ENV_KEY]: port },
     windowsHide: true,

@@ -50,26 +50,21 @@ async function loadAdapter() {
 }
 const A = await loadAdapter();
 const core = await import('../packages/core/dist/index.js');
-const repairChain = new core.StartupRepairChain();
 const {
   BACKGROUND_BAR_INJECTION, BACKGROUND_BAR_CLEANUP, BACKGROUND_BAR_STYLE_ID,
   buildContractCss, readTheme,
   TOKEN_SCAN_EXPRESSION, buildTokenOverlayCss, TOKEN_OVERLAY_STYLE_ID,
   HARDCODED_SURFACE_SCAN_EXPRESSION, buildHardcodedSurfaceCss,
   buildStyleKeeperExpression,
-  pickWorkBuddyTarget, assertLoopbackDebuggerUrl,
+  pickWorkBuddyTarget, assertLoopbackDebuggerUrl, safeTargetLabel,
   ensureWorkBuddyCdp,
-  listWorkBuddyProcesses, selectWorkBuddyReconnectDelay,
-  isInitialPersistState,
 } = A;
 for (const [k, v] of Object.entries({
   BACKGROUND_BAR_INJECTION, BACKGROUND_BAR_CLEANUP, buildContractCss, readTheme,
   TOKEN_SCAN_EXPRESSION, buildTokenOverlayCss, TOKEN_OVERLAY_STYLE_ID,
   HARDCODED_SURFACE_SCAN_EXPRESSION, buildHardcodedSurfaceCss, buildStyleKeeperExpression,
-  pickWorkBuddyTarget, assertLoopbackDebuggerUrl,
+  pickWorkBuddyTarget, assertLoopbackDebuggerUrl, safeTargetLabel,
   ensureWorkBuddyCdp,
-  listWorkBuddyProcesses, selectWorkBuddyReconnectDelay,
-  isInitialPersistState,
 })) {
   if (typeof v !== 'string' && typeof v !== 'function') {
     process.stderr.write(`adapter 导出形状不对：${k}\n`); process.exit(2);
@@ -495,11 +490,12 @@ const ALPHA_VARIFY = (css) =>
   css.split(' 82%, transparent)').join(' var(--bc-surface-alpha-pct, 82%), transparent)');
 
 function isBlankPersistState(live) {
-  // Keep the explicit legacy-shape check here: an array containing saved
-  // themes is never considered hydration-blank, even if other fields are
-  // still at their renderer defaults.
-  const themesEmpty = !live || !Array.isArray(live.themes) || live.themes.length === 0;
-  return themesEmpty && isInitialPersistState(live);
+  return !live || (
+    !live.wallpaper && !live.cleared && !live.blob &&
+    live.dim == null && live.blur == null && live.alpha == null &&
+    (!Array.isArray(live.themes) || live.themes.length === 0) &&
+    !live.activeThemeId
+  );
 }
 
 function galleryConfigExpression() {
@@ -934,7 +930,8 @@ async function runWatchdog() {
     startedAtMs: Date.now(), image: process.execPath,
     runner: fileURLToPath(import.meta.url), pidFile: RUNNER_PID_FILE,
   };
-  try { fs.writeFileSync(RUNNER_PID_FILE, JSON.stringify(owner) + '\n', 'utf8'); } catch { /* best effort */ }
+  try { owner.createdAtMs = readWindowsProcess(process.pid)?.createdAtMs; } catch { /* non-Windows */ }
+  fs.writeFileSync(RUNNER_PID_FILE, JSON.stringify(owner), 'utf8');
   const releasePid = () => {
     try {
       if (JSON.parse(fs.readFileSync(RUNNER_PID_FILE, 'utf8')).pid === process.pid) {
@@ -952,8 +949,8 @@ async function runWatchdog() {
     });
     child.on('exit', (code, signal) => {
       if (stopping) process.exit(code ?? 0);
-      log.warn(`runner 退出（${code ?? signal}），1s 后拉起`);
-      setTimeout(start, 1000);
+      log.warn(`runner 退出（${code ?? signal}），3s 后拉起`);
+      setTimeout(start, 3000);
     });
   };
   const stop = () => {
@@ -987,18 +984,15 @@ async function main() {
         restartIfBlind: !args.noLaunch,
         repairWindowMs: 10_000,
         timeoutMs: args.once ? 15_000 : 40_000,
-        repairChain,
         log,
       });
-      const previousPort = PORT;
       PORT = ensured.port;
-      if (PORT !== previousPort) persistPortSelection(PORT);
       if (ensured.launched || ensured.restarted) {
         log.info(`WorkBuddy CDP 已就绪：127.0.0.1:${PORT}${ensured.restarted ? '（已重启）' : '（已启动）'}`);
       }
     } catch (e) {
-      if (args.once || args.noLaunch) { log.error('startup-fatal', safeErrorCode(e)); process.exit(1); }
-      log.warn('startup-not-ready', safeErrorCode(e));
+      if (args.once || args.noLaunch) { log.error('fatal: ' + e.message); process.exit(1); }
+      log.warn('启动检测暂未就绪：' + e.message.slice(0, 160) + ' —— 3s 后重试');
     }
   }
   for (;;) {
@@ -1007,32 +1001,22 @@ async function main() {
       log.info(`连接 http://127.0.0.1:${PORT} …`);
       await session();
     } catch (e) {
-      if (args.once) { log.error('connection-fatal', safeErrorCode(e)); process.exit(1); }
-      log.warn('connection-lost', safeErrorCode(e));
+      if (args.once) { log.error('fatal: ' + e.message); process.exit(1); }
+      log.warn('连接断开（' + e.message.slice(0, 80) + '），3s 后重试');
       if (!args.noLaunch) {
         try {
-          const processes = await listWorkBuddyProcesses();
-          repairChain.observeSnapshot(processes);
-          reconnectDelayMs = selectWorkBuddyReconnectDelay(processes);
-          // A missing process is an intentional user close: keep the idle
-          // cadence and never ask ensureWorkBuddyCdp to launch it.
-          if (processes.length > 0) {
-            const ensured = await ensureWorkBuddyCdp({
-              preferredPort: PORT,
-              launch: true,
-              launchIfMissing: false,
-              restartIfBlind: true,
-              repairWindowMs: 10_000,
-              timeoutMs: 20_000,
-              repairChain,
-              log,
-            });
-            const previousPort = PORT;
-            PORT = ensured.port;
-            if (PORT !== previousPort) persistPortSelection(PORT);
-          }
+          const ensured = await ensureWorkBuddyCdp({
+            preferredPort: PORT,
+            launch: true,
+            launchIfMissing: false,
+            restartIfBlind: true,
+            repairWindowMs: 10_000,
+            timeoutMs: 20_000,
+            log,
+          });
+          PORT = ensured.port;
         } catch (ensureErr) {
-          log.warn('workbuddy-not-ready', safeErrorCode(ensureErr));
+          log.warn('WorkBuddy 尚未恢复：' + ensureErr.message.slice(0, 120));
         }
       }
     }
@@ -1040,4 +1024,4 @@ async function main() {
     await new Promise((r) => setTimeout(r, reconnectDelayMs));
   }
 }
-main().catch((e) => { log.error('runner-fatal', safeErrorCode(e)); process.exit(1); });
+main().catch((e) => { log.error('fatal: ' + (e.stack || e.message)); process.exit(1); });

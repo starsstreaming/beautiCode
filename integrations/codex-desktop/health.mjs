@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createCodexTaskAdapter } from "./task-wiring.mjs";
+import { createCodexRunKeyAdapter, createCodexTaskAdapter } from "./task-wiring.mjs";
 import { parseCodexLockOwner, processCommandLine } from "./lifecycle.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,7 +24,7 @@ function actionFor(result) {
 
 export async function probeCodexHealth(deps, timeoutMs = 16_000) {
   const result = {
-    installation: "incomplete", taskOwned: false,
+    installation: "incomplete", taskOwned: false, runKeyOwned: false,
     guardian: "unknown", host: "unknown", cdp: "unknown",
     entry: "not-checked", primaryPages: 0, action: "none",
   };
@@ -50,7 +50,9 @@ export async function probeCodexHealth(deps, timeoutMs = 16_000) {
   ]);
   if (installation.ok) {
     result.taskOwned = installation.value?.taskOwned === true;
-    result.installation = installation.value?.runtimeReady && result.taskOwned ? "ready" : installation.value?.runtimeReady ? "incomplete" : "missing";
+    result.runKeyOwned = installation.value?.runKeyOwned === true;
+    const startupOwned = result.taskOwned || result.runKeyOwned;
+    result.installation = installation.value?.runtimeReady && startupOwned ? "ready" : installation.value?.runtimeReady ? "incomplete" : "missing";
   }
   if (guardian.ok) result.guardian = guardian.value;
   if (host.ok && Array.isArray(host.value)) {
@@ -95,13 +97,17 @@ export function isCodexRuntimeReady(baseRoot) {
 async function installed() {
   const home = path.join(base(), "codex-plugin");
   const runtimeReady = isCodexRuntimeReady(base());
-  if (process.platform !== "win32") return { runtimeReady: false, taskOwned: false };
-  const task = createCodexTaskAdapter(path.join(home, "start-watch.ps1"));
+  if (process.platform !== "win32") return { runtimeReady: false, taskOwned: false, runKeyOwned: false };
+  const starter = path.join(home, "start-watch.ps1");
+  const task = createCodexTaskAdapter(starter);
+  let runKeyOwned = false;
+  try { runKeyOwned = await createCodexRunKeyAdapter(starter).read() !== null; }
+  catch { /* Unowned or unreadable startup wiring cannot establish readiness. */ }
   try {
-    if (!(await task.read())) return { runtimeReady, taskOwned: false };
+    if (!(await task.read())) return { runtimeReady, taskOwned: false, runKeyOwned };
     await task.assertOwned();
-    return { runtimeReady, taskOwned: true };
-  } catch { return { runtimeReady, taskOwned: false }; }
+    return { runtimeReady, taskOwned: true, runKeyOwned };
+  } catch { return { runtimeReady, taskOwned: false, runKeyOwned }; }
 }
 
 async function guardianState() {
@@ -130,7 +136,7 @@ const ENTRY_EXPRESSION = `(() => {
 
 export async function probeLocalCodexHealth() {
   if (process.platform !== "win32") return {
-    installation: "missing", taskOwned: false, guardian: "unknown", host: "unknown",
+    installation: "missing", taskOwned: false, runKeyOwned: false, guardian: "unknown", host: "unknown",
     cdp: "unknown", entry: "not-checked", primaryPages: 0, action: "none", reason: "unsupported-platform",
   };
   const adapter = await import(pathToFileURL(adapterFile()).href);

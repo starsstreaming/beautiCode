@@ -244,6 +244,8 @@ foreach ($relativeFile in @(
     "packages\adapter-cursor\package.json",
     "packages\adapter-doubao\package.json",
     "integrations\deepseek-harness\index.mjs",
+    "integrations\deepseek-harness\browser-injection.mjs",
+    "integrations\deepseek-harness\transport.js",
     "integrations\deepseek-harness\client.js",
     "integrations\deepseek-harness\console.js",
     "integrations\deepseek-harness\atmosphere.js",

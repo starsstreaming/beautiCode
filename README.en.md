@@ -23,7 +23,7 @@
 
 beautiCode is a local background tool, **aimed mainly at DeepSeek Harness and Codex**.
 
-It does not bundle, install, or start DSH. Install DeepSeek Harness yourself and run `dsh web`. After the plugin is installed, a **Background** entry appears in the DSH settings dialog — no tray required. Codex Desktop still goes through the beautiCode tray. You can set files already on your computer as the background behind the DeepSeek Harness page:
+It does not bundle, install, or start DSH. Install DeepSeek Harness yourself; run `dsh web` for Web or open the official Desktop app. After the plugin is installed, a **Background** entry appears in the DSH settings dialog — no tray required. Codex Desktop still goes through the beautiCode tray. You can set files already on your computer as the background behind the DeepSeek Harness workspace:
 
 * Images
 * Live wallpapers
@@ -38,6 +38,18 @@ Code, input fields, and buttons keep working as usual.
 
 
 ## How to use it
+
+### Official DeepSeek Harness Desktop
+
+Open Desktop once to initialize its profile, then quit it from the application menu. Once a version containing this adaptation is published, install `beauticode-dsh` in Desktop's **Plugins** page, or use the `dsh` command installed by Desktop:
+
+```sh
+dsh plugin --profile desktop add beauticode-dsh
+```
+
+To try this checkout now, run `npm run plugin:pack` and replace the package name with `file:<absolute-repo-path>/artifacts/dsh-plugin`.
+
+Reopen Desktop and choose **Background** in Settings. The `npx beauticode-dsh` installer and the Windows installer wiring below target the Web profile; Desktop manages its own profile. To connect the beautiCode tray to Desktop, set `-DshUrl http://127.0.0.1:19387`. See the [integration guide](docs/deepseek-harness.md).
 
 ### One-command plugin install (recommended)
 

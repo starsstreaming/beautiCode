@@ -34,7 +34,7 @@ export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
  * payload 世代戳：每次改 payload 内容时递增。守卫用它判断页面上的注入
  * 是否为「当前代」——旧代按钮的闭包攥着已分离的节点引用，必须全拆重建。
  */
-export const BACKGROUND_BAR_VERSION = 'v10.1';
+export const BACKGROUND_BAR_VERSION = 'v10.2';
 
 /** 注入 IIFE 字符串；幂等（守卫同时校验 entry 是否仍在 DOM，侧栏收起/重挂后可重建）。 */
 export const BACKGROUND_BAR_INJECTION: string = (function () {
@@ -587,16 +587,14 @@ function applyMediaUrl(url, kind) {
 function newThemeId() {
   return 'wb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
-function rememberImportedTheme(name, path, kind, provenance) {
+function rememberImportedTheme(name, path, kind) {
   var rows = themeRows();
   var theme = rows.find(function (t) { return t.path === path; });
   if (theme) {
     theme.name = name;
     theme.type = kind;
-    if (provenance && provenance.source === 'hnnulwh') theme.provenance = provenance;
   } else {
     theme = { id: newThemeId(), name: name, path: path, type: kind };
-    if (provenance && provenance.source === 'hnnulwh') theme.provenance = provenance;
     rows.push(theme);
   }
   PERSIST.themes = rows;
@@ -655,7 +653,7 @@ alphaSlider.addEventListener('input', function () {
 // ── 状态记忆：页面维护实时状态，守护轮询落地 state.json，启动时 __bcRestoreState 恢复 ──
 // 挂在 window 上跨 payload 重装存活——否则 applyAll 每轮重装都会把状态打回
 // nulls，watcher 会把 nulls 覆盖进 state.json（实测把已保存的壁纸冲掉的真凶）
-window.__bcPersistStore = window.__bcPersistStore || { wallpaper: null, dim: 49, blur: 0, alpha: 100, cleared: false, themes: [], activeThemeId: null };
+window.__bcPersistStore = window.__bcPersistStore || { wallpaper: null, dim: null, blur: null, alpha: null, cleared: false, themes: [], activeThemeId: null };
 var PERSIST = window.__bcPersistStore;
 if (!Array.isArray(PERSIST.themes)) PERSIST.themes = [];
 if (typeof PERSIST.activeThemeId !== 'string') PERSIST.activeThemeId = null;
@@ -684,20 +682,12 @@ window.__bcRestoreState = function (stRaw) {
       var id = typeof t.id === 'string' && t.id ? t.id : 'legacy-' + index + '-' + String(t.path).length;
       if (seenThemeIds[id]) id += '-' + index;
       seenThemeIds[id] = true;
-      var restored = {
+      return {
         id: id,
         name: typeof t.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 80) : String(t.path).split(/[\\\\/]/).pop().replace(/\\.[^.]+$/, ''),
         path: t.path,
         type: kind,
       };
-      if (t.provenance && t.provenance.source === 'hnnulwh' && typeof t.provenance.sourceSkinId === 'string' && typeof t.provenance.sourceVersion === 'string') {
-        restored.provenance = {
-          source: 'hnnulwh',
-          sourceSkinId: t.provenance.sourceSkinId,
-          sourceVersion: t.provenance.sourceVersion,
-        };
-      }
-      return restored;
     }).filter(Boolean);
     PERSIST.activeThemeId = typeof st.activeThemeId === 'string' && PERSIST.themes.some(function (t) { return t.id === st.activeThemeId; })
       ? st.activeThemeId : null;

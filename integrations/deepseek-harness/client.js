@@ -1,6 +1,9 @@
 (() => {
   "use strict";
   if (window.__beauticodeBridgeLoaded) return;
+  if (globalThis.location?.protocol === "dsh-app:" && !globalThis.__beauticodeTransport) {
+    throw new Error("beautiCode Desktop transport did not load.");
+  }
   window.__beauticodeBridgeLoaded = true;
   window.__beauticodeBridgeVersion = 4;
 
@@ -533,7 +536,10 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       method: "POST",
       mode: "same-origin",
       credentials: "same-origin",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(globalThis.__beauticodeTransport?.headers() ?? {}),
+      },
       body: JSON.stringify({ clientId, ...body }),
     }).catch(() => {});
   }
@@ -1797,18 +1803,22 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     await acknowledgeMode();
   }
 
-  const events = new EventSource(
-    `/__beauticode/events?clientId=${encodeURIComponent(clientId)}`,
-  );
-  events.onmessage = (event) => {
-    try {
-      const payload = JSON.parse(event.data);
-      if (payload?.type === "mode") void applyModes(payload).catch(() => {});
-      else if (payload?.type === "apply") scheduleBackground(payload);
-    } catch {
-      /* EventSource will continue with the next valid frame. */
-    }
+  const onEvent = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.type === "mode") void applyModes(payload).catch(() => {});
+        else if (payload?.type === "apply") scheduleBackground(payload);
+      } catch {
+        /* The stream continues with the next valid frame. */
+      }
   };
+  const eventsUrl = `/__beauticode/events?clientId=${encodeURIComponent(clientId)}`;
+  if (globalThis.__beauticodeTransport) {
+    globalThis.__beauticodeTransport.events(eventsUrl, onEvent);
+  } else {
+    const events = new EventSource(eventsUrl);
+    events.onmessage = onEvent;
+  }
 
   setInterval(() => {
     if (
@@ -1856,8 +1866,8 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
   // gesture, so a page cannot open in it; the closest honest reading of
   // "starts fullscreen" is the first click after load. Typing in the composer
   // must not count: DSH's main action is a keydown. Escape or the settings row
-  // still exits, and an exit is not fought — the listener is spent on its first
-  // call, so a page load enters at most once.
+  // still exits. Stay armed until the request actually succeeds — a rejected
+  // first gesture used to spend the listener and leave the page windowed.
   function armFullscreenDefault() {
     const root = document.documentElement;
     if (typeof root?.requestFullscreen !== "function" &&
@@ -1867,18 +1877,33 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     let spent = false;
     const enter = () => {
       if (spent) return;
-      spent = true;
-      document.removeEventListener?.("pointerdown", enter, true);
-      if (document.fullscreenElement || document.webkitFullscreenElement) return;
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        spent = true;
+        document.removeEventListener?.("pointerdown", enter, true);
+        return;
+      }
       for (const name of ["requestFullscreen", "webkitRequestFullscreen"]) {
         const request = root?.[name];
         if (typeof request !== "function") continue;
-        const started = request.call(root);
-        started?.catch?.(() => {});
+        let started;
+        try {
+          started = request.call(root, { navigationUI: "hide" });
+        } catch {
+          continue;
+        }
+        Promise.resolve(started).then(
+          () => {
+            spent = true;
+            document.removeEventListener?.("pointerdown", enter, true);
+          },
+          () => {
+            /* gesture rejected — stay armed for the next click */
+          },
+        );
         return;
       }
     };
-    document.addEventListener?.("pointerdown", enter, { capture: true, once: true });
+    document.addEventListener?.("pointerdown", enter, { capture: true });
   }
 
   armFullscreenDefault();

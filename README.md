@@ -28,23 +28,35 @@ https://github.com/user-attachments/assets/f1b52d41-aea4-4330-80e1-5a90c344360e
 
 beautiCode 是一个本地动态皮肤工具：把图片、视频或带氛围特效的壁纸，注入到你正在使用的 AI 编程客户端界面背后。代码、输入框和按钮照常工作——它不是把窗口变成播放器，而是让画面待在对话和工作区后面。
 
-皮肤有两个来源：
+它不包含、不安装、也不启动 DSH。请先自行安装 DeepSeek Harness；Web 运行 `dsh web`，官方 Desktop 则直接打开客户端。插件装好后，打开 DSH 的「设置」，左侧导航里会多出一项「背景」，不必再开托盘。Codex Desktop 仍走 beautiCode 托盘。可以把电脑里的：
 
 * **皮肤中心**：在线目录，浏览、搜索、一键安装经过审核的皮肤，下载到本机后自动应用
 * **本地导入**：从系统文件夹里挑你自己的图片或视频（JPG / JPEG / PNG / WebP / AVIF，MP4 / MOV）
 
-导入的内容都可以存成命名主题，随时切换；视频主题会记住上次播放进度。
+直接设成 DeepSeek Harness Web 或官方 Desktop 工作区背后的背景。
+
+它不会把工作窗口变成一个播放器，而是让画面安静地待在对话和工作区后面。
+
+代码、输入框和按钮仍然可以正常使用。
+
+<img width="1280" height="714" alt="QQ20260818-205802" src="https://github.com/user-attachments/assets/a9a18412-4c62-4083-ab49-d127f05e61c3" />
 
 
 ## 支持的客户端
 
-| 客户端 | 接入方式 | 平台 | 状态 |
-|---|---|---|---|
-| **DeepSeek Harness** | Cordis 插件，设置页内嵌「背景」面板 | Windows | ✅ 推荐，无需托盘 |
-| **Codex Desktop** | 托盘 or 本机 CDP 注入 | Windows | ✅ 支持 |
-| **WorkBuddy** | 官方 CDP 开关 + 守护注入 | Windows / macOS | ✅ 支持 |
-| **Cursor** | 桌面 CDP 守护 | Windows | ✅ 支持（基线 3.18.9） |
-| **豆包** | 桌面 CDP 守护 | Windows | ✅ 支持（基线 2.29.12） |
+### 官方 DeepSeek Harness Desktop
+
+先打开 Desktop 一次，再从应用菜单退出。发布包含本适配的插件版本后，在 Desktop 的「插件」页面安装 `beauticode-dsh`，或使用 Desktop 安装的 `dsh` 命令执行：
+
+```sh
+dsh plugin --profile desktop add beauticode-dsh
+```
+
+要试当前源码，先运行 `npm run plugin:pack`，然后将包名替换为 `file:<仓库绝对路径>/artifacts/dsh-plugin`。
+
+重新打开 Desktop，在「设置」里选择「背景」。`npx beauticode-dsh` 和下方 Windows 安装包自动接线针对 Web profile；Desktop profile 由官方客户端管理。托盘连接 Desktop 时传入 `-DshUrl http://127.0.0.1:19387`。详见 [DeepSeek Harness 集成](docs/deepseek-harness.md)。
+
+### 一键安装插件（推荐）
 
 beautiCode 不会修改任何客户端的安装文件，也不替厂商发布补丁——DSH 走官方插件接口，桌面客户端走 `127.0.0.1` 本机调试端口注入，可随时干净卸载。
 
@@ -89,8 +101,12 @@ beauticode-desktop all install
 
 ```sh
 npx beauticode-dsh
-dsh web
+npx @deepseek-ai/dsh web
 ```
+
+`npx beauticode-dsh` 会安装并接线插件，不需要安装 pnpm，也不需要再执行 `dsh plugin add`。已有 pnpm 时，也可运行 `npx @deepseek-ai/dsh plugin --profile web add beauticode-dsh`。
+
+Windows 安装包会自动接线 DSH 插件；自定义安装路径以安装目录里的 `集成说明.txt` 为准。
 
 装好插件后，打开 DSH「设置」，左侧导航会多出「背景」一项，不需要托盘。也可以在对话里输入 `/bg <文件路径>`、`/bg-theme <名称>`、`/bg-clear`，或直接让 AI 帮你换背景。
 

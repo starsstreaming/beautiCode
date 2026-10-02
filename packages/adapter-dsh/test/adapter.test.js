@@ -137,11 +137,13 @@ test("DSH URL only accepts loopback HTTP", () => {
     "http://127.0.0.1:3080",
     "http://localhost:3080",
     "http://[::1]:3080",
+    "dsh-app://app",
   ]);
   assert.deepEqual(dshTrustedOrigins("http://localhost:3080"), [
     "http://localhost:3080",
     "http://127.0.0.1:3080",
     "http://[::1]:3080",
+    "dsh-app://app",
   ]);
   assert.throws(() => normalizeDshBaseUrl("https://127.0.0.1:3080"), /loopback HTTP/);
   assert.throws(() => normalizeDshBaseUrl("http://192.168.1.10:3080"), /loopback HTTP/);
@@ -222,7 +224,7 @@ test("host applier sends loopback MP4 only and controls browser modes", async (t
   assert.equal((await host.setBackgroundTone("light")).tone, "light");
 });
 
-test("verify is inconclusive when no DSH browser page is connected", async (t) => {
+test("verify queues the background when no DSH browser page is connected", async (t) => {
   const bridge = await mockBridge();
   t.after(() => bridge.close());
   bridge.setConnected(0);
@@ -239,8 +241,8 @@ test("verify is inconclusive when no DSH browser page is connected", async (t) =
     { generation: 3, media: "clear" },
     { deadlineMs: 20 },
   );
-  assert.equal(verified.status, "inconclusive");
-  assert.match(verified.reason, /No DeepSeek Harness browser client/);
+  assert.equal(verified.status, "pass");
+  assert.match(verified.reason, /queued for the next page/);
 });
 
 test("verify preserves the renderer media failure details", async (t) => {
@@ -435,7 +437,7 @@ test("DSH session yields the injector lock when the tray claims it", async (t) =
   });
 });
 
-test("DSH video media permits localhost and IPv6 loopback origins on the same port", async (t) => {
+test("DSH video media permits Web loopback and Desktop application origins", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-dsh-origin-"));
   const videoPath = path.join(root, "background.mp4");
   await fs.writeFile(videoPath, mp4Fixture("ORIGIN"));
@@ -449,7 +451,7 @@ test("DSH video media permits localhost and IPv6 loopback origins on the same po
   const staged = await media.stage(videoPath);
   assert.ok(staged);
 
-  for (const origin of ["http://localhost:3080", "http://[::1]:3080"]) {
+  for (const origin of ["http://localhost:3080", "http://[::1]:3080", "dsh-app://app"]) {
     const response = await fetch(staged.srcUrl, {
       headers: { Origin: origin, Range: "bytes=0-1" },
     });

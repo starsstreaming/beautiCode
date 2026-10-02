@@ -1,6 +1,6 @@
 # DeepSeek Harness 集成
 
-beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`beauticode-dsh`），不修改 DSH 源码，也不依赖 Chromium 调试端口。DSH 由你自己启动；beautiCode 只挂插件、不替代、不重启你的 DSH。Codex Desktop 仍由托盘按原路径拉起，与本节无关。
+beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`beauticode-dsh`），不修改 DSH 源码，也不依赖 Chromium 调试端口。插件通过 DSH 的结构化页面注入同时支持 Web 和官方 Desktop；后者的页面地址是 `dsh-app://app/`，Host 默认端口是 `19387`。DSH 由你自己启动；beautiCode 只挂插件、不替代、不重启你的 DSH。Codex Desktop 仍由托盘按原路径拉起，与本节无关。
 
 ## 已实现能力
 
@@ -16,7 +16,25 @@ beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`beauticode-d
 
 同一个 beautiCode 数据目录一次只能运行一个宿主会话，避免 Codex 与 DSH 同时写入造成状态损坏。
 
-## 安装插件
+## 官方 Desktop 安装
+
+先启动 Desktop 一次以创建 `desktop` profile，再从应用菜单退出（关闭窗口通常只会隐藏）。发布包含本适配的插件版本后，在 Desktop 的「插件」页面安装 `beauticode-dsh`，或者用 **Desktop 安装的** `dsh` 命令：
+
+```sh
+dsh plugin --profile desktop add beauticode-dsh
+```
+
+要试当前仓库源码，先在仓库根目录执行 `npm run plugin:pack`，再将包名换成 `file:<仓库绝对路径>/artifacts/dsh-plugin`。
+
+重新打开 Desktop，在「设置」里选择「背景」。Desktop profile 的插件安装由官方客户端管理；下面的 Windows 安装包和 `npx beauticode-dsh` 接线只针对 Web profile。若使用 beautiCode 托盘，启动时显式指定 Desktop Host 地址：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File apps\tray\start-tray.ps1 -TargetHost dsh -DshUrl http://127.0.0.1:19387
+```
+
+若 `webserver.config.port` 在 Desktop profile 中修改过，应使用修改后的端口。Desktop 主窗口关闭后通常仍保持运行；完全退出后桥接会断开。
+
+## Web 安装插件
 
 Windows 安装包会在安装结束时（以及选择 DeepSeek Harness 时）自动写入你的 DSH profile，**不需要 pnpm，也不需要再跑 `dsh plugin add`**。没有 DSH 也不影响安装；第一次运行 `dsh web` 会走 home 层补丁。
 
@@ -107,7 +125,7 @@ npm run bc -- clear --port 3080
 ## 安全边界
 
 - DSH 地址只接受 `http://127.0.0.1`、`http://localhost` 或 `http://[::1]`。
-- 控制请求使用数据目录内的 256 位随机令牌；浏览器回执只接受同源请求。
-- 图片与 MP4 由随机端口的本机媒体服务提供，URL 带不可预测令牌并校验 DSH 页面来源。
+- 控制请求使用数据目录内的 256 位随机令牌；Web 浏览器回执只接受同源请求。Desktop 转发会移除浏览器 Origin 标头，因此其回执额外使用 Host 启动时生成、只注入到应用页面的随机密钥。
+- 图片与 MP4 由随机端口的本机媒体服务提供，URL 带不可预测令牌，并只接受 DSH Web 回环来源或 `dsh-app://app` 来源。
 - 只有浏览器真实加载/解码媒体并回执后，应用事务才成功；否则磁盘状态回滚。
 - 自动化测试不能替代发布前的真实 DSH 页面可见性验收。

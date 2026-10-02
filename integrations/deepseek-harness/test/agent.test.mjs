@@ -475,10 +475,8 @@ test("page bridge still loads when inject is absent", async (t) => {
           routes.set(route.path, route.handler);
           return () => routes.delete(route.path);
         },
-        tapIndex() {
-          return () => {};
-        },
       },
+      on() { return () => {}; },
       effect(factory) {
         return factory();
       },

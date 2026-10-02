@@ -5,31 +5,17 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
-import { StartupRepairChain, terminateWindowsProcessGeneration } from "@beauticode/core";
 import {
   DEFAULT_CDP_CANDIDATE_PORTS,
   discoverCdpEndpoints,
   parseRemoteDebuggingFlags,
   type DiscoveredCdpEndpoint,
 } from "./host-discover.js";
-import {
-  activateCodexMsix,
-  codexMsixPackageFullName,
-  preflightCodexMsix,
-  type CodexMsixTarget,
-} from "./msix-activation.js";
-import {
-  clearMsixRepairFailure,
-  isMsixRepairSuppressed,
-  markMsixRepairFailure,
-} from "./msix-repair-state.js";
-import { runGuardedMsixRepair } from "./msix-repair.js";
 
 const execFileAsync = promisify(execFile);
 
 export const DEFAULT_CODEX_CDP_PORT = 9335;
 export const DEFAULT_CODEX_REPAIR_WINDOW_MS = 10_000;
-export const DEFAULT_CODEX_CDP_POLL_INTERVAL_MS = 200;
 
 export interface CodexProcess {
   pid: number;
@@ -69,7 +55,7 @@ export function classifyCodexStartupProcess(
 export interface CodexStartupRepairControllerOptions {
   now?: () => number;
   repairWindowMs?: number;
-  repair: (proc: CodexProcess) => Promise<"launched" | "verified" | "deferred" | void>;
+  repair: (proc: CodexProcess) => Promise<void>;
 }
 
 export type CodexStartupRepairResult =
@@ -84,23 +70,13 @@ export class CodexStartupRepairController {
   private chain: Promise<unknown> = Promise.resolve();
   private readonly now: () => number;
   private readonly repairWindowMs: number;
-  private readonly repair: (proc: CodexProcess) => Promise<"launched" | "verified" | "deferred" | void>;
-  private readonly repairChain: StartupRepairChain;
+  private readonly repair: (proc: CodexProcess) => Promise<void>;
 
   constructor(opts: CodexStartupRepairControllerOptions) {
     this.now = opts.now ?? Date.now;
     this.repairWindowMs =
       opts.repairWindowMs ?? DEFAULT_CODEX_REPAIR_WINDOW_MS;
     this.repair = opts.repair;
-    this.repairChain = new StartupRepairChain(this.now, this.repairWindowMs);
-  }
-
-  observeSnapshot(rows: readonly CodexProcess[]): void {
-    this.repairChain.observeSnapshot(rows);
-  }
-
-  markVerified(): void {
-    this.repairChain.markVerified();
   }
 
   observe(proc: CodexProcess): Promise<CodexStartupRepairResult> {
@@ -116,20 +92,8 @@ export class CodexStartupRepairController {
     this.seen.add(generation);
 
     const run = async (): Promise<CodexStartupRepairResult> => {
-      if (!this.repairChain.claim(proc)) return "already-handled";
-      try {
-        const result = await this.repair(proc);
-        if (result === "deferred") {
-          this.repairChain.markFailed();
-          return "ignore-stale";
-        }
-        if (result === "verified") this.repairChain.markVerified();
-        else this.repairChain.markLaunched();
-        return "repaired";
-      } catch (error) {
-        this.repairChain.markFailed();
-        throw error;
-      }
+      await this.repair(proc);
+      return "repaired";
     };
     const next = this.chain.then(run, run);
     this.chain = next.then(
@@ -167,8 +131,10 @@ export function looksLikeCodexMain(
   name: string,
   exePath = "",
 ): boolean {
-  if (!/^(ChatGPT|Codex)\.exe$/i.test(name)) return false;
-  if (!exePath || path.win32.basename(exePath).toLowerCase() !== name.toLowerCase()) return false;
+  const hay = `${name} ${exePath} ${commandLine}`;
+  if (!/\b(ChatGPT|Codex)\.exe\b/i.test(hay) && !/\b(ChatGPT|Codex)\b/i.test(hay)) {
+    return false;
+  }
   if (/\s--type=/.test(commandLine)) return false;
   if (/\bapp-server\b/i.test(commandLine)) return false;
   if (/\\resources\\/i.test(exePath) || /\\resources\\/i.test(commandLine)) {
@@ -405,30 +371,16 @@ export async function stopCodexProcesses(
   }
 }
 
-export interface CodexExeLaunchCommand {
-  kind: "exe";
+export interface CodexLaunchCommand {
   file: string;
   args: string[];
 }
-
-export type CodexLaunchCommand = CodexExeLaunchCommand | CodexMsixTarget;
 
 export function buildCodexLaunchCommand(
   port: number,
   executable: string,
 ): CodexLaunchCommand {
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error("Invalid Codex CDP port");
-  }
-  const packageFullName = codexMsixPackageFullName(executable);
-  if (packageFullName) {
-    return { kind: "msix", packageFullName, executable, port };
-  }
-  if (/[\\/]WindowsApps[\\/]/i.test(executable)) {
-    throw new Error("未知的 WindowsApps Codex 路径；不执行不安全的直接启动。");
-  }
   return {
-    kind: "exe",
     file: executable,
     args: [
       "--remote-debugging-address=127.0.0.1",
@@ -442,80 +394,16 @@ async function launchCodexWithCdp(
   executable: string,
 ): Promise<void> {
   const command = buildCodexLaunchCommand(port, executable);
-  if (command.kind === "msix") {
-    await activateCodexMsix(command);
-    return;
-  }
   const child = spawn(command.file, command.args, {
     detached: true,
     stdio: "ignore",
-    // Codex is the foreground application in this path. Only the watcher
-    // and PowerShell probes use hidden windows; do not pass a hidden-window
-    // hint to the host launch itself.
-    windowsHide: false,
+    windowsHide: true,
   });
   await new Promise<void>((resolve, reject) => {
     child.once("spawn", resolve);
     child.once("error", reject);
   });
   child.unref();
-}
-
-async function waitForCodexProcessExit(pid: number): Promise<void> {
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    if (!(await listCodexProcesses()).some((proc) => proc.pid === pid)) return;
-    await delay(100);
-  }
-  throw new Error("Codex 原主进程未退出；已取消包激活以避免参数被旧窗口吞掉。");
-}
-
-async function repairPackagedCodexProcess(
-  observed: CodexProcess,
-  command: CodexMsixTarget,
-  repairWindowMs: number,
-  log?: EnsureCodexLog,
-): Promise<DiscoveredCdpEndpoint | null> {
-  const startedAt = Date.now();
-  if (await isMsixRepairSuppressed(command.packageFullName)) {
-    throw new Error("该 Codex 包的 CDP 激活曾失败，冷却期内不再自动重启。");
-  }
-  let endpoint: DiscoveredCdpEndpoint | null = null;
-  const repaired = await runGuardedMsixRepair({
-    preflight: () => preflightCodexMsix(command),
-    stillFresh: async () => {
-      const live = await listCodexProcesses();
-      return live.length === 1
-        && live[0]?.pid === observed.pid
-        && live[0]?.createdAtMs === observed.createdAtMs
-        && classifyCodexStartupProcess(live[0], Date.now(), repairWindowMs) === "repair-now";
-    },
-    stop: async () => {
-      if (!(await terminateWindowsProcessGeneration(observed))) {
-        throw new Error("Codex 主进程代际已变化；取消修复性重启。");
-      }
-      await waitForCodexProcessExit(observed.pid);
-    },
-    launchWithCdp: async () => { await activateCodexMsix(command); },
-    verifyCdp: async () => {
-      endpoint = await waitForCodexCdp(command.port, 15_000);
-      log?.info(`Codex 启动诊断 stage=msix-cdp-verification elapsedMs=${Date.now() - startedAt} result=${endpoint ? "connected" : "timeout"}`);
-      if (!endpoint) return false;
-      const processes = await listCodexProcesses();
-      return processes.some((proc) =>
-        proc.port === command.port
-        && path.win32.normalize(proc.executablePath).toLowerCase()
-          === path.win32.normalize(command.executable).toLowerCase());
-    },
-    markFailure: () => markMsixRepairFailure(command.packageFullName),
-    restorePlain: async () => {
-      if ((await listCodexProcesses()).length === 0) {
-        await activateCodexMsix(command, false);
-      }
-    },
-    clearFailure: () => clearMsixRepairFailure(),
-  });
-  return repaired ? endpoint : null;
 }
 
 export interface CodexStartupRepairMonitorOptions {
@@ -558,14 +446,12 @@ export function buildWindowsCodexProcessStartScript(parentPid: number): string {
     "if($cmd -match '\\bapp-server\\b'){continue};",
     "$created=0;",
     "try{$created=([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds()}catch{};",
-    "if($created -le 0){continue};",
+    "if($created -le 0){$created=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()};",
     "$seen[$pidValue]=$true;",
     "$o=@{pid=$pidValue;name=$name;exe=$path;cmd=$cmd;created=$created};",
     "($o | ConvertTo-Json -Compress -Depth 3);",
     "}",
-    "$hadMain=$seen.Count -gt 0;",
     "foreach($known in @($seen.Keys)){if(-not $current.ContainsKey($known)){$seen.Remove($known)}};",
-    "if($hadMain -and $seen.Count -eq 0){'{\"empty\":true}'};",
     "Start-Sleep -Milliseconds 200;",
     "}",
   ].join(" ");
@@ -574,21 +460,17 @@ export function buildWindowsCodexProcessStartScript(parentPid: number): string {
 async function repairFreshBlindCodexProcess(
   observed: CodexProcess,
   opts: CodexStartupRepairMonitorOptions,
-  onVerified: () => void,
-): Promise<"launched" | "verified" | "deferred"> {
-  const startedAt = Date.now();
+): Promise<void> {
   const repairWindowMs =
     opts.repairWindowMs ?? DEFAULT_CODEX_REPAIR_WINDOW_MS;
   const live = await listCodexProcesses();
-  const exact = live.find((proc) =>
-    proc.pid === observed.pid && proc.createdAtMs === observed.createdAtMs,
-  );
-  if (!exact) return "deferred";
+  const exact = live.find((proc) => proc.pid === observed.pid);
+  if (!exact) return;
   if (
     classifyCodexStartupProcess(exact, Date.now(), repairWindowMs) !==
     "repair-now"
   ) {
-    return "deferred";
+    return;
   }
 
   // Never recycle a newly spawned secondary instance while an older primary
@@ -597,9 +479,8 @@ async function repairFreshBlindCodexProcess(
     opts.log?.warn(
       `检测到 Codex 新进程 ${exact.pid}，但已有主进程；跳过自动重启以保护正在运行的任务。`,
     );
-    return "deferred";
+    return;
   }
-  opts.log?.info(`Codex 启动诊断 stage=fresh-process-validated elapsedMs=${Date.now() - startedAt} result=repair-started`);
 
   const executable =
     parseExecutableFromProcess(exact) ||
@@ -607,24 +488,12 @@ async function repairFreshBlindCodexProcess(
     findCodexExecutable();
   if (!executable) {
     opts.log?.warn("检测到新的 Codex 进程，但无法确认可执行文件；跳过自动重启。");
-    return "deferred";
+    return;
   }
 
   const preferred = opts.preferredPort ?? DEFAULT_CODEX_CDP_PORT;
   const candidates = opts.candidatePorts ?? DEFAULT_CDP_CANDIDATE_PORTS;
   const port = await pickAvailableCodexPort(preferred, candidates);
-  const command = buildCodexLaunchCommand(port, executable);
-  if (command.kind === "msix") {
-    const repaired = await repairPackagedCodexProcess(exact, command, repairWindowMs, opts.log);
-    if (repaired) opts.log?.info(`Codex MSIX 已通过包激活接入 :${port}`);
-    return repaired ? "verified" : "deferred";
-  }
-  try {
-    buildCodexLaunchCommand(port, executable);
-  } catch (error) {
-    opts.log?.warn(error instanceof Error ? error.message : String(error));
-    return "deferred";
-  }
   opts.log?.warn(
     `Codex 新主进程 ${exact.pid} 未带 CDP 参数，立即使用 :${port} 修复性重启。`,
   );
@@ -632,19 +501,16 @@ async function repairFreshBlindCodexProcess(
   try {
     // Exact fresh PID only: no /T and no name-wide kill. At <10s there is no
     // established user task to preserve, and /F avoids the old 8s stop delay.
-    if (!(await terminateWindowsProcessGeneration(exact))) return "deferred";
+    await execFileAsync("taskkill.exe", ["/PID", String(exact.pid), "/F"], {
+      windowsHide: true,
+      timeout: 2_000,
+    });
   } catch {
-    return "deferred";
+    return;
   }
-  opts.log?.info(`Codex 启动诊断 stage=client-stopped elapsedMs=${Date.now() - startedAt} result=relaunching`);
   await delay(120);
   await launchCodexWithCdp(port, executable);
-  opts.log?.info(`Codex 启动诊断 stage=client-relaunched elapsedMs=${Date.now() - startedAt} result=awaiting-cdp`);
-  void waitForCodexCdp(port, 15_000).then((endpoint) => {
-    opts.log?.info(`Codex 启动诊断 stage=cdp-verification elapsedMs=${Date.now() - startedAt} result=${endpoint ? "ready" : "timeout"}`);
-    if (endpoint) onVerified();
-  }, () => opts.log?.warn("Codex 修复后 CDP 验证失败；本次启动不再自动重启。"));
-  return "launched";
+  opts.log?.info(`已立即带 --remote-debugging-port=${port} 重启 Codex`);
 }
 
 /**
@@ -660,7 +526,7 @@ export function startCodexStartupRepairMonitor(
   let child: ChildProcess | null = null;
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   const controllerOptions: CodexStartupRepairControllerOptions = {
-    repair: (proc) => repairFreshBlindCodexProcess(proc, opts, () => controller.markVerified()),
+    repair: (proc) => repairFreshBlindCodexProcess(proc, opts),
   };
   if (opts.repairWindowMs !== undefined) {
     controllerOptions.repairWindowMs = opts.repairWindowMs;
@@ -677,10 +543,7 @@ export function startCodexStartupRepairMonitor(
 
   const reconcile = () => {
     void listCodexProcesses().then(
-      (processes) => {
-        controller.observeSnapshot(processes);
-        processes.forEach(observe);
-      },
+      (processes) => processes.forEach(observe),
       () => undefined,
     );
   };
@@ -719,16 +582,12 @@ export function startCodexStartupRepairMonitor(
       } catch {
         return;
       }
-      if ((row as { empty?: boolean }).empty === true) {
-        controller.observeSnapshot([]);
-        return;
-      }
       const commandLine = typeof row.cmd === "string" ? row.cmd : "";
       const name = typeof row.name === "string" ? row.name : "ChatGPT.exe";
       const executablePath = typeof row.exe === "string" ? row.exe : "";
       if (!looksLikeCodexMain(commandLine, name, executablePath)) return;
       const flags = parseRemoteDebuggingFlags(commandLine);
-      const processInfo: CodexProcess = {
+      observe({
         pid: Number(row.pid) || 0,
         name,
         executablePath,
@@ -738,9 +597,7 @@ export function startCodexStartupRepairMonitor(
           Number.isFinite(Number(row.created)) && Number(row.created) > 0
             ? Number(row.created)
             : null,
-      };
-      controller.observeSnapshot([processInfo]);
-      observe(processInfo);
+      });
     });
     let finished = false;
     const finish = (code: number | null, spawnError?: Error) => {
@@ -784,21 +641,13 @@ async function waitForCodexCdp(
   return await waitForAnyCodexCdp([port], timeoutMs);
 }
 
-export async function waitForAnyCodexCdp(
+async function waitForAnyCodexCdp(
   ports: readonly number[],
   timeoutMs: number,
-  options: {
-    discover?: typeof discoverCdpEndpoints;
-    sleep?: (ms: number) => Promise<void>;
-    now?: () => number;
-  } = {},
 ): Promise<DiscoveredCdpEndpoint | null> {
-  const discover = options.discover ?? discoverCdpEndpoints;
-  const sleep = options.sleep ?? delay;
-  const now = options.now ?? Date.now;
-  const deadline = now() + Math.max(1_000, timeoutMs);
-  while (now() < deadline) {
-    const hits = await discover({
+  const deadline = Date.now() + Math.max(1_000, timeoutMs);
+  while (Date.now() < deadline) {
+    const hits = await discoverCdpEndpoints({
       ports: [...new Set(ports)],
       scanProcesses: false,
       requirePages: true,
@@ -806,7 +655,7 @@ export async function waitForAnyCodexCdp(
     });
     const hit = hits[0];
     if (hit) return hit;
-    await sleep(DEFAULT_CODEX_CDP_POLL_INTERVAL_MS);
+    await delay(400);
   }
   return null;
 }
@@ -876,27 +725,14 @@ async function ensureCodexCdpUnqueued(
         );
       }
       const proc = repairable[0]!;
-      const port = await pickAvailableCodexPort(preferred, candidatePorts);
-      const command = buildCodexLaunchCommand(port, exe);
-      if (command.kind === "msix") {
-        const ready = await repairPackagedCodexProcess(
-          proc,
-          command,
-          DEFAULT_CODEX_REPAIR_WINDOW_MS,
-          log,
-        );
-        if (!ready) {
-          throw new Error("Codex 进程不再满足 10 秒修复条件；未重启。");
-        }
-        return { ...ready, launched: true, restarted: true };
-      }
       log?.warn(
         `Codex 新主进程 ${proc.pid} 未带 CDP 参数，立即修复性重启…`,
       );
       try {
-        if (!(await terminateWindowsProcessGeneration(proc))) {
-          throw new Error("Codex 主进程代际已变化；取消修复性重启。");
-        }
+        await execFileAsync("taskkill.exe", ["/PID", String(proc.pid), "/F"], {
+          windowsHide: true,
+          timeout: 2_000,
+        });
       } catch {
         throw new Error("Codex 新主进程已退出，取消本次自动重启。");
       }
@@ -926,32 +762,13 @@ async function ensureCodexCdpUnqueued(
     log?.warn(`本机端口 ${preferred} 已被占用，Codex 改用 ${port}`);
   }
   log?.info(`带 --remote-debugging-port=${port} 启动 Codex`);
-  const command = buildCodexLaunchCommand(port, exe);
-  if (command.kind === "msix") await preflightCodexMsix(command);
-  try {
-    await launchCodexWithCdp(port, exe);
-  } catch (error) {
-    if (command.kind === "msix") {
-      await markMsixRepairFailure(command.packageFullName);
-      if ((await listCodexProcesses()).length === 0) {
-        await activateCodexMsix(command, false).catch(() => {});
-      }
-    }
-    throw error;
-  }
+  await launchCodexWithCdp(port, exe);
   const ready = await waitForCodexCdp(port, timeoutMs);
   if (!ready) {
-    if (command.kind === "msix") {
-      await markMsixRepairFailure(command.packageFullName);
-      if ((await listCodexProcesses()).length === 0) {
-        await activateCodexMsix(command, false).catch(() => {});
-      }
-    }
     throw new Error(
-      `已启动 Codex，但 ${timeoutMs}ms 内未出现带 app:// 主页面的本机 CDP。`,
+      `已直接启动 Codex，但 ${timeoutMs}ms 内未出现带 app:// 主页面的本机 CDP。`,
     );
   }
-  if (command.kind === "msix") await clearMsixRepairFailure();
   return { ...ready, launched: true, restarted };
 }
 

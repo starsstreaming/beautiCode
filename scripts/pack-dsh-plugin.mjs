@@ -15,6 +15,8 @@ const pluginSrc = path.join(repoRoot, "integrations", "deepseek-harness");
 
 const PLUGIN_FILES = [
   "index.mjs",
+  "browser-injection.mjs",
+  "transport.js",
   "client.js",
   "console.js",
   "atmosphere.js",
@@ -167,6 +169,10 @@ export async function stageDshPlugin(destRoot = defaultStageDir(), opts = {}) {
       await fsp.copyFile(source, dest);
     }
   }
+  const galleryHost = path.join(destRoot, "gallery-host.mjs");
+  await fsp.writeFile(galleryHost,
+    (await fsp.readFile(galleryHost, "utf8")).replace('from "@beauticode/core"', 'from "./vendor/core/index.js"'),
+    "utf8");
   await stageEngineInto(destRoot);
   if (opts.publishName) await applyPublishName(destRoot, opts.publishName);
   return destRoot;
