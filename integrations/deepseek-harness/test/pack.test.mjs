@@ -21,6 +21,8 @@ test("staged npm plugin is a self-contained DSH bundle with a vendored engine", 
   const canvas = path.join(dest, "themes", "internal-beyond", "bg-canvas-4k.png");
   const license = path.join(dest, "LICENSE");
   await fs.access(adapter);
+  await fs.access(path.join(dest, "browser-injection.mjs"));
+  await fs.access(path.join(dest, "transport.js"));
   await fs.access(canvas);
   assert.match(await fs.readFile(license, "utf8"), /MIT License/);
   const session = await import(pathToFileURL(adapter).href);

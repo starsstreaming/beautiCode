@@ -45,6 +45,35 @@ export {
   BACKGROUND_BAR_VERSION,
 } from "./background-bar.js";
 export {
+  MAX_CDP_JSON_BYTES,
+  WORKBUDDY_CDP_ENV_KEY,
+  DEFAULT_WORKBUDDY_CDP_PORT,
+  DEFAULT_WORKBUDDY_CDP_PORTS,
+  parseRemoteDebuggingFlags,
+  readBoundedJson,
+  probeCdpPort,
+  probeWorkBuddyCdp,
+  discoverWorkBuddyCdp,
+  type DiscoveredWorkBuddyCdp,
+} from "./discovery.js";
+export {
+  DEFAULT_WORKBUDDY_REPAIR_WINDOW_MS,
+  classifyWorkBuddyStartupProcess,
+  isWorkBuddyMainProcess,
+  parsePsElapsedSeconds,
+  workBuddyInstallCandidates,
+  findWorkBuddyExecutable,
+  isLoopbackPortFree,
+  pickAvailableLoopbackPort,
+  listWorkBuddyProcesses,
+  stopWorkBuddyProcesses,
+  launchWorkBuddyWithCdp,
+  ensureWorkBuddyCdp,
+  type WorkBuddyProcess,
+  type EnsureWorkBuddyCdpOptions,
+  type EnsuredWorkBuddyCdp,
+} from "./launch.js";
+export {
   TOKEN_INCLUDE_PATTERN,
   TOKEN_EXCLUDE_PATTERN,
   TOKEN_SCAN_EXPRESSION,

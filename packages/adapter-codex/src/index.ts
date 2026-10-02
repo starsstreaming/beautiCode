@@ -77,6 +77,29 @@ export {
   type BeautiSessionOptions,
 } from "./session.js";
 
+export {
+  DEFAULT_CODEX_CDP_PORT,
+  DEFAULT_CODEX_REPAIR_WINDOW_MS,
+  codexInstallCandidates,
+  findCodexExecutable,
+  listCodexProcesses,
+  isLoopbackPortFree,
+  pickAvailableCodexPort,
+  ensureCodexCdp,
+  classifyCodexStartupProcess,
+  CodexStartupRepairController,
+  buildWindowsCodexProcessStartScript,
+  startCodexStartupRepairMonitor,
+  type CodexProcess,
+  type CodexStartupProcessDecision,
+  type CodexStartupRepairControllerOptions,
+  type CodexStartupRepairResult,
+  type CodexStartupRepairMonitorOptions,
+  type CodexStartupRepairMonitor,
+  type EnsureCodexCdpOptions,
+  type EnsuredCodexCdp,
+} from "./launch.js";
+
 export { CODEX_HOST_DESCRIPTOR } from "./host-descriptor.js";
 
 export { toChineseErrorMessage } from "@beauticode/core";

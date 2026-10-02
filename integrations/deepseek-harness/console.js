@@ -495,6 +495,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
         ...(controller ? { signal: controller.signal } : {}),
         headers: {
           ...(init?.headers || {}),
+          ...(globalThis.__beauticodeTransport?.headers() ?? {}),
         },
       });
       const body = await response.json().catch(() => null);
@@ -528,12 +529,18 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     }
   }
 
+  function pageControls() {
+    return [...page.querySelectorAll(".bc-btn, .bc-theme-item, .bc-theme-del, .bc-tab")].filter(
+      (el) => el.getAttribute("data-act") !== "sound",
+    );
+  }
+
   async function run(task) {
     if (busy) return;
     busy = true;
     page.dataset.busy = "true";
     let afterRun = null;
-    for (const button of page.querySelectorAll(".bc-btn, .bc-theme-item, .bc-theme-del, .bc-tab")) button.disabled = true;
+    for (const button of pageControls()) button.disabled = true;
     showMessage("正在处理，请稍候…");
     try {
       const result = await task();
@@ -558,7 +565,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     } finally {
       busy = false;
       delete page.dataset.busy;
-      for (const button of page.querySelectorAll(".bc-btn, .bc-theme-item, .bc-theme-del, .bc-tab")) button.disabled = false;
+      for (const button of pageControls()) button.disabled = false;
       syncImportControls();
     }
     if (afterRun) queueMicrotask(afterRun);
@@ -687,7 +694,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
       const fn = owner?.[name];
       if (typeof fn !== "function") continue;
       try {
-        return Promise.resolve(fn.call(owner));
+        return Promise.resolve(fn.call(owner, { navigationUI: "hide" }));
       } catch (error) {
         return Promise.reject(error);
       }
@@ -768,13 +775,22 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     });
   });
   soundBtn.addEventListener("click", () => {
-    void run(() =>
-      request("/__beauticode/ui/mode", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ muted: !muted }),
-      }),
-    );
+    void (async () => {
+      try {
+        const result = await request("/__beauticode/ui/mode", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ muted: !muted }),
+        });
+        muted = result?.muted !== false;
+        soundBtn.classList.toggle("on", !muted);
+        soundBtn.textContent = muted ? "已关" : "已开";
+        soundBtn.setAttribute("aria-pressed", muted ? "false" : "true");
+        if (result?.message) showMessage(result.message);
+      } catch (error) {
+        showMessage(error instanceof Error ? error.message : String(error));
+      }
+    })();
   });
   dimSlider.addEventListener("input", () => {
     const n = Number(dimSlider.value);

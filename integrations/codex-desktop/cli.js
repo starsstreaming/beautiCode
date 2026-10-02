@@ -119,6 +119,26 @@ function startHidden(node, script) {
   child.unref();
 }
 
+function psQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function startIndependentWindows(starter) {
+  const commandLine =
+    `powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${JSON.stringify(starter)}`;
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${psQuote(commandLine)} }`,
+    "if ($null -eq $result) { throw 'Win32_Process.Create returned no result' }",
+    "if ([int]$result.ReturnValue -ne 0) { exit [int]$result.ReturnValue }",
+  ].join("; ");
+  execFileSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { stdio: "pipe", windowsHide: true },
+  );
+}
+
 export async function runCli(argv = process.argv.slice(2)) {
   const home = pluginHome();
   const remove = argv.includes("--remove");
@@ -140,7 +160,17 @@ export async function runCli(argv = process.argv.slice(2)) {
     "utf8",
   );
   writeRunKey(`powershell.exe -NoProfile -WindowStyle Hidden -File "${starter}"`);
-  startHidden(process.execPath, watch);
+  if (process.platform === "win32") {
+    try {
+      startIndependentWindows(starter);
+    } catch (error) {
+      console.warn(
+        `本次未能立即启动后台监视器：${error instanceof Error ? error.message : String(error)}。下次登录时会自动启动。`,
+      );
+    }
+  } else {
+    startHidden(process.execPath, watch);
+  }
   console.log("已安装 Codex 后台注入。");
   console.log("打开 Codex Desktop 后，侧栏「探索」下方会出现「背景」。");
   console.log(`常驻目录：${home}`);

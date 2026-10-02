@@ -21,6 +21,7 @@ import { createConsoleHost } from "./console-host.js";
 import { CdpIdentityMismatchError, CdpError } from "./cdp.js";
 import { probeCdp } from "./discovery.js";
 import { findBestCdpPort } from "./host-discover.js";
+import { ensureCodexCdp } from "./launch.js";
 import { acquireInjectorLock } from "./injector-lock.js";
 import { loadRendererSource, MAX_CDP_INLINE_IMAGE_BYTES } from "./payload.js";
 import { CODEX_HOST_DESCRIPTOR } from "./host-descriptor.js";
@@ -34,6 +35,13 @@ export interface BeautiSessionOptions {
   urlPrefix?: string;
   pollMs?: number;
   autoDiscover?: boolean;
+  /**
+   * Launch/restart Codex when discovery finds no endpoint. Defaults to false so
+   * tray and other long-lived sessions never reopen a user-closed host. An
+   * explicit foreground caller may opt in; the process-start monitor handles
+   * only a newly opened, flagless instance.
+   */
+  autoLaunchHost?: boolean;
   /**
    * When true (default for tray), start() returns after store+lock init and
    * connects CDP in the background. Apply/reapply still await a live host.
@@ -62,6 +70,7 @@ export class BeautiSession implements HostSession {
   readonly urlPrefix: string | undefined;
   readonly pollMs: number;
   readonly autoDiscover: boolean;
+  readonly autoLaunchHost: boolean;
   readonly deferHostConnect: boolean;
 
   private port: number | null;
@@ -120,6 +129,7 @@ export class BeautiSession implements HostSession {
     this.urlPrefix = opts.urlPrefix;
     this.pollMs = opts.pollMs ?? 1_000;
     this.autoDiscover = opts.autoDiscover ?? true;
+    this.autoLaunchHost = opts.autoLaunchHost ?? false;
     // Default deferred: tray wants the control plane up immediately.
     this.deferHostConnect = opts.deferHostConnect ?? true;
     this.onError = opts.onError ?? null;
@@ -218,15 +228,37 @@ export class BeautiSession implements HostSession {
           timeoutMs: 450,
         });
         if (!best) {
-          throw new CdpError(
-            "No healthy loopback Codex CDP endpoint found. Open Codex Desktop, then use tray 应用或重新应用.",
+          if (!this.autoLaunchHost) {
+            throw new CdpError(
+              "Codex is not running with CDP; waiting for the user to open it.",
+            );
+          }
+          // WorkBuddy runner: if the host is up without CDP, restart it with
+          // loopback flags instead of waiting for a tray click.
+          this.onStatus?.(
+            "Codex CDP missing; launching or restarting with loopback debugging…",
+          );
+          const ensured = await ensureCodexCdp({
+            launch: true,
+            restartIfBlind: true,
+            timeoutMs: 40_000,
+            log: {
+              info: (...m) => this.onStatus?.(m.join(" ")),
+              warn: (...m) => this.onStatus?.(m.join(" ")),
+            },
+          });
+          if (this.closed) throw new CdpError("Session already stopped");
+          this.port = ensured.port;
+          this.onStatus?.(
+            `Using CDP :${ensured.port} (${ensured.browser ?? "unknown"}; ${ensured.restarted ? "restarted" : "launched"})`,
+          );
+        } else {
+          if (this.closed) throw new CdpError("Session already stopped");
+          this.port = best.port;
+          this.onStatus?.(
+            `Using CDP :${best.port} (${best.browser ?? "unknown"}; primaryPages=${best.primaryPages})`,
           );
         }
-        if (this.closed) throw new CdpError("Session already stopped");
-        this.port = best.port;
-        this.onStatus?.(
-          `Using CDP :${best.port} (${best.browser ?? "unknown"}; primaryPages=${best.primaryPages})`,
-        );
       }
 
       await probeCdp(this.port, "127.0.0.1", { timeoutMs: 800 });

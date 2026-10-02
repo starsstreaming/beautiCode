@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: ""
+title: beautiCode Monorepo 根工作区
+scope:
+    - README.md
+    - NOTICE.md
+    - THIRD_PARTY_NOTICES.md
+    - package.json
+    - package-lock.json
+    - .gitignore
+    - LICENSE
+source_files: []
+depends_on: []
+related_to: []

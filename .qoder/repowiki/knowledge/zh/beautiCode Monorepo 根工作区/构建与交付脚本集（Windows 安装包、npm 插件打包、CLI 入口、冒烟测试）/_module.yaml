@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: scripts
+title: 构建与交付脚本集（Windows 安装包、npm 插件打包、CLI 入口、冒烟测试）
+scope:
+    - scripts/
+source_files: []
+depends_on: []
+related_to:
+    - path: docs_and_design_demos

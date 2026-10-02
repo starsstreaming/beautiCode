@@ -1,0 +1,45 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+nodes_managed: true
+exported_at: "2026-08-31T10:25:32Z"
+modules:
+    "":
+        dir_name: beautiCode Monorepo 根工作区
+        title: beautiCode Monorepo 根工作区
+        scope:
+            - README.md
+            - NOTICE.md
+            - THIRD_PARTY_NOTICES.md
+            - package.json
+            - package-lock.json
+            - .gitignore
+            - LICENSE
+        source_files: []
+        children:
+            - docs_and_design_demos
+            - scripts
+        depends_on: []
+        related_to: []
+    docs_and_design_demos:
+        dir_name: 项目文档与内置主题资源
+        title: 项目文档与内置主题资源
+        scope:
+            - docs/
+            - assets/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: scripts
+    scripts:
+        dir_name: 构建与交付脚本集（Windows 安装包、npm 插件打包、CLI 入口、冒烟测试）
+        title: 构建与交付脚本集（Windows 安装包、npm 插件打包、CLI 入口、冒烟测试）
+        scope:
+            - scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: docs_and_design_demos

@@ -1,0 +1,170 @@
+{
+  "summary": {
+    "projectName": "beautiCode",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 26,
+    "overview": "本次为 session-limited 评审：该运行时实际使用 Qoder CN 专属 home 目录，而证据管道探测的 Qoder 全局 home 会话源根全部缺失，窗口内 0 个可分析会话，行为层判断保持 Unobserved。项目机制本身有真实强项：apply 事务链（snapshot→finalize/rollback，磁盘为回滚权威、阶段计时与 generation 关联内嵌错误串）配有伴改测试与 14 个路由进根 npm test 的测试文件，CI 声明了 win/ubuntu × node 22/24 多层检查。保留两项发现：跨进程 apply 链的失败诊断仅存于 in-band 错误串、无任何持久化诊断落点（Medium）；Qoder CN home 中的会话记录与已安装插件无法被证据管道解析，导致学习循环与插件完整性治理不可观测（Low）。延迟项包括：CI 实际绿色未验证、host-applier.ts 高 churn 决策集中（有伴改测试缓解）、无项目级 AGENTS.md/lint/format（项目未声明该要求）、测试经 dist 消费、用户级 Skill 精确重复副本（diagnosing-bugs）等，均因缺乏当下后果证据而不构成发现。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Workflows"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Skills",
+          "scopes": [
+            "Global"
+          ],
+          "count": 86,
+          "paths": [
+            "~/.agents/skills/agent-reach/SKILL.md",
+            "~/.qoder/skills/agents-sdk/SKILL.md",
+            "~/.agents/skills/ask-matt/SKILL.md",
+            "~/.qoder/skills/ask-matt/SKILL.md",
+            "~/.agents/skills/asu-project/SKILL.md",
+            "~/.agents/skills/asu-recap/SKILL.md",
+            "~/.agents/skills/asu-study/SKILL.md",
+            "~/.qoder/skills/cloudflare/SKILL.md",
+            "~/.qoder/skills/cloudflare-email-service/SKILL.md",
+            "~/.qoder/skills/cloudflare-one/SKILL.md",
+            "~/.qoder/skills/cloudflare-one-migrations/SKILL.md",
+            "~/.agents/skills/code-review/SKILL.md"
+          ]
+        },
+        {
+          "surface": "Workflows",
+          "scopes": [
+            "Project"
+          ],
+          "count": 2,
+          "paths": [
+            ".github/workflows/ci.yml",
+            ".github/workflows/publish-github-package.yml"
+          ]
+        },
+        {
+          "surface": "Rules",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Hooks",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Commands",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "MCP",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Memories",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Plugins",
+          "scopes": [
+            "Plugin"
+          ],
+          "count": 0
+        }
+      ],
+      "repositorySourceRows": []
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 52,
+        "summary": "README 与 10 篇边界文档提供了可运行的任务入口与上下文（Present），但项目缺少 agent 专用指令文件，且无会话证据可证明任务级使用；验收边界与范围控制保持 Unobserved。",
+        "findingRefs": []
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 60,
+        "summary": "engines 钉定、workspaces、discover/readiness/smoke 脚本与 CI 矩阵构成可路由的启动与运行面（Present→Wired）；权限边界仅有 CI 只读声明，生命周期钩子与强制决策无观察证据。",
+        "findingRefs": []
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 56,
+        "summary": "核心 apply 变更伴随映射测试（path-correlated 伴改）与多层声明检查，错误串内嵌阶段耗时可操作；但 failure-repair 可观测性未决——跨进程失败无持久化、可关联的诊断落点，live smoke 未演练，维度保持在 59 以下。",
+        "findingRefs": [
+          "apply-chain-inband-diagnostics"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 48,
+        "summary": "CI 与发布工作流静态声明存在（Present），当前核心变更仍在未提交工作区，无修订绑定的验收决定证据；产品自身的快照/回滚机制强，但那是产品行为而非交付流程护栏。",
+        "findingRefs": []
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 36,
+        "summary": "有界评审已完成并落入证据缺口：会话记录实际存在（5 份）但被 home 路由错误遮蔽，Memory 扫描为空、无干预台账、无可比情节；重复判定与后续效果对比在本窗口不可评估。",
+        "findingRefs": [
+          "qoder-cn-home-evidence-routing"
+        ]
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "apply-chain-inband-diagnostics",
+      "title": "跨进程 apply 失败只能靠 in-band 错误串复盘",
+      "severity": "Medium",
+      "reason": "apply 事务链（snapshot→commitImport→stageMedia→hostApply→rendererVerify→finalize/rollback）横跨 tray session-host、engine 与 renderer 多个进程。lead 核验了 packages/core、packages/adapter-codex、apps/tray/session-host.mjs 及 integrations/deepseek-harness 的 client.js/console.js：全链未发现任何持久化日志落点（无文件写入式日志），仅 1 处 console.log；阶段计时与 generation 关联身份只存在于错误返回值内。当下后果：一旦 live apply 失败（blob 挂载超时、渲染端异常、宿主失联），调用方拿不到返回值时即无任何可关联的持久诊断证据，失败定位只能依赖最后一次 in-band 错误串。该核心路径正处于大规模未提交重构中（host-applier.ts +67/-97，伴随测试同步变更）。不确定性：测试与 CI 未在本次评审中执行（UNVERIFIED）；未观察到历史失败事件，此为结构性诊断缺口而非已发生事故。",
+      "expectedOutput": [
+        "Update the existing Code owner identified by the reviewed evidence and retain a focused validation result."
+      ],
+      "expectedArtifact": "Code",
+      "aiFixPrompt": "/better-harness fix this issue\n\n为 apply 事务链补一条最小持久化诊断记录：复用错误 payload 中已有的阶段计时与 generation 关联身份，在事务各阶段（成功与失败两路）追加一条 append-only 诊断记录（阶段名、结果、耗时、失败分类、generation），落点选项目内可重置的位置；保持现有回滚以磁盘为权威的语义，诊断写入失败不得阻塞回滚。\n\n## Validation\n\n- 运行聚焦测试 packages/core/test/background-store.test.js，断言成功路径与 verify 失败回滚路径均产生诊断记录且包含 generation 关联字段\n- 确认离线模式下诊断路径不抛错、不影响回滚结果",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "qoder-cn-home-evidence-routing",
+      "title": "Qoder CN home 里的会话记录与已装插件无法被证据管道解析",
+      "severity": "Low",
+      "reason": "该运行时实际 home 为 Qoder CN 专属目录，而证据管道探测的是 Qoder 全局 home 下的 6 个可选源根（全部不存在，warningCodes: missing-optional-root / disabled-source-root）。lead 磁盘核验：本项目的会话记录实际存在于 Qoder CN home 的本项目目录下（5 份）；其插件注册文件显示项目 .qoder-cn/settings.json 声明启用的 3 个插件均已安装且启用（其中 2 个为 project scope），而确定性信封报告 plugins=0、enabledPluginCount=0、合格会话 0。当下后果：本评审被限定为 session-limited，重复工作流判定与 Loop Effectiveness 后续对比没有可观测窗口；资产完整性治理覆盖不到实际启用的插件。不确定性：平台侧是否支持指向 CN home 属 provider 行为，本次未验证；会话内容本身未打开，不构成行为证据。",
+      "expectedOutput": [
+        "Update the existing Document owner identified by the reviewed evidence and retain a focused validation result."
+      ],
+      "expectedArtifact": "Document",
+      "aiFixPrompt": "/better-harness fix this issue\n\n执行有界发现：确认本运行时的 harness 证据采集能否指向 Qoder CN 运行时 home（会话记录位于该 home 的 projects 目录下、插件注册位于其 plugins 目录下），重新运行会话源探测与证据采集，确认本项目会话记录与启用插件可被解析；将已验证的采集路由记录进项目 docs。不修改任何 provider 内部实现。\n\n## Validation\n\n- 重跑会话源探测后，至少一个对应本工作区的会话源根报告为存在\n- 项目 settings 声明启用的插件出现在资产清单中而非 0",
+      "dimensionRefs": [
+        "learning-capture"
+      ]
+    }
+  ]
+}

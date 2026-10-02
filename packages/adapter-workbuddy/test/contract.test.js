@@ -41,7 +41,17 @@ test("descriptor advertises the capabilities this runner actually honours", () =
   assert.equal(caps.muted, true);
   assert.equal(caps.tone, true);
   assert.equal(caps.fish, false);
-  assert.equal(caps.savedThemes, false);
+  assert.equal(caps.savedThemes, true);
+});
+
+test("background bar requires a name and exposes persisted themes", () => {
+  assert.match(BACKGROUND_BAR_INJECTION, /保存背景主题/);
+  assert.match(BACKGROUND_BAR_INJECTION, /已保存主题/);
+  assert.match(BACKGROUND_BAR_INJECTION, /requestThemeName/);
+  assert.match(BACKGROUND_BAR_INJECTION, /PERSIST\.themes/);
+  assert.match(BACKGROUND_BAR_INJECTION, /activeThemeId/);
+  assert.match(BACKGROUND_BAR_INJECTION, /applyPath\(theme\.path, theme\.id\)/);
+  assert.doesNotThrow(() => new Function(BACKGROUND_BAR_INJECTION));
 });
 
 test("target matching ignores the query string but keeps scheme and path", () => {
@@ -118,6 +128,10 @@ test("theme is read from the html class token list, and unknown themes fail clos
 
 test("wallpaper area is transparent and the scroll fade is killed", () => {
   const css = buildContractCss({ theme: "dark" });
+  assert.ok(
+    BACKDROP_SELECTORS.includes(".wb-home-route"),
+    "the opaque WorkBuddy 5.5.6 home route must not cover the right side of the wallpaper",
+  );
   for (const selector of BACKDROP_SELECTORS) {
     assert.ok(css.includes(selector), `backdrop selector ${selector} missing`);
   }

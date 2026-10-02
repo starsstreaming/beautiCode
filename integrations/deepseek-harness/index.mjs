@@ -7,6 +7,7 @@ import { registerAgentSurfaces } from "./agent.mjs";
 import { resolvePluginBaseUrl } from "./host-apply.mjs";
 import { createBeauticodeUi } from "./ui-host.mjs";
 import { canvasImagePath, iceFrostImagePath, normalizeAtmosphere } from "./presets.mjs";
+import { createBrowserInjection } from "./browser-injection.mjs";
 
 export const name = "beauticode-bridge";
 export const inject = ["webServer"];
@@ -105,12 +106,6 @@ async function authorized(req, tokenFile) {
   );
 }
 
-function isSameOrigin(req) {
-  const origin = req.headers.origin;
-  if (typeof origin === "string") return origin === `http://${req.headers.host}`;
-  return req.headers["sec-fetch-site"] === "same-origin";
-}
-
 function validLoopbackMediaUrl(value) {
   if (typeof value !== "string") return false;
   try {
@@ -202,6 +197,8 @@ function publicStatus(current, modes, clients, clientStates) {
 }
 
 export function apply(ctx, config = {}) {
+  const browserInjection = createBrowserInjection();
+  const isSameOrigin = (req) => browserInjection.isSameOrigin(req);
   const tokenFile = path.resolve(config.tokenFile || defaultTokenFile());
   const clients = new Map();
   const clientStates = new Map();
@@ -228,19 +225,28 @@ export function apply(ctx, config = {}) {
   };
 
   ctx.effect(() => {
-    const disposeTap = ctx.webServer.tapIndex((html) => {
-      if (html.includes("data-beauticode-bridge")) return html;
-      const script =
-        '<script defer src="/__beauticode/atmosphere.js"></script>' +
-        '<script defer src="/__beauticode/client.js" data-beauticode-bridge></script>' +
-        '<script defer src="/__beauticode/console.js"></script>' +
-        '<script defer src="/__beauticode/gallery.js"></script>';
-      return html.includes("</body>")
-        ? html.replace("</body>", `${script}</body>`)
-        : `${html}${script}`;
+    const disposeInjection = ctx.on("webserver/index-inject", (table) => {
+      browserInjection.contribute(table);
     });
 
     const disposers = [
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/__beauticode/transport.js",
+        handler: async (req, res) => {
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            res.writeHead(405).end();
+            return;
+          }
+          const source = await fs.readFile(path.join(here, "transport.js"));
+          res.writeHead(200, {
+            "content-type": "text/javascript; charset=utf-8",
+            "cache-control": "no-store",
+            "content-length": source.length,
+          });
+          res.end(req.method === "HEAD" ? undefined : source);
+        },
+      }),
       ctx.webServer.register({
         kind: "exact",
         path: "/__beauticode/version",
@@ -289,7 +295,7 @@ export function apply(ctx, config = {}) {
           }
           const source = await fs.readFile(filePath);
           res.writeHead(200, {
-            "content-type": "image/png",
+            "content-type": filePath.endsWith(".webp") ? "image/webp" : "image/png",
             "cache-control": "public, max-age=86400",
             "content-length": source.length,
           });
@@ -638,7 +644,7 @@ export function apply(ctx, config = {}) {
     ];
 
     return () => {
-      disposeTap();
+      if (typeof disposeInjection === "function") disposeInjection();
       for (const dispose of disposers) dispose();
       for (const response of clients.values()) response.destroy();
       clients.clear();

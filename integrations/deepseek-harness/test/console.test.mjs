@@ -1070,10 +1070,18 @@ test("console disables its controls and reports progress while busy", async () =
   page.querySelector('[data-act="clear"]').click();
 
   assert.equal(page.dataset.busy, "true");
+  const locked = [...page.querySelectorAll(".bc-btn")].filter(
+    (button) => button.getAttribute("data-act") !== "sound",
+  );
   assert.equal(
-    page.querySelectorAll(".bc-btn").every((button) => button.disabled === true),
+    locked.every((button) => button.disabled === true),
     true,
-    "every control is disabled while the request is in flight",
+    "import-related controls are disabled while the request is in flight",
+  );
+  assert.equal(
+    page.querySelector('[data-act="sound"]').disabled === true,
+    false,
+    "sound stays clickable while another action is busy",
   );
   assert.match(page.querySelector(".bc-msg").textContent, /正在处理/);
 
@@ -1084,4 +1092,40 @@ test("console disables its controls and reports progress while busy", async () =
     page.querySelectorAll(".bc-btn").some((button) => button.disabled === true),
     false,
   );
+});
+
+test("console toggles sound even while another action is busy", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const modeBodies = [];
+  await loadConsole(document, {
+    fetch: routedFetch({
+      "/__beauticode/ui/status": () =>
+        okJson(
+          statusBody({ importPolicy: { nativeLocalRequired: false, managedUploadAllowed: true } }),
+        ),
+      "/__beauticode/ui/clear": async () => {
+        await gate;
+        return okJson({ ok: true, message: "已清除" });
+      },
+      "/__beauticode/ui/mode": async (_url, init) => {
+        modeBodies.push(JSON.parse(init.body));
+        return okJson({ ok: true, muted: false, message: "背景视频声音已打开。" });
+      },
+    }),
+  });
+
+  const page = pageEl(document);
+  page.querySelector('[data-act="clear"]').click();
+  page.querySelector('[data-act="sound"]').click();
+  await flushAsync();
+  assert.deepEqual(modeBodies, [{ muted: false }]);
+  assert.equal(page.querySelector('[data-act="sound"]').textContent, "已开");
+
+  release();
+  await flushAsync();
 });

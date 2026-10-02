@@ -70,7 +70,10 @@ const home = os.homedir();
 const LAUNCHER_MAC = path.join(home, 'Library/LaunchAgents/com.beauticode.wb-runner.plist');
 const MAC_LOG = path.join(home, 'Library/Logs/beauticode-wb-runner.log');
 const STARTUP_VBS = path.join(home, 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/beauticode-wb-runner.vbs');
-const WIN_LOG = path.join(home, 'beauticode-wb-runner.log');
+const WIN_LOG = path.join(
+  process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'),
+  'beauticode', 'logs', 'wb-runner.log',
+);
 const LINUX_ENV = path.join(home, '.config/environment.d/beauticode-wb.conf');
 const LINUX_DESKTOP = path.join(home, '.config/autostart/beauticode-beauticode-wb-runner.desktop');
 const PID_FILE = PLAT === 'win32'
@@ -85,7 +88,7 @@ const macPlist = () => `<?xml version="1.0" encoding="UTF-8"?>
   <key>Label</key><string>com.beauticode.wb-runner</string>
   <key>ProgramArguments</key><array>
     <string>/bin/sh</string><string>-c</string>
-    <string>launchctl setenv ${ENV_KEY} ${port} 2>/dev/null; exec ${JSON.stringify(NODE)} ${JSON.stringify(RUNNER)}</string>
+    <string>launchctl setenv ${ENV_KEY} ${port} 2>/dev/null; exec ${JSON.stringify(NODE)} ${JSON.stringify(RUNNER)} --watchdog</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -96,13 +99,13 @@ const macPlist = () => `<?xml version="1.0" encoding="UTF-8"?>
 function vbsString(value) {
   return `"${String(value).replace(/"/g, '""')}"`;
 }
-const winVbs = () => `CreateObject("WScript.Shell").Run ${vbsString(`"${NODE}" "${RUNNER}"`)}, 0, False`;
+const winVbs = () => `CreateObject("WScript.Shell").Run ${vbsString(`"${NODE}" "${RUNNER}" --watchdog`)}, 0, False`;
 
 function shSingleQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 const linuxDesktop = () => {
-  const cmd = `exec ${shSingleQuote(NODE)} ${shSingleQuote(RUNNER)} >> /tmp/beauticode-wb-runner.log 2>&1`;
+  const cmd = `exec ${shSingleQuote(NODE)} ${shSingleQuote(RUNNER)} --watchdog >> /tmp/beauticode-wb-runner.log 2>&1`;
   const escaped = cmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `[Desktop Entry]
 Type=Application
@@ -197,7 +200,7 @@ function startDaemon() {
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
   const out = fs.openSync(logFile, 'a');
-  const child = spawn(NODE, [RUNNER], {
+  const child = spawn(NODE, [RUNNER, '--watchdog'], {
     detached: true, stdio: ['ignore', out, out],
     env: { ...process.env, [ENV_KEY]: port },
     windowsHide: true,

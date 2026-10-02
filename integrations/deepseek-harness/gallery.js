@@ -69,7 +69,10 @@
   }
 
   async function request(path, init) {
-    const response = await fetch(path, init);
+    const response = await fetch(path, {
+      ...init,
+      headers: { ...(init?.headers || {}), ...(globalThis.__beauticodeTransport?.headers() ?? {}) },
+    });
     if ((response.headers.get("content-type") || "").includes("ndjson")) {
       return readNdjson(response);
     }

@@ -25,6 +25,7 @@
 
 import process from 'node:process';
 import { createServer } from 'node:http';
+import { spawn, execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,12 +53,14 @@ const {
   HARDCODED_SURFACE_SCAN_EXPRESSION, buildHardcodedSurfaceCss,
   buildStyleKeeperExpression,
   pickWorkBuddyTarget, assertLoopbackDebuggerUrl, safeTargetLabel,
+  ensureWorkBuddyCdp,
 } = A;
 for (const [k, v] of Object.entries({
   BACKGROUND_BAR_INJECTION, BACKGROUND_BAR_CLEANUP, buildContractCss, readTheme,
   TOKEN_SCAN_EXPRESSION, buildTokenOverlayCss, TOKEN_OVERLAY_STYLE_ID,
   HARDCODED_SURFACE_SCAN_EXPRESSION, buildHardcodedSurfaceCss, buildStyleKeeperExpression,
   pickWorkBuddyTarget, assertLoopbackDebuggerUrl, safeTargetLabel,
+  ensureWorkBuddyCdp,
 })) {
   if (typeof v !== 'string' && typeof v !== 'function') {
     process.stderr.write(`adapter 导出形状不对：${k}\n`); process.exit(2);
@@ -69,7 +72,7 @@ const APPLY_IDS = [CONTRACT_STYLE_ID, TOKEN_OVERLAY_STYLE_ID, HARDCODED_STYLE_ID
 
 // ── 参数 ──────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const o = { port: 0, once: false, clean: false, verbose: false, help: false };
+  const o = { port: 0, once: false, clean: false, verbose: false, help: false, watchdog: false, noLaunch: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--port' || a === '-p') o.port = parseInt(argv[++i], 10);
@@ -78,6 +81,8 @@ function parseArgs(argv) {
     else if (a === '--clean') o.clean = true;
     else if (a === '--verbose' || a === '-v') o.verbose = true;
     else if (a === '--help' || a === '-h') o.help = true;
+    else if (a === '--watchdog') o.watchdog = true;
+    else if (a === '--no-launch') o.noLaunch = true;
     else if (a.startsWith('--port=')) o.port = parseInt(a.slice(7), 10);
   }
   return o;
@@ -85,12 +90,13 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 if (args.help) {
   process.stdout.write(
-    '用法：node wb-cdp-runner.mjs [--port 9335] [--once] [--clean] [--verbose]\n' +
-    '  默认常驻：连上即应用完整序列（UI+契约+token覆盖+硬编码+看门狗），断开 3s 重连\n' +
-    '  --once   应用一次后退出    --clean  清理后退出    -v 详细日志\n');
+    '用法：node wb-cdp-runner.mjs [--port 9335] [--once] [--clean] [--verbose] [--watchdog] [--no-launch]\n' +
+    '  默认常驻：仅修复 10 秒内新启动且没有 CDP 的 WorkBuddy；主动退出后不会重开\n' +
+    '  --once   应用一次后退出    --clean  清理后退出    --watchdog 崩溃拉起\n' +
+    '  --no-launch  不启动/重启宿主，缺 CDP 时失败退出\n');
   process.exit(0);
 }
-const PORT = args.port || parseInt(process.env.WORKBUDDY_REMOTE_DEBUGGING_PORT || '9335', 10);
+let PORT = args.port || parseInt(process.env.WORKBUDDY_REMOTE_DEBUGGING_PORT || '9335', 10);
 // 默认壁纸：舞台没有媒体时自动铺上（否则透明面透出的是 #101114 纯色，
 // 看起来就像"不透明没生效"——实测踩过）。--wallpaper 可换。
 const DEFAULT_WALLPAPER = args.wallpaper
@@ -389,6 +395,16 @@ function startGalleryServer(applyFn) {
 // 实时驱动（纯 CSS 变量，拖动即生效，无需守护重造）。
 const ALPHA_VARIFY = (css) =>
   css.split(' 82%, transparent)').join(' var(--bc-surface-alpha-pct, 82%), transparent)');
+
+function isBlankPersistState(live) {
+  return !live || (
+    !live.wallpaper && !live.cleared && !live.blob &&
+    live.dim == null && live.blur == null && live.alpha == null &&
+    (!Array.isArray(live.themes) || live.themes.length === 0) &&
+    !live.activeThemeId
+  );
+}
+
 async function applyAll(c) {
   // 1) 主题（fail-closed：读不出就不上 CSS，只上 UI 并说明原因）
   const className = await evaluate(c, 'document.documentElement.className');
@@ -488,7 +504,12 @@ return 'default-applied';
 
   // 8) 记忆恢复：有 state.json 就把壁纸 + 三滑杆恢复到上次退出时的样子
   //    （state.wallpaper=null 且 cleared=true = 用户上次主动清除 → 连默认壁纸也撤掉）
-  if (fs.existsSync(STATE_FILE)) {
+  let liveBeforeRestore = null;
+  try {
+    const raw = await evaluate(c, 'window.__bcPersistGet ? window.__bcPersistGet() : null');
+    liveBeforeRestore = raw ? JSON.parse(raw) : null;
+  } catch { /* treat unreadable live state as blank */ }
+  if (fs.existsSync(STATE_FILE) && isBlankPersistState(liveBeforeRestore)) {
     try {
       const st = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
       await evaluate(c, 'window.__bcRestoreState && window.__bcRestoreState(' + JSON.stringify(st) + ')');
@@ -548,7 +569,7 @@ function startWatcher(c, state) {
       let blankLive = true;
       try {
         const live = v.persist ? JSON.parse(v.persist) : null;
-        blankLive = !live || (!live.wallpaper && !live.cleared && !live.blob && live.dim == null && live.blur == null && live.alpha == null);
+        blankLive = isBlankPersistState(live);
       } catch { blankLive = true; }
       let disk = null;
       try { disk = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* 无存档 */ }
@@ -587,7 +608,6 @@ function startWatcher(c, state) {
 // ── 原生文件选择器（DSH「宿主接管文件选择」的移植） ────────────────────
 // WorkBuddy renderer 拦程序化 file chooser（Page.fileChooserOpened 未触发），
 // 所以面板「选择文件」只发 __bcPickRequest，由守护开系统原生对话框并回填路径。
-import { execFile } from 'node:child_process';
 import { platform } from 'node:os';
 
 async function pickFileNative() {
@@ -601,12 +621,37 @@ async function pickFileNative() {
     });
   }
   if (platform() === 'win32') {
-    const ps = 'Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; ' +
-      "$d.Filter='媒体|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp;*.avif;*.mp4;*.mov;*.webm;*.m4v'; " +
-      "if($d.ShowDialog() -eq 'OK'){$d.FileName}";
+    const ps = [
+      "$ErrorActionPreference='Stop'",
+      // Windows PowerShell 5 writes redirected console output in the active
+      // OEM code page by default. Node decodes the pipe as UTF-8, so a media
+      // path containing Chinese characters used to arrive as U+FFFD and the
+      // renderer later reported MEDIA_ERR_SRC_NOT_SUPPORTED. Pin both output
+      // channels to UTF-8 before the dialog prints its selected path.
+      "$OutputEncoding=New-Object System.Text.UTF8Encoding($false)",
+      "[Console]::OutputEncoding=$OutputEncoding",
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "Add-Type -AssemblyName System.Drawing",
+      "[System.Windows.Forms.Application]::EnableVisualStyles()",
+      "$owner = New-Object System.Windows.Forms.Form",
+      "$owner.Text='beautiCode 文件选择器'",
+      "$owner.FormBorderStyle=[System.Windows.Forms.FormBorderStyle]::FixedToolWindow",
+      "$owner.ShowInTaskbar=$false",
+      "$owner.StartPosition=[System.Windows.Forms.FormStartPosition]::CenterScreen",
+      "$owner.Size=[System.Drawing.Size]::new(1,1)",
+      "$owner.Opacity=0.01",
+      "$owner.TopMost=$true",
+      "$d=New-Object System.Windows.Forms.OpenFileDialog",
+      "$d.Filter='媒体|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp;*.avif;*.mp4;*.mov;*.webm;*.m4v'",
+      "$d.Multiselect=$false",
+      "$d.CheckFileExists=$true",
+      "$d.RestoreDirectory=$true",
+      "$d.Title='选择背景图片或视频'",
+      "try { [void]$owner.Show(); [void]$owner.Hide(); [void]$owner.Show(); [void]$owner.Activate(); [void]$owner.BringToFront(); [System.Windows.Forms.Application]::DoEvents(); $r=$d.ShowDialog($owner); if($r -eq [System.Windows.Forms.DialogResult]::OK){ [Console]::WriteLine($d.FileName) } } finally { $d.Dispose(); $owner.Close(); $owner.Dispose() }",
+    ].join('; ');
+    const encoded = Buffer.from(ps, 'utf16le').toString('base64');
     const out = await new Promise((resolve, reject) => {
-      // -STA：WinForms 文件对话框要求单线程单元（MTA 下可能异常/卡顿）
-      execFile('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', ps], { maxBuffer: 1 << 20 },
+      execFile('powershell.exe', ['-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], { windowsHide: true, maxBuffer: 1 << 20 },
         (err, so) => err ? reject(err) : resolve(String(so).trim()));
     });
     if (!out) throw new Error('cancel');
@@ -718,16 +763,89 @@ async function shutdown(sig) {
   process.exit(0);
 }
 
+async function runWatchdog() {
+  if (args.once || args.clean) {
+    throw new Error('--watchdog 不能与 --once 或 --clean 同时使用');
+  }
+  let child = null;
+  let stopping = false;
+  const start = () => {
+    if (stopping) return;
+    const childArgs = process.argv.slice(2).filter((a) => a !== '--watchdog');
+    child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...childArgs], {
+      stdio: 'inherit',
+      env: process.env,
+      windowsHide: true,
+    });
+    child.on('exit', (code, signal) => {
+      if (stopping) process.exit(code ?? 0);
+      log.warn(`runner 退出（${code ?? signal}），3s 后拉起`);
+      setTimeout(start, 3000);
+    });
+  };
+  const stop = () => {
+    stopping = true;
+    if (child?.pid) {
+      try { process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+    setTimeout(() => process.exit(0), 800);
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  start();
+  await new Promise(() => {});
+}
+
 async function main() {
+  if (args.watchdog) {
+    await runWatchdog();
+    return;
+  }
   process.on('SIGINT', () => { shutdown('SIGINT'); });
   process.on('SIGTERM', () => { shutdown('SIGTERM'); });
+  if (!args.clean) {
+    try {
+      const ensured = await ensureWorkBuddyCdp({
+        preferredPort: PORT,
+        launch: !args.noLaunch,
+        launchIfMissing: false,
+        restartIfBlind: !args.noLaunch,
+        repairWindowMs: 10_000,
+        timeoutMs: args.once ? 15_000 : 40_000,
+        log,
+      });
+      PORT = ensured.port;
+      if (ensured.launched || ensured.restarted) {
+        log.info(`WorkBuddy CDP 已就绪：127.0.0.1:${PORT}${ensured.restarted ? '（已重启）' : '（已启动）'}`);
+      }
+    } catch (e) {
+      if (args.once || args.noLaunch) { log.error('fatal: ' + e.message); process.exit(1); }
+      log.warn('启动检测暂未就绪：' + e.message.slice(0, 160) + ' —— 3s 后重试');
+    }
+  }
   for (;;) {
     try {
       log.info(`连接 http://127.0.0.1:${PORT} …`);
       await session();
     } catch (e) {
       if (args.once) { log.error('fatal: ' + e.message); process.exit(1); }
-      log.warn('连接断开（' + e.message.slice(0, 80) + '），3s 后重试 —— WorkBuddy 没开或没带 CDP 时会一直重试');
+      log.warn('连接断开（' + e.message.slice(0, 80) + '），3s 后重试');
+      if (!args.noLaunch) {
+        try {
+          const ensured = await ensureWorkBuddyCdp({
+            preferredPort: PORT,
+            launch: true,
+            launchIfMissing: false,
+            restartIfBlind: true,
+            repairWindowMs: 10_000,
+            timeoutMs: 20_000,
+            log,
+          });
+          PORT = ensured.port;
+        } catch (ensureErr) {
+          log.warn('WorkBuddy 尚未恢复：' + ensureErr.message.slice(0, 120));
+        }
+      }
     }
     if (args.once) process.exit(0);
     await new Promise((r) => setTimeout(r, 3000));

@@ -8,10 +8,21 @@ from disk alone when CDP is missing.
 
 1. Connect only to `127.0.0.1` (CLI discovery + injector both enforce this).
 2. Prefer hosts that already set `--remote-debugging-address=127.0.0.1`.
+   Omitted address is still treated as a **loopback-probe candidate**; beautiCode
+   never connects to the advertised address, only `127.0.0.1`.
 3. **Never** use `--remote-debugging-address=0.0.0.0` or a LAN bind.
-4. If CDP is gone after a host update, operations **fail closed** with a clear
+4. The background watcher never launches Codex merely because it is absent, so
+   a user-initiated close remains closed. When the original Windows icon starts
+   a **new main process less than 10 seconds old** without a CDP flag, the
+   process-start monitor immediately performs one repair restart with
+   `--remote-debugging-address=127.0.0.1` and an available loopback port (9335
+   preferred; bounded fallbacks when WorkBuddy already owns it).
+5. A process that already carries `--remote-debugging-port` is allowed to finish
+   starting. Failure to expose a valid `app://` page does not trigger a second
+   automatic restart, preventing crash loops.
+6. If CDP is gone after a host update, operations **fail closed** with a clear
    error (upstream lesson #235).
-5. Only one beautiCode injector may own a host (`injector.lock`).
+7. Only one beautiCode injector may own a host (`injector.lock`).
 
 ## Quick path (current Windows Codex package)
 
@@ -69,8 +80,11 @@ The tray auto-discovers a healthy loopback endpoint unless you pass `-Port`.
 --remote-debugging-port=9335
 ```
 
-**Microsoft Store / AppX** packages may ignore custom CLI arguments. Prefer the
-host’s own loopback CDP when present rather than forcing a relaunch.
+**Microsoft Store / AppX** builds must be started with a direct process call.
+Wrapping `ChatGPT.exe` in PowerShell `UseShellExecute=true` activates the package
+but drops Chromium's debugging flags; beautiCode therefore launches the resolved
+executable directly and verifies that an `app://` main page appears on the chosen
+loopback port.
 
 Windows AppX AppId observed in the field:
 

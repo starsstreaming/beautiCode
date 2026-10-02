@@ -11,16 +11,17 @@ const TOKEN = "b".repeat(64);
 
 class FakeWebServer {
   routes = new Map();
-  taps = [];
+  injections = [];
 
   register(route) {
     this.routes.set(route.path, route.handler);
     return () => this.routes.delete(route.path);
   }
 
-  tapIndex(tap) {
-    this.taps.push(tap);
-    return () => this.taps.splice(this.taps.indexOf(tap), 1);
+  collectIndexInjections() {
+    const rows = [];
+    for (const contribute of this.injections) contribute(rows);
+    return rows;
   }
 }
 
@@ -30,6 +31,11 @@ async function createPluginServer(tokenFile) {
   apply(
     {
       webServer,
+      on(event, contribute) {
+        assert.equal(event, "webserver/index-inject");
+        webServer.injections.push(contribute);
+        return () => webServer.injections.splice(webServer.injections.indexOf(contribute), 1);
+      },
       effect(factory) {
         effects.push(factory());
       },
@@ -58,11 +64,11 @@ async function createPluginServer(tokenFile) {
   };
 }
 
-function openEvents(origin, clientId) {
+function openEvents(origin, clientId, headers = { "Sec-Fetch-Site": "same-origin" }) {
   return new Promise((resolve, reject) => {
     const request = http.get(
       `${origin}/__beauticode/events?clientId=${clientId}`,
-      { headers: { "Sec-Fetch-Site": "same-origin" } },
+      { headers },
       (response) => {
         let data = "";
         response.on("data", (chunk) => {
@@ -75,7 +81,29 @@ function openEvents(origin, clientId) {
   });
 }
 
-test("plugin injects its client script exactly once", async (t) => {
+test("Desktop page key admits proxied UI and event requests", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-dsh-desktop-"));
+  const tokenFile = path.join(root, "token");
+  await fs.writeFile(tokenFile, TOKEN);
+  const plugin = await createPluginServer(tokenFile);
+  t.after(async () => {
+    await plugin.dispose();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const key = plugin.webServer.collectIndexInjections()[0].value;
+  const denied = await fetch(`${plugin.origin}/__beauticode/ui/status`);
+  assert.equal(denied.status, 403);
+  const allowed = await fetch(`${plugin.origin}/__beauticode/ui/status`, {
+    headers: { "X-Beauticode-Desktop-Key": key },
+  });
+  assert.equal(allowed.status, 200);
+  const stream = await openEvents(plugin.origin, "desktop-client", {
+    "X-Beauticode-Desktop-Key": key,
+  });
+  stream.request.destroy();
+});
+
+test("plugin publishes one ordered browser injection table for Web and Desktop", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-dsh-plugin-"));
   const tokenFile = path.join(root, "token");
   await fs.writeFile(tokenFile, TOKEN);
@@ -84,12 +112,20 @@ test("plugin injects its client script exactly once", async (t) => {
     await plugin.dispose();
     await fs.rm(root, { recursive: true, force: true });
   });
-  const tap = plugin.webServer.taps[0];
-  const once = tap("<html><body></body></html>");
-  const twice = tap(once);
-  assert.equal((twice.match(/data-beauticode-bridge/g) || []).length, 1);
-  assert.match(once, /__beauticode\/atmosphere\.js/);
-  assert.match(once, /__beauticode\/console\.js/);
+  const rows = plugin.webServer.collectIndexInjections();
+  assert.deepEqual(rows.map((row) => row.kind), ["global", ...Array(5).fill("script-src")]);
+  assert.deepEqual(rows.slice(1).map((row) => row.src), [
+    "/__beauticode/transport.js",
+    "/__beauticode/atmosphere.js",
+    "/__beauticode/client.js",
+    "/__beauticode/console.js",
+    "/__beauticode/gallery.js",
+  ]);
+  assert.match(rows[0].value, /^[a-f0-9]{64}$/);
+  const transport = await fetch(`${plugin.origin}/__beauticode/transport.js`);
+  assert.equal(transport.status, 200);
+  const transportSource = await transport.text();
+  assert.doesNotThrow(() => new Function(transportSource));
   const atmosphere = await fetch(`${plugin.origin}/__beauticode/atmosphere.js`);
   assert.equal(atmosphere.status, 200);
   const atmosphereSource = await atmosphere.text();
@@ -382,8 +418,8 @@ test("opaque DSH surfaces are re-expressed on the translucency tiers", async () 
 
 /**
  * Fullscreen cannot be entered without a user gesture, so "fullscreen by
- * default" means taking the first click after load - exactly once, and never
- * fighting an exit. A keydown in the composer must not count.
+ * default" means taking the first successful click after load. A rejected
+ * gesture must not spend the listener. A keydown in the composer must not count.
  */
 test("browser client takes the first click to start fullscreen", async () => {
   const source = await fs.readFile(new URL("../client.js", import.meta.url), "utf8");
@@ -400,6 +436,7 @@ test("browser client takes the first click to start fullscreen", async () => {
   };
   const context = {
     crypto: { randomUUID: () => "client-fullscreen-test" },
+    Promise,
     document: {
       body: { hasAttribute: () => false, prepend() {} },
       documentElement,
@@ -432,20 +469,76 @@ test("browser client takes the first click to start fullscreen", async () => {
   vm.runInNewContext(source, context);
 
   assert.equal(typeof listeners.get("pointerdown")?.handler, "function", "the default is armed");
-  // Cross-realm objects do not compare by structure, so the flags are read out.
   assert.equal(listeners.get("pointerdown").options.capture, true);
-  assert.equal(listeners.get("pointerdown").options.once, true);
   assert.equal(listeners.has("keydown"), false, "typing in the composer is not a fullscreen gesture");
   assert.equal(requested, 0, "nothing is requested before a gesture");
 
   const enter = listeners.get("pointerdown").handler;
   enter();
   assert.equal(requested, 1, "the first click starts fullscreen");
-  assert.equal(listeners.has("pointerdown"), false, "and the arming is spent");
+  await Promise.resolve();
+  assert.equal(listeners.has("pointerdown"), false, "and the arming is spent after success");
 
-  // An exit is not fought: a later click in the same page load does nothing.
   enter();
   assert.equal(requested, 1);
+});
+
+test("browser client stays armed when the first fullscreen request is rejected", async () => {
+  const source = await fs.readFile(new URL("../client.js", import.meta.url), "utf8");
+  const listeners = new Map();
+  let requested = 0;
+  const documentElement = {
+    dataset: {},
+    style: { setProperty() {}, removeProperty() {}, removeAttribute() {} },
+    removeAttribute() {},
+    requestFullscreen() {
+      requested += 1;
+      return requested === 1 ? Promise.reject(new Error("denied")) : Promise.resolve();
+    },
+  };
+  const context = {
+    crypto: { randomUUID: () => "client-fullscreen-retry" },
+    Promise,
+    document: {
+      body: { hasAttribute: () => false, prepend() {} },
+      documentElement,
+      fullscreenElement: null,
+      head: { append() {} },
+      createElement: () => ({ dataset: {}, style: {} }),
+      getElementById: () => null,
+      querySelector: () => null,
+      addEventListener(name, handler, options) {
+        listeners.set(name, { handler, options });
+      },
+      removeEventListener(name) {
+        listeners.delete(name);
+      },
+    },
+    fetch: async () => ({ ok: true }),
+    HTMLMediaElement: { HAVE_CURRENT_DATA: 2 },
+    HTMLVideoElement: class {},
+    Image: class {},
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    MutationObserver: class {
+      observe() {}
+    },
+    EventSource: class {},
+    queueMicrotask: (callback) => callback(),
+    setInterval: () => 0,
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.runInNewContext(source, context);
+
+  const enter = listeners.get("pointerdown").handler;
+  enter();
+  await Promise.resolve();
+  assert.equal(requested, 1);
+  assert.equal(listeners.has("pointerdown"), true, "a rejected gesture does not spend the arming");
+  enter();
+  await Promise.resolve();
+  assert.equal(requested, 2);
+  assert.equal(listeners.has("pointerdown"), false);
 });
 
 test("browser client restores user dim from localStorage and can clear it", async () => {

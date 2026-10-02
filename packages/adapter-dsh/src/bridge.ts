@@ -68,6 +68,7 @@ export function dshTrustedOrigins(value: string | URL): string[] {
       new URL(`http://127.0.0.1${port}`).origin,
       new URL(`http://localhost${port}`).origin,
       new URL(`http://[::1]${port}`).origin,
+      "dsh-app://app",
     ]),
   ];
 }
@@ -215,6 +216,19 @@ export class DshHostApplier implements HostApplier {
         }
         if (
           currentMatches &&
+          last.connectedClients === 0
+        ) {
+          // Bridge already holds the payload; the next SSE client receives it
+          // on connect. Do not fail-closed as 422 just because the page is closed.
+          return {
+            status: "pass",
+            reason:
+              "No DeepSeek Harness browser client is connected; background is queued for the next page.",
+            details: { ...last },
+          };
+        }
+        if (
+          currentMatches &&
           last.failedClients > 0 &&
           last.readyClients === 0 &&
           typeof last.lastRenderError === "string" &&
@@ -226,10 +240,7 @@ export class DshHostApplier implements HostApplier {
             details: { ...last },
           };
         }
-        lastError =
-          last.connectedClients === 0
-            ? "No DeepSeek Harness browser client is connected."
-            : "DeepSeek Harness client has not acknowledged this generation.";
+        lastError = "DeepSeek Harness client has not acknowledged this generation.";
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
       }

@@ -32,7 +32,7 @@ export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
  * payload 世代戳：每次改 payload 内容时递增。守卫用它判断页面上的注入
  * 是否为「当前代」——旧代按钮的闭包攥着已分离的节点引用，必须全拆重建。
  */
-export const BACKGROUND_BAR_VERSION = 'v9.8';
+export const BACKGROUND_BAR_VERSION = 'v10.0';
 
 /** 注入 IIFE 字符串；幂等（守卫同时校验 entry 是否仍在 DOM，侧栏收起/重挂后可重建）。 */
 export const BACKGROUND_BAR_INJECTION: string = (function () {
@@ -127,6 +127,29 @@ styleEl.textContent = [
   '.beauticode-gal .bcg-close{margin-left:auto;height:30px;padding:0 12px;border:.5px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.08);color:inherit;font:inherit;font-size:13px;cursor:pointer}',
   '.beauticode-gal .bcg-close:hover{background:rgba(255,255,255,.15)}',
   'html.light .beauticode-gal .bcg-close{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.14)}',
+  // 主题命名与已保存主题选择：沿用 WorkBuddy popover 的深浅色配方。
+  '.beauticode-theme-dialog{position:fixed;inset:0;z-index:3200;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.55)}',
+  '.beauticode-theme-dialog[hidden]{display:none}',
+  '.beauticode-theme-card{display:flex;flex-direction:column;gap:12px;width:min(420px,calc(100vw - 48px));max-height:min(600px,calc(100vh - 48px));padding:18px;border-radius:18px;background:rgb(36,36,36);color:rgba(228,228,228,.92);outline:.5px solid rgba(255,255,255,.14);box-shadow:color(srgb 0 0 0/.4) 0 24px 48px -8px;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}',
+  'html.light .beauticode-theme-card{background:rgb(252,252,252);color:rgba(28,28,30,.92);outline-color:rgba(0,0,0,.1)}',
+  '.beauticode-theme-card h2{margin:0;font-size:16px;font-weight:600}',
+  '.beauticode-theme-file,.beauticode-theme-empty,.beauticode-theme-error{margin:0;font-size:12px;line-height:18px;opacity:.65;overflow-wrap:anywhere}',
+  '.beauticode-theme-error{color:#ff8f8f;opacity:1}',
+  '.beauticode-theme-card input{height:38px;padding:0 11px;border:.5px solid rgba(255,255,255,.18);border-radius:10px;background:rgba(255,255,255,.08);color:inherit;font:inherit}',
+  'html.light .beauticode-theme-card input{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.16)}',
+  '.beauticode-theme-actions{display:flex;justify-content:flex-end;gap:8px}',
+  '.beauticode-theme-actions button,.beauticode-theme-row{cursor:pointer;border:.5px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:inherit;font:inherit}',
+  '.beauticode-theme-actions button{height:34px;padding:0 13px;border-radius:10px}',
+  '.beauticode-theme-actions button[data-theme-confirm]{background:rgba(255,255,255,.16)}',
+  'html.light .beauticode-theme-actions button,html.light .beauticode-theme-row{border-color:rgba(0,0,0,.14);background:rgba(0,0,0,.04)}',
+  '.beauticode-theme-list{display:flex;flex-direction:column;gap:8px;overflow:auto;min-height:0}',
+  '.beauticode-theme-row{display:flex;align-items:center;gap:10px;width:100%;min-height:46px;padding:8px 11px;border-radius:12px;text-align:left}',
+  '.beauticode-theme-row:hover{background:rgba(255,255,255,.12)}',
+  'html.light .beauticode-theme-row:hover{background:rgba(0,0,0,.08)}',
+  '.beauticode-theme-dot{width:8px;height:8px;border-radius:50%;background:transparent;border:1px solid currentColor;flex:none}',
+  '.beauticode-theme-row[data-active="true"] .beauticode-theme-dot{background:#27d7a1;border-color:#27d7a1}',
+  '.beauticode-theme-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+  '.beauticode-theme-kind{font-size:11px;opacity:.58}',
 ].join('');
 document.head.appendChild(styleEl);
 
@@ -239,6 +262,9 @@ soundBtn.setAttribute('aria-pressed', 'false');
 soundBtn.setAttribute('data-id', 'soundBtn');
 pop.appendChild(menuItem(ICONS.sound, '声音', soundBtn, true));
 pop.appendChild(menuItem(ICONS.media, '导入背景', pill('选择文件', 'media'), true));
+var themesBtn = pill('选择', 'themes');
+themesBtn.setAttribute('data-id', 'themesBtn');
+pop.appendChild(menuItem(ICONS.media, '已保存主题', themesBtn, true));
 pop.appendChild(menuItem(ICONS.store, '皮肤中心', pill('打开', 'store'), true));
 pop.appendChild(menuItem(ICONS.clear, '清除背景', pill('清除', 'clear'), true));
 
@@ -250,7 +276,7 @@ fileInput.accept = 'image/png,image/jpeg,image/webp,image/gif,image/bmp,image/av
 fileInput.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
 pop.appendChild(fileInput);
 fileInput.addEventListener('change', function (ev) {
-  if (ev.target.files && ev.target.files[0]) applyBlob(ev.target.files[0]);
+  if (ev.target.files && ev.target.files[0]) requestThemeName(ev.target.files[0]);
   ev.target.value = '';
 });
 
@@ -346,6 +372,112 @@ galGrid.addEventListener('click', function (ev) {
   }).then(function (r2) { return r2.json(); }).then(function (j) {
     galMsg.textContent = j.ok ? '已应用到 WorkBuddy。' : (j.error || '应用失败。');
   }).catch(function () { galMsg.textContent = '应用失败（皮肤中心服务未响应）。'; }).finally(function () { galBusy = false; });
+});
+
+// ── 导入命名 + 已保存主题选择 ───────────────────────────────────────
+var nameDialog = document.createElement('div');
+nameDialog.className = 'beauticode-theme-dialog';
+nameDialog.setAttribute('data-bc-injected', BC);
+nameDialog.hidden = true;
+nameDialog.innerHTML = '<div class="beauticode-theme-card" role="dialog" aria-modal="true" aria-labelledby="bc-theme-name-title"><h2 id="bc-theme-name-title">保存背景主题</h2><p class="beauticode-theme-file"></p><input type="text" maxlength="80" aria-label="主题名称" placeholder="输入主题名称"><p class="beauticode-theme-error" hidden></p><div class="beauticode-theme-actions"><button type="button" data-theme-cancel>取消</button><button type="button" data-theme-confirm>保存并应用</button></div></div>';
+document.body.appendChild(nameDialog);
+var nameInput = nameDialog.querySelector('input');
+var nameFile = nameDialog.querySelector('.beauticode-theme-file');
+var nameError = nameDialog.querySelector('.beauticode-theme-error');
+var pendingThemeFile = null;
+function suggestedThemeName(file) {
+  return String(file && file.name || '新背景').replace(/\\.[^.]+$/, '').trim() || '新背景';
+}
+function cancelThemeName() {
+  pendingThemeFile = null;
+  window.__bcPendingPickPath = '';
+  nameDialog.hidden = true;
+}
+function requestThemeName(file) {
+  pendingThemeFile = file;
+  nameFile.textContent = String(file.name || '');
+  nameInput.value = suggestedThemeName(file);
+  nameError.hidden = true;
+  nameError.textContent = '';
+  nameDialog.hidden = false;
+  closePop();
+  setTimeout(function () { nameInput.focus(); nameInput.select(); }, 0);
+}
+function confirmThemeName() {
+  var name = String(nameInput.value || '').trim();
+  if (!name) {
+    nameError.textContent = '请输入主题名称。';
+    nameError.hidden = false;
+    nameInput.focus();
+    return;
+  }
+  var file = pendingThemeFile;
+  if (!file) { cancelThemeName(); return; }
+  var real = String(window.__bcPendingPickPath || '');
+  if (!real) {
+    nameError.textContent = '无法读取文件路径，请取消后重新选择。';
+    nameError.hidden = false;
+    return;
+  }
+  nameDialog.hidden = true;
+  pendingThemeFile = null;
+  applyBlob(file, name, real);
+}
+nameDialog.querySelector('[data-theme-cancel]').addEventListener('click', cancelThemeName);
+nameDialog.querySelector('[data-theme-confirm]').addEventListener('click', confirmThemeName);
+nameInput.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter') { ev.preventDefault(); confirmThemeName(); }
+  else if (ev.key === 'Escape') { ev.preventDefault(); cancelThemeName(); }
+});
+nameDialog.addEventListener('mousedown', function (ev) { if (ev.target === nameDialog) cancelThemeName(); });
+
+var savedDialog = document.createElement('div');
+savedDialog.className = 'beauticode-theme-dialog';
+savedDialog.setAttribute('data-bc-injected', BC);
+savedDialog.hidden = true;
+savedDialog.innerHTML = '<div class="beauticode-theme-card" role="dialog" aria-modal="true" aria-labelledby="bc-saved-title"><h2 id="bc-saved-title">已保存主题</h2><div class="beauticode-theme-list"></div><p class="beauticode-theme-empty" hidden>还没有保存的主题。导入图片或视频后会自动保存。</p><div class="beauticode-theme-actions"><button type="button" data-theme-close>关闭</button></div></div>';
+document.body.appendChild(savedDialog);
+var savedList = savedDialog.querySelector('.beauticode-theme-list');
+var savedEmpty = savedDialog.querySelector('.beauticode-theme-empty');
+function themeRows() {
+  return Array.isArray(PERSIST && PERSIST.themes) ? PERSIST.themes.filter(function (t) {
+    return t && typeof t.id === 'string' && typeof t.name === 'string' && typeof t.path === 'string';
+  }) : [];
+}
+function syncThemesButton() {
+  var count = themeRows().length;
+  themesBtn.textContent = count ? String(count) + ' 个' : '选择';
+}
+function renderSavedThemes() {
+  var rows = themeRows();
+  savedList.textContent = '';
+  savedEmpty.hidden = rows.length > 0;
+  rows.forEach(function (theme) {
+    var row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'beauticode-theme-row';
+    row.dataset.themeId = theme.id;
+    row.dataset.active = theme.id === PERSIST.activeThemeId ? 'true' : 'false';
+    var dot = document.createElement('span'); dot.className = 'beauticode-theme-dot';
+    var title = document.createElement('span'); title.className = 'beauticode-theme-name'; title.textContent = theme.name;
+    var kind = document.createElement('span'); kind.className = 'beauticode-theme-kind'; kind.textContent = theme.type === 'video' ? '视频' : '图片';
+    row.appendChild(dot); row.appendChild(title); row.appendChild(kind);
+    savedList.appendChild(row);
+  });
+  syncThemesButton();
+}
+function openSavedThemes() { renderSavedThemes(); savedDialog.hidden = false; closePop(); }
+function closeSavedThemes() { savedDialog.hidden = true; }
+savedDialog.querySelector('[data-theme-close]').addEventListener('click', closeSavedThemes);
+savedDialog.addEventListener('mousedown', function (ev) { if (ev.target === savedDialog) closeSavedThemes(); });
+savedList.addEventListener('click', function (ev) {
+  var row = ev.target.closest('[data-theme-id]');
+  if (!row) return;
+  var theme = themeRows().find(function (t) { return t.id === row.dataset.themeId; });
+  if (!theme) return;
+  applyPath(theme.path, theme.id);
+  renderSavedThemes();
+  closeSavedThemes();
 });
 
 // 文件卡片点击 → 600ms 短沉降幕：产物视图挂载重绘在幕后完成（防进入期频闪）。
@@ -444,7 +576,24 @@ function applyMediaUrl(url, kind) {
     msg('已应用图片背景。');
   }
 }
-function applyBlob(file) {
+function newThemeId() {
+  return 'wb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+function rememberImportedTheme(name, path, kind) {
+  var rows = themeRows();
+  var theme = rows.find(function (t) { return t.path === path; });
+  if (theme) {
+    theme.name = name;
+    theme.type = kind;
+  } else {
+    theme = { id: newThemeId(), name: name, path: path, type: kind };
+    rows.push(theme);
+  }
+  PERSIST.themes = rows;
+  PERSIST.activeThemeId = theme.id;
+  syncThemesButton();
+}
+function applyBlob(file, themeName, realPath) {
   var kind = (/\\.(mp4|mov|webm|m4v)$/i.test(file.name) || /^video\\//.test(file.type)) ? 'video'
     : (/\\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name) || /^image\\//.test(file.type)) ? 'image' : null;
   if (!kind) { msg('不认识的格式：支持 png/jpg/webp/gif/bmp/avif 和 mp4/mov/webm/m4v。'); return; }
@@ -453,9 +602,13 @@ function applyBlob(file) {
   currentUrl = u;
   // 路径记忆：守护选择文件后会把真实路径放到 __bcPendingPickPath——媒体显示用
   // blob URL（100% 可靠），但状态记真实路径（blob 跨重启失效，重启后靠路径恢复）
-  var real = window.__bcPendingPickPath || '';
+  var real = String(realPath || window.__bcPendingPickPath || '');
   window.__bcPendingPickPath = '';
-  if (real) { PERSIST.wallpaper = real; PERSIST.blob = false; }
+  if (real) {
+    PERSIST.wallpaper = real;
+    PERSIST.blob = false;
+    rememberImportedTheme(String(themeName || suggestedThemeName(file)).trim(), real, kind);
+  }
   else { PERSIST.blob = true; }
   PERSIST.cleared = false;
 }
@@ -492,24 +645,58 @@ alphaSlider.addEventListener('input', function () {
 // ── 状态记忆：页面维护实时状态，守护轮询落地 state.json，启动时 __bcRestoreState 恢复 ──
 // 挂在 window 上跨 payload 重装存活——否则 applyAll 每轮重装都会把状态打回
 // nulls，watcher 会把 nulls 覆盖进 state.json（实测把已保存的壁纸冲掉的真凶）
-window.__bcPersistStore = window.__bcPersistStore || { wallpaper: null, dim: null, blur: null, alpha: null, cleared: false };
+window.__bcPersistStore = window.__bcPersistStore || { wallpaper: null, dim: null, blur: null, alpha: null, cleared: false, themes: [], activeThemeId: null };
 var PERSIST = window.__bcPersistStore;
+if (!Array.isArray(PERSIST.themes)) PERSIST.themes = [];
+if (typeof PERSIST.activeThemeId !== 'string') PERSIST.activeThemeId = null;
+syncThemesButton();
 window.__bcPersistGet = function () { return JSON.stringify(PERSIST); };
-function persistMark(wallpaper) {
-  if (wallpaper === null) { PERSIST.cleared = true; PERSIST.wallpaper = null; }
-  else { PERSIST.cleared = false; PERSIST.wallpaper = wallpaper; }
+function persistMark(wallpaper, themeId) {
+  if (wallpaper === null) {
+    PERSIST.cleared = true;
+    PERSIST.wallpaper = null;
+    PERSIST.activeThemeId = null;
+  } else {
+    PERSIST.cleared = false;
+    PERSIST.wallpaper = wallpaper;
+    var matched = themeRows().find(function (t) { return t.id === themeId || (!themeId && t.path === wallpaper); });
+    PERSIST.activeThemeId = matched ? matched.id : null;
+  }
 }
 window.__bcRestoreState = function (stRaw) {
   try {
     var st = typeof stRaw === 'string' ? JSON.parse(stRaw) : stRaw;
+    var rawThemes = Array.isArray(st.themes) ? st.themes : [];
+    var seenThemeIds = Object.create(null);
+    PERSIST.themes = rawThemes.slice(0, 200).map(function (t, index) {
+      if (!t || typeof t.path !== 'string' || !t.path) return null;
+      var kind = t.type === 'video' || isVideo(t.path) ? 'video' : 'image';
+      var id = typeof t.id === 'string' && t.id ? t.id : 'legacy-' + index + '-' + String(t.path).length;
+      if (seenThemeIds[id]) id += '-' + index;
+      seenThemeIds[id] = true;
+      return {
+        id: id,
+        name: typeof t.name === 'string' && t.name.trim() ? t.name.trim().slice(0, 80) : String(t.path).split(/[\\\\/]/).pop().replace(/\\.[^.]+$/, ''),
+        path: t.path,
+        type: kind,
+      };
+    }).filter(Boolean);
+    PERSIST.activeThemeId = typeof st.activeThemeId === 'string' && PERSIST.themes.some(function (t) { return t.id === st.activeThemeId; })
+      ? st.activeThemeId : null;
+    if (!PERSIST.activeThemeId && st.wallpaper) {
+      var activeByPath = PERSIST.themes.find(function (t) { return t.path === st.wallpaper; });
+      if (activeByPath) PERSIST.activeThemeId = activeByPath.id;
+    }
+    syncThemesButton();
+    if (!savedDialog.hidden) renderSavedThemes();
     var qs = function (sel) { return document.querySelector('#beauticode-workbuddy-bg-panel ' + sel); };
     // 值相同就不设置/不派发事件——调和每 tick 调用时不再无谓跳动、不干扰拖动中的滑杆
     if (st.dim != null) { var d2 = qs('.bc-dim-slider'); if (d2 && d2.value !== String(st.dim)) { d2.value = String(st.dim); d2.dispatchEvent(new Event('input')); } }
     if (st.blur != null) { var b2 = qs('.bc-blur-slider'); if (b2 && b2.value !== String(st.blur)) { b2.value = String(st.blur); b2.dispatchEvent(new Event('input')); } }
     if (st.alpha != null) { var a2 = qs('.bc-alpha-slider'); if (a2 && a2.value !== String(st.alpha)) { a2.value = String(st.alpha); a2.dispatchEvent(new Event('input')); } }
     var hasMediaEl = (function () { var s2 = document.getElementById('beauticode-bg-stage'); return !!(s2 && s2.querySelector('img.bc-media,video.bc-media')); })();
-    if (st.wallpaper && (st.wallpaper !== PERSIST.wallpaper || !hasMediaEl)) applyPath(st.wallpaper);
-    else if (!st.wallpaper && st.cleared) { clearMedia(); PERSIST.wallpaper = null; PERSIST.cleared = true; }
+    if (st.wallpaper && (st.wallpaper !== PERSIST.wallpaper || !hasMediaEl)) applyPath(st.wallpaper, PERSIST.activeThemeId);
+    else if (!st.wallpaper && st.cleared) { clearMedia(); persistMark(null); }
   } catch (e) {}
 };
 
@@ -541,6 +728,8 @@ document.addEventListener('mousedown', function (ev) {
   closePop();
 });
 document.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Escape' && !nameDialog.hidden) { cancelThemeName(); return; }
+  if (ev.key === 'Escape' && !savedDialog.hidden) { closeSavedThemes(); return; }
   if (ev.key === 'Escape' && !gal.hidden) { gal.hidden = true; return; }
   if (ev.key === 'Escape' && pop.style.display === 'block') closePop();
 });
@@ -563,6 +752,9 @@ pop.addEventListener('click', function (ev) {
   else if (act === 'store') {
     galOpen();
   }
+  else if (act === 'themes') {
+    openSavedThemes();
+  }
   else if (act === 'clear') {
     clearMedia();
     if (currentUrl && currentUrl.indexOf('blob:') === 0) { URL.revokeObjectURL(currentUrl); }
@@ -579,9 +771,9 @@ window.__bcApplyBackgroundPath = function (p) { try { applyPath(String(p)); } ca
 // store 恢复一次——重装即恢复，不依赖守护轮询的时机（时机盲区实测卡死在默认）
 try { if (PERSIST.wallpaper) window.__bcRestoreState(JSON.parse(JSON.stringify(PERSIST))); } catch (e) {}
 window.__bcBackgroundMsg = function (t) { try { msg(String(t)); } catch (e) {} };
-function applyPath(p) {
-  if (isImage(p)) { applyMediaUrl(filePathToUrl(p), 'image'); persistMark(p); }
-  else if (isVideo(p)) { applyMediaUrl(filePathToUrl(p), 'video'); persistMark(p); }
+function applyPath(p, themeId) {
+  if (isImage(p)) { applyMediaUrl(filePathToUrl(p), 'image'); persistMark(p, themeId); }
+  else if (isVideo(p)) { applyMediaUrl(filePathToUrl(p), 'video'); persistMark(p, themeId); }
   else msg('不认识的扩展名：支持 png/jpg/webp/gif/bmp/avif 和 mp4/mov/webm/m4v。');
 }
 function isImage(p) { return /\\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(p); }
@@ -605,6 +797,7 @@ delete window.__bcBackgroundDemoInstalled;
 delete window.__bcApplyBackgroundPath;
 delete window.__bcBackgroundMsg;
 delete window.__bcPickRequest;
+delete window.__bcPendingPickPath;
 document.documentElement.removeAttribute('data-bc-workbuddy-bg');
 document.documentElement.removeAttribute('data-bc-active');
 document.documentElement.removeAttribute('data-bc-media');

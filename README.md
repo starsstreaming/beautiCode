@@ -24,14 +24,14 @@
 
 beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex**。
 
-它不包含、不安装、也不启动 DSH。请先自行安装 DeepSeek Harness 并运行 `dsh web`。插件装好后，打开 DSH 的「设置」，左侧导航里会多出一项「背景」，不必再开托盘。Codex Desktop 仍走 beautiCode 托盘。可以把电脑里的：
+它不包含、不安装、也不启动 DSH。请先自行安装 DeepSeek Harness；Web 运行 `dsh web`，官方 Desktop 则直接打开客户端。插件装好后，打开 DSH 的「设置」，左侧导航里会多出一项「背景」，不必再开托盘。Codex Desktop 仍走 beautiCode 托盘。可以把电脑里的：
 
 * 图片
 * 动态壁纸
 * MP4 / MOV 视频
 * 番剧
 
-直接设成 DeepSeek Harness 网页背后的背景。
+直接设成 DeepSeek Harness Web 或官方 Desktop 工作区背后的背景。
 
 它不会把工作窗口变成一个播放器，而是让画面安静地待在对话和工作区后面。
 
@@ -41,6 +41,18 @@ beautiCode 是一个本地背景工具，**主要面向 DeepSeek Harness和Codex
 
 
 ## 使用方式
+
+### 官方 DeepSeek Harness Desktop
+
+先打开 Desktop 一次，再从应用菜单退出。发布包含本适配的插件版本后，在 Desktop 的「插件」页面安装 `beauticode-dsh`，或使用 Desktop 安装的 `dsh` 命令执行：
+
+```sh
+dsh plugin --profile desktop add beauticode-dsh
+```
+
+要试当前源码，先运行 `npm run plugin:pack`，然后将包名替换为 `file:<仓库绝对路径>/artifacts/dsh-plugin`。
+
+重新打开 Desktop，在「设置」里选择「背景」。`npx beauticode-dsh` 和下方 Windows 安装包自动接线针对 Web profile；Desktop profile 由官方客户端管理。托盘连接 Desktop 时传入 `-DshUrl http://127.0.0.1:19387`。详见 [DeepSeek Harness 集成](docs/deepseek-harness.md)。
 
 ### 一键安装插件（推荐）
 

@@ -71,8 +71,10 @@ WORKBUDDY_REMOTE_DEBUGGING_PORT=9335 \
 
 - 从 Finder / Dock 双击启动**不会**带环境变量。
 - 备选：`launchctl setenv WORKBUDDY_REMOTE_DEBUGGING_PORT 9335` 后照常 `open -a WorkBuddy`。这是**全局**环境变量，用完要 `launchctl unsetenv`。
-- 决定（暂定）：随包提供一个启动脚本（`scripts/start-workbuddy-cdp.command` / `.ps1`），负责"若已在运行则先退出、再带变量拉起"。**不由 beautiCode 去重启用户的 WorkBuddy** —— 让程序拥有"关掉并重启别人应用"的能力，信任成本与安全风险都不划算。
-- 缺端口时的行为：**fail closed** —— 报明确错误并提示上面这条命令，不静默、不假装成功（沿用 `host-adapter.md` 第 5 条原则）。
+- 日常路径对齐 Codex 托盘：`wb-cdp-runner` 先发现本机 WorkBuddy CDP；只对启动不超过 10 秒、且没有口的单一新主进程做一次修复性重启。没有 WorkBuddy 进程时保持等待，用户主动退出后不会重新拉起。`--no-launch` 会连新进程修复也关闭，缺口即失败。
+- 点官方图标启动：仍靠 `wb-setup.mjs` 持久化环境变量（Windows `setx` / macOS `launchctl setenv`），下次启动自带 CDP。
+- 发现时必须命中 WorkBuddy renderer 页，避免 9335 上的 Codex 被误注入。
+- Windows 原生选择器用 TopMost owner 置前，并强制 UTF-8 输出路径；否则含中文的文件名会在 Node 管道中变成 `�`，表现为大视频导入/重启恢复失败。
 
 ### 3.2 端口与连接
 
@@ -430,7 +432,7 @@ WorkBuddy 有真实回读通道（CDP + 页面内状态），所以**保留 `hos
 | `video` | ✅（M2） | 结构支持；`file://` + 自动播放待实测 |
 | `clear` | ✅ | — |
 | `reapply` | ✅ | 与 watch/重挂同一机制 |
-| `savedThemes` | ✅ | 复用 core 的 saved store |
+| `savedThemes` | ✅ | 导入时强制命名并写入 `%APPDATA%\beauticode\state.json`；面板可直接切换 |
 | `fish`（摸鱼） | ✅ | 实测 `#root` 存在，隐藏它即可，与 DSH 的做法一致 |
 | `muted`（背景视频静音） | ✅ | 我们自己创建的 `<video>` 可控 |
 | `tone` | ✅ | 由 `--bc-scrim` 承载 |

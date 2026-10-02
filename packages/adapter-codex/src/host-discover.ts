@@ -66,7 +66,9 @@ const LOOPBACK_ADDRS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
 /**
  * Parse Chromium-style remote debugging flags from a process command line.
- * Rejects non-loopback debugging addresses (fail closed).
+ * Same rule as WorkBuddy: omitted address is still a loopback-probe candidate;
+ * an explicit non-loopback bind is marked unsafe. Callers always attach to
+ * 127.0.0.1 — they never connect to the advertised address.
  */
 export function parseRemoteDebuggingFlags(commandLine: string): {
   port: number | null;
@@ -77,20 +79,19 @@ export function parseRemoteDebuggingFlags(commandLine: string): {
     return { port: null, address: null, safe: false };
   }
   const portMatch = commandLine.match(
-    /--remote-debugging-port\s*=\s*(\d{1,5})\b/i,
+    /--remote-debugging-port\s*=\s*(?:"(\d{1,5})"|'(\d{1,5})'|(\d{1,5})\b)/i,
   );
   const addrMatch = commandLine.match(
-    /--remote-debugging-address\s*=\s*([^\s"']+)/i,
+    /--remote-debugging-address\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
   );
-  const port = portMatch ? Number(portMatch[1]) : null;
-  const address = addrMatch ? String(addrMatch[1]).trim() : null;
+  const portValue = portMatch?.[1] ?? portMatch?.[2] ?? portMatch?.[3];
+  const addressValue = addrMatch?.[1] ?? addrMatch?.[2] ?? addrMatch?.[3];
+  const port = portValue ? Number(portValue) : null;
+  const address = addressValue ? String(addressValue).trim() : null;
   if (port == null || !Number.isInteger(port) || port < 1 || port > 65535) {
     return { port: null, address, safe: false };
   }
-  // If address is omitted, Chromium historically may bind broader interfaces.
-  // We only treat explicit loopback as safe evidence; the subsequent probe still
-  // connects exclusively to 127.0.0.1.
-  if (!address || !LOOPBACK_ADDRS.has(address.toLowerCase())) {
+  if (address && !LOOPBACK_ADDRS.has(address.toLowerCase())) {
     return { port, address, safe: false };
   }
   return { port, address, safe: true };
@@ -221,7 +222,11 @@ export async function scanWindowsDebuggingPorts(): Promise<
       }
       const cmd = typeof row.cmd === "string" ? row.cmd : "";
       const flags = parseRemoteDebuggingFlags(cmd);
-      if (!flags.safe || flags.port == null) continue;
+      // Keep the port even when the advertised address is non-loopback: we only
+      // ever probe 127.0.0.1. Skipping those rows was the "Codex has CDP but
+      // beautiCode cannot see it" miss (WorkBuddy already treats omitted
+      // --remote-debugging-address as a candidate).
+      if (flags.port == null) continue;
       found.push({
         pid: Number(row.pid) || 0,
         name: typeof row.name === "string" ? row.name : "unknown",
@@ -347,7 +352,7 @@ export async function findBestCdpPort(
 export function getCodexLaunchGuidance(): CodexLaunchGuidance {
   return {
     summary:
-      "beautiCode never patches Codex. It only attaches to a loopback CDP port the host already exposes.",
+      "beautiCode attaches to a loopback CDP port. A newly opened Codex process without CDP is repaired once within 10 seconds; closing Codex does not reopen it.",
     notes: [
       "Open Codex Desktop (Windows package may appear as ChatGPT.exe / OpenAI.Codex).",
       "Recent builds often self-enable --remote-debugging-address=127.0.0.1 with a fixed port (commonly 9335).",

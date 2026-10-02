@@ -25,16 +25,17 @@ const PNG_1X1 = Buffer.from(
 
 class FakeWebServer {
   routes = new Map();
-  taps = [];
+  injections = [];
 
   register(route) {
     this.routes.set(route.path, route.handler);
     return () => this.routes.delete(route.path);
   }
 
-  tapIndex(tap) {
-    this.taps.push(tap);
-    return () => this.taps.splice(this.taps.indexOf(tap), 1);
+  collectIndexInjections() {
+    const rows = [];
+    for (const contribute of this.injections) contribute(rows);
+    return rows;
   }
 }
 
@@ -44,6 +45,11 @@ async function createPluginServer(tokenFile, config = {}) {
   apply(
     {
       webServer,
+      on(event, contribute) {
+        assert.equal(event, "webserver/index-inject");
+        webServer.injections.push(contribute);
+        return () => webServer.injections.splice(webServer.injections.indexOf(contribute), 1);
+      },
       effect(factory) {
         effects.push(factory());
       },
@@ -89,10 +95,10 @@ test("plugin injects the console script that joins the settings dialog", async (
   });
 
   const tap = new FakeWebServer();
-  apply({ webServer: tap, effect(factory) { factory(); } }, { tokenFile });
-  const injected = tap.taps[0]("<html><body></body></html>");
-  assert.match(injected, /__beauticode\/client\.js/);
-  assert.match(injected, /__beauticode\/console\.js/);
+  apply({ webServer: tap, on(_event, contribute) { tap.injections.push(contribute); }, effect(factory) { factory(); } }, { tokenFile });
+  const injected = tap.collectIndexInjections().map((row) => row.src).filter(Boolean);
+  assert.ok(injected.includes("/__beauticode/client.js"));
+  assert.ok(injected.includes("/__beauticode/console.js"));
 
   const response = await fetch(`${plugin.origin}/__beauticode/console.js`);
   assert.equal(response.status, 200);

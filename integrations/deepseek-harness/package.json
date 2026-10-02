@@ -1,7 +1,7 @@
 {
   "name": "beauticode-dsh",
-  "version": "1.0.24",
-  "description": "Cordis plugin: image/video backgrounds for DeepSeek Harness web.",
+  "version": "1.0.26",
+  "description": "Cordis plugin: image/video backgrounds for DeepSeek Harness Web and Desktop.",
   "type": "module",
   "main": "./index.mjs",
   "bin": {
@@ -14,6 +14,8 @@
   },
   "files": [
     "index.mjs",
+    "browser-injection.mjs",
+    "transport.js",
     "client.js",
     "console.js",
     "gallery.js",

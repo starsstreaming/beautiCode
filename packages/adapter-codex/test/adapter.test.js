@@ -23,9 +23,22 @@ import {
   discoverCdpEndpoints,
   getCodexLaunchGuidance,
   BeautiSession,
+  DEFAULT_CODEX_CDP_PORT,
+  codexInstallCandidates,
+  pickAvailableCodexPort,
+  ensureCodexCdp,
 } from "../dist/index.js";
 import { startMockCdp } from "./mock-cdp.js";
 import http from "node:http";
+import net from "node:net";
+import {
+  buildCodexLaunchCommand,
+  buildWindowsCodexProcessStartScript,
+  CodexStartupRepairController,
+  classifyCodexStartupProcess,
+  looksLikeCodexMain,
+  parseAppxCodexInstallLocations,
+} from "../dist/launch.js";
 
 test("slimCodexCdpPayload drops huge video posters and blob dataUrls", () => {
   const huge = `data:image/png;base64,${"A".repeat(MAX_CDP_DATA_URL_CHARS + 10)}`;
@@ -591,7 +604,7 @@ test("acquireInjectorLock prevents dueling injectors", async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-test("parseRemoteDebuggingFlags accepts loopback only", () => {
+test("parseRemoteDebuggingFlags treats omitted address as a loopback-probe candidate", () => {
   const ok = parseRemoteDebuggingFlags(
     `"ChatGPT.exe" --remote-debugging-address=127.0.0.1 --remote-debugging-port=9335`,
   );
@@ -605,6 +618,12 @@ test("parseRemoteDebuggingFlags accepts loopback only", () => {
   assert.equal(bad.safe, false);
   assert.equal(bad.port, 9222);
 
+  const badQuoted = parseRemoteDebuggingFlags(
+    `app --remote-debugging-address="0.0.0.0" --remote-debugging-port="9222"`,
+  );
+  assert.equal(badQuoted.safe, false);
+  assert.equal(badQuoted.port, 9222);
+
   const missing = parseRemoteDebuggingFlags("no flags here");
   assert.equal(missing.port, null);
   assert.equal(missing.safe, false);
@@ -613,7 +632,7 @@ test("parseRemoteDebuggingFlags accepts loopback only", () => {
     `app --remote-debugging-port=9335`,
   );
   assert.equal(missingAddress.port, 9335);
-  assert.equal(missingAddress.safe, false);
+  assert.equal(missingAddress.safe, true);
 });
 
 test("discoverCdpEndpoints finds mock loopback CDP", async () => {
@@ -632,10 +651,196 @@ test("discoverCdpEndpoints finds mock loopback CDP", async () => {
   }
 });
 
+test("Codex auto-launch does not mistake WorkBuddy CDP for Codex", async () => {
+  const mock = await startMockCdp({
+    title: "WorkBuddy",
+    pageUrl: "file:///C:/Programs/WorkBuddy/resources/app.asar/renderer/index.html",
+  });
+  try {
+    await assert.rejects(
+      () =>
+        ensureCodexCdp({
+          preferredPort: mock.port,
+          candidatePorts: [mock.port],
+          scanProcesses: false,
+          launch: false,
+          timeoutMs: 500,
+        }),
+      /CDP is missing/,
+    );
+  } finally {
+    await mock.close();
+  }
+});
+
 test("getCodexLaunchGuidance is loopback-only", () => {
   const g = getCodexLaunchGuidance();
   assert.ok(g.preferredFlags.every((f) => !/0\.0\.0\.0/.test(f)));
   assert.ok(g.preferredFlags.some((f) => /127\.0\.0\.1/.test(f)));
+});
+
+test("codex install candidates include the usual Windows locations", () => {
+  const win = codexInstallCandidates(
+    { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local", ProgramFiles: "C:\\Program Files" },
+    "win32",
+  );
+  assert.ok(win.some((p) => p.endsWith("ChatGPT.exe")));
+  assert.ok(win.some((p) => p.endsWith("Codex.exe")));
+  assert.equal(DEFAULT_CODEX_CDP_PORT, 9335);
+  assert.equal(codexInstallCandidates({}, "darwin").length, 0);
+});
+
+test("Codex CDP launch avoids a preferred port already used by WorkBuddy", async () => {
+  const occupied = net.createServer();
+  await new Promise((resolve, reject) => {
+    occupied.once("error", reject);
+    occupied.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = occupied.address();
+    assert.ok(address && typeof address === "object");
+    const picked = await pickAvailableCodexPort(address.port, [address.port]);
+    assert.notEqual(picked, address.port);
+    assert.ok(picked > 0 && picked <= 65535);
+  } finally {
+    await new Promise((resolve) => occupied.close(resolve));
+  }
+});
+
+test("Windows Store Codex is launched directly so Chromium receives CDP flags", () => {
+  const executable =
+    "C:\\Program Files\\WindowsApps\\OpenAI.Codex_1.0.0.0_x64__test\\app\\ChatGPT.exe";
+  const command = buildCodexLaunchCommand(9222, executable);
+  assert.equal(command.file, executable);
+  assert.deepEqual(command.args, [
+    "--remote-debugging-address=127.0.0.1",
+    "--remote-debugging-port=9222",
+  ]);
+});
+
+test("Codex process scan filters the app-server helper", () => {
+  assert.equal(
+    looksLikeCodexMain(
+      '"C:\\Program Files\\WindowsApps\\OpenAI.Codex_test\\app\\ChatGPT.exe"',
+      "ChatGPT.exe",
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_test\\app\\ChatGPT.exe",
+    ),
+    true,
+  );
+  assert.equal(
+    looksLikeCodexMain(
+      "C:\\Users\\me\\OpenAI\\Codex\\bin\\codex.exe app-server --analytics-default-enabled",
+      "codex.exe",
+      "C:\\Users\\me\\OpenAI\\Codex\\bin\\codex.exe",
+    ),
+    false,
+  );
+});
+
+test("fresh Codex without CDP is repaired immediately only inside the 10s window", () => {
+  const now = 50_000;
+  const blind = {
+    pid: 101,
+    name: "ChatGPT.exe",
+    executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_test\\app\\ChatGPT.exe",
+    commandLine: '"C:\\Program Files\\WindowsApps\\OpenAI.Codex_test\\app\\ChatGPT.exe"',
+    port: null,
+    createdAtMs: now - 9_999,
+  };
+
+  assert.equal(classifyCodexStartupProcess(blind, now), "repair-now");
+  assert.equal(
+    classifyCodexStartupProcess({ ...blind, createdAtMs: now - 10_000 }, now),
+    "ignore-stale",
+  );
+  assert.equal(
+    classifyCodexStartupProcess(
+      {
+        ...blind,
+        commandLine: `${blind.commandLine} --remote-debugging-port=9222`,
+        port: 9222,
+      },
+      now,
+    ),
+    "wait-for-cdp",
+  );
+});
+
+test("Codex startup repair runs once per process generation without a CDP wait", async () => {
+  const calls = [];
+  const controller = new CodexStartupRepairController({
+    now: () => 20_000,
+    repair: async (process) => {
+      calls.push(process.pid);
+    },
+  });
+  const process = {
+    pid: 202,
+    name: "ChatGPT.exe",
+    executablePath: "C:\\Codex\\ChatGPT.exe",
+    commandLine: '"C:\\Codex\\ChatGPT.exe"',
+    port: null,
+    createdAtMs: 19_500,
+  };
+
+  assert.equal(await controller.observe(process), "repaired");
+  assert.equal(await controller.observe(process), "already-handled");
+  assert.deepEqual(calls, [202]);
+});
+
+test("Codex startup monitor detects new PIDs without privileged WMI events", () => {
+  const source = buildWindowsCodexProcessStartScript(4321);
+  assert.match(source, /Get-Process -Id 4321/);
+  assert.match(source, /Get-Process -Name ChatGPT,Codex/);
+  assert.match(source, /Start-Sleep -Milliseconds 200/);
+  assert.doesNotMatch(source, /Win32_ProcessStartTrace|Register-WmiEvent/);
+  assert.match(source, /CreationDate/);
+  assert.ok(
+    source.indexOf("$seen[$pidValue]=$true") >
+      source.indexOf("if(-not $cmd){continue}"),
+  );
+});
+
+test("BeautiSession defaults to preserving a user-closed Codex host", () => {
+  const session = new BeautiSession({ autoDiscover: false });
+  assert.equal(session.autoLaunchHost, false);
+});
+
+test("Codex watch host has one serialized ensure owner", async () => {
+  const source = await fs.readFile(
+    new URL("../../../integrations/codex-desktop/watch-host.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /ensureCodexCdp/);
+  assert.equal((source.match(/setInterval\(/g) ?? []).length, 1);
+  assert.match(source, /startCodexStartupRepairMonitor/);
+  assert.match(source, /repairWindowMs:\s*10_000/);
+  assert.match(source, /autoLaunchHost:\s*false/);
+});
+
+test("Codex AppX install locations are parsed without locale-dependent JSON", () => {
+  assert.deepEqual(
+    parseAppxCodexInstallLocations(
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_2.0\r\n\r\nC:\\Program Files\\WindowsApps\\OpenAI.Codex_1.0\r\n",
+    ),
+    [
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_2.0",
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_1.0",
+    ],
+  );
+});
+
+test("Codex installer starts the immediate watcher outside the host process tree", async () => {
+  const source = await fs.readFile(
+    new URL("../../../integrations/codex-desktop/cli.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /Invoke-CimMethod/);
+  assert.match(source, /Win32_Process/);
+  assert.match(source, /\$ErrorActionPreference\s*=\s*'Stop'/);
+  assert.match(source, /\$null\s+-eq\s+\$result/);
+  assert.match(source, /本次未能立即启动后台监视器/);
+  assert.match(source, /startIndependentWindows\(starter\)/);
 });
 
 test("BeautiSession applies image against mock CDP", async () => {
