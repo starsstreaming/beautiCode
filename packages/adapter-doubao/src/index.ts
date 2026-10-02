@@ -5,7 +5,7 @@ import {
 import { DOUBAO_CDP_SPEC } from "./spec.js";
 
 export { DOUBAO_HOST_DESCRIPTOR } from "./host-descriptor.js";
-export { DOUBAO_CDP_SPEC } from "./spec.js";
+export { DOUBAO_CDP_SPEC, doubaoExecutableCandidates } from "./spec.js";
 
 export function buildDoubaoBackgroundInjection(galleryUrl = ""): string {
   return buildDesktopBackgroundInjection(DOUBAO_CDP_SPEC, galleryUrl);
