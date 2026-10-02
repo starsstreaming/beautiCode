@@ -12,10 +12,71 @@ import {
   isDesktopMainProcess,
   parseRemoteDebuggingFlags,
   probeDesktopCdp,
+  readBoundedJson,
   repairDesktopProcess,
   selectDesktopMainProcesses,
   waitForDesktopCdp,
 } from '../dist/index.js';
+
+test('CDP streaming cap cancels a response without Content-Length before buffering all bytes', async (t) => {
+  const chunkBytes = 64 * 1024;
+  let pulled = 0;
+  let cancelled = false;
+  const response = new Response(new ReadableStream({
+    pull(controller) {
+      if (pulled === 128) { controller.close(); return; }
+      pulled++;
+      controller.enqueue(new Uint8Array(chunkBytes).fill(32));
+    },
+    cancel() { cancelled = true; },
+  }));
+  t.mock.method(globalThis, 'fetch', async () => response);
+  await assert.rejects(readBoundedJson('http://127.0.0.1:1/test', { maxBytes: 1024 * 1024 }), /safety limit/);
+  assert.equal(cancelled, true);
+  assert.ok(pulled < 128, 'must stop before pulling the whole 8 MiB response');
+  assert.equal(response.body.locked, false);
+});
+
+test('CDP streaming cap accepts a multi-chunk JSON response exactly at the cap', async (t) => {
+  const bytes = new TextEncoder().encode('{"text":"背景"}');
+  const response = new Response(new ReadableStream({
+    start(controller) {
+      for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+      controller.close();
+    },
+  }));
+  t.mock.method(globalThis, 'fetch', async () => response);
+  assert.deepEqual(await readBoundedJson('http://127.0.0.1:1/test', { maxBytes: bytes.length }), { text: '背景' });
+  assert.equal(response.body.locked, false);
+});
+
+test('CDP rejects declared oversize bodies, invalid JSON and missing bodies', async (t) => {
+  for (const [response, pattern] of [
+    [new Response('{}', { headers: { 'content-length': '99999' } }), /safety limit/],
+    [new Response('not JSON'), /JSON|Unexpected token/],
+    [new Response(null), /readable body/],
+    [new Response('{}', { status: 503 }), /CDP HTTP 503/],
+  ]) {
+    t.mock.method(globalThis, 'fetch', async () => response);
+    await assert.rejects(readBoundedJson('http://127.0.0.1:1/test', { maxBytes: 32 }), pattern);
+    assert.ok(!response.body?.locked);
+    t.mock.restoreAll();
+  }
+});
+
+test('CDP timeout remains active while a response body is stalled', async (t) => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.write('{');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  await assert.rejects(readBoundedJson(`http://127.0.0.1:${server.address().port}`, { timeoutMs: 150 }),
+    (error) => error.name === 'TimeoutError' || error.name === 'AbortError');
+});
 
 const spec = {
   kind: 'cursor', displayName: 'Cursor', processName: 'Cursor.exe',
