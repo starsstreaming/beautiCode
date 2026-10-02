@@ -21,7 +21,7 @@
   ],
   "scripts": {
     "postinstall": "node ./bin/postinstall.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node ../../scripts/test-runner.mjs --test test/*.test.mjs"
   },
   "engines": {
     "node": ">=22"
