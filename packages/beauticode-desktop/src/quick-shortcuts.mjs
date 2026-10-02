@@ -30,6 +30,8 @@ export function installHostQuickShortcut(host, options = {}) {
   const description = `beautiCode quick launch for ${host}`;
   const script = [
     "$ErrorActionPreference='Stop'",
+    "$ProgressPreference='SilentlyContinue'",
+    'try {',
     "$shell=New-Object -ComObject WScript.Shell",
     `$shortcutPath=${psLiteral(shortcutPath)}`,
     `$launcher=${psLiteral(launcher)}`,
@@ -50,6 +52,7 @@ export function installHostQuickShortcut(host, options = {}) {
     "  $link.Save()",
     "  [Console]::Out.WriteLine('created')",
     '}',
+    '} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }',
   ].join('\n');
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
     encoding: 'utf8', windowsHide: true, timeout: 8_000, maxBuffer: 16 * 1024,
