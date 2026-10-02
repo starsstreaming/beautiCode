@@ -233,30 +233,23 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresWi
 
     const web = path.join(home, "profiles", "web");
     fs.mkdirSync(web, { recursive: true });
-    // Start from the pre-1.0.1 installer / npx state: both dep names point at
-    // another copy and the legacy scoped junction already exists.
+    // Migrate a verified legacy junction owned by this installation.
     fs.writeFileSync(
       path.join(web, "package.json"),
       JSON.stringify({
         name: "dsh-profile-web",
         private: true,
         dependencies: {
-          "beauticode-dsh": "link:C:/elsewhere/beauticode-dsh",
-          "@beauticode/dsh-plugin": "link:C:/elsewhere/beauticode-dsh",
+          "beauticode-dsh": `link:${pluginRoot.replace(/\\/g, "/")}`,
+          "@beauticode/dsh-plugin": `link:${pluginRoot.replace(/\\/g, "/")}`,
         },
         dsh: { profile: { bundles: ["@deepseek-ai/dsh-base"] } },
       }),
       "utf8",
     );
     fs.writeFileSync(path.join(web, "cordis.patch.yml"), "[]\n", "utf8");
-    fs.mkdirSync(path.join(web, "node_modules", "@beauticode", "dsh-plugin"), {
-      recursive: true,
-    });
-    fs.writeFileSync(
-      path.join(web, "node_modules", "@beauticode", "dsh-plugin", "index.mjs"),
-      "export {}\n",
-      "utf8",
-    );
+    fs.mkdirSync(path.join(web, "node_modules", "@beauticode"), { recursive: true });
+    fs.symlinkSync(pluginRoot, path.join(web, "node_modules", "@beauticode", "dsh-plugin"), "junction");
     const migrate = spawnSync(
       powerShellExecutable,
       [
@@ -319,6 +312,121 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresWi
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("DSH installer and uninstaller preserve unowned directories before changing any wiring", requiresWindowsPowerShell, () => {
+  const script = path.join(repoRoot, "scripts/install-dsh-plugin.ps1");
+  const pluginRoot = path.join(repoRoot, "integrations/deepseek-harness");
+  for (const remove of [false, true]) {
+    for (const collision of ["beauticode-dsh", "@beauticode/dsh-plugin"]) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-conflict-"));
+      try {
+        const home = path.join(root, "home");
+        const web = path.join(home, "profiles", "web");
+        const conflict = path.join(web, "node_modules", collision);
+        fs.mkdirSync(conflict, { recursive: true });
+        fs.writeFileSync(path.join(conflict, "keep.txt"), "user-owned content");
+        fs.writeFileSync(path.join(conflict, "package.json"), '{"name":"unrelated"}');
+        const patch = "# user configuration\n[]\n";
+        const manifest = '{"private":true,"dependencies":{},"custom":"keep"}\n';
+        fs.writeFileSync(path.join(web, "cordis.patch.yml"), patch);
+        fs.writeFileSync(path.join(web, "package.json"), manifest);
+        const currentLink = path.join(web, "node_modules", "beauticode-dsh");
+        if (collision !== "beauticode-dsh") fs.symlinkSync(pluginRoot, currentLink, "junction");
+        const result = spawnSync(powerShellExecutable, ["-NoProfile", "-File", script,
+          "-PluginRoot", pluginRoot, "-DshHome", home, ...(remove ? ["-Remove"] : [])],
+          { encoding: "utf8", windowsHide: true, env: { ...process.env, LOCALAPPDATA: path.join(root, "local") } });
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr + result.stdout, /DSH plugin conflict/);
+        assert.equal(fs.readFileSync(path.join(conflict, "keep.txt"), "utf8"), "user-owned content");
+        assert.equal(fs.readFileSync(path.join(web, "cordis.patch.yml"), "utf8"), patch);
+        assert.equal(fs.readFileSync(path.join(web, "package.json"), "utf8"), manifest);
+        if (collision !== "beauticode-dsh") assert.equal(fs.realpathSync(currentLink), fs.realpathSync(pluginRoot));
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test("DSH installer refuses foreign and dangling junctions without deleting their targets", requiresWindowsPowerShell, () => {
+  const script = path.join(repoRoot, "scripts/install-dsh-plugin.ps1");
+  const pluginRoot = path.join(repoRoot, "integrations/deepseek-harness");
+  for (const dangling of [false, true]) {
+    for (const remove of [false, true]) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-foreign-link-"));
+      try {
+        const home = path.join(root, "home");
+        const web = path.join(home, "profiles", "web");
+        const target = path.join(root, "foreign");
+        fs.mkdirSync(target);
+        fs.writeFileSync(path.join(target, "keep.txt"), "foreign target");
+        fs.mkdirSync(path.join(web, "node_modules"), { recursive: true });
+        const link = path.join(web, "node_modules", "beauticode-dsh");
+        fs.symlinkSync(target, link, "junction");
+        if (dangling) fs.renameSync(target, target + "-moved");
+        const patch = "[]\n";
+        fs.writeFileSync(path.join(web, "cordis.patch.yml"), patch);
+        fs.writeFileSync(path.join(web, "package.json"), '{"dependencies":{}}');
+        const result = spawnSync(powerShellExecutable, ["-NoProfile", "-File", script,
+          "-PluginRoot", pluginRoot, "-DshHome", home, ...(remove ? ["-Remove"] : [])],
+          { encoding: "utf8", windowsHide: true, env: { ...process.env, LOCALAPPDATA: path.join(root, "local") } });
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr + result.stdout, /DSH plugin conflict/);
+        assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+        assert.equal(fs.readFileSync(path.join(dangling ? target + "-moved" : target, "keep.txt"), "utf8"), "foreign target");
+        assert.equal(fs.readFileSync(path.join(web, "cordis.patch.yml"), "utf8"), patch);
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test("DSH uninstaller preserves a foreign dependency even when its directory is absent", requiresWindowsPowerShell, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-foreign-dep-"));
+  try {
+    const web = path.join(root, "home", "profiles", "web");
+    fs.mkdirSync(web, { recursive: true });
+    const manifest = '{"dependencies":{"beauticode-dsh":"file:../custom-plugin"}}';
+    fs.writeFileSync(path.join(web, "package.json"), manifest);
+    fs.writeFileSync(path.join(web, "cordis.patch.yml"), "[]\n");
+    const result = spawnSync(powerShellExecutable, ["-NoProfile", "-File",
+      path.join(repoRoot, "scripts/install-dsh-plugin.ps1"), "-DshHome", path.join(root, "home"), "-Remove"],
+      { encoding: "utf8", windowsHide: true, env: { ...process.env, LOCALAPPDATA: path.join(root, "local") } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr + result.stdout, /DSH plugin conflict/);
+    assert.equal(fs.readFileSync(path.join(web, "package.json"), "utf8"), manifest);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("owned DSH junctions are reused and removed without touching target content", requiresWindowsPowerShell, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "bc-dsh-owned-link-"));
+  try {
+    const pluginRoot = path.join(root, "plugin");
+    fs.mkdirSync(pluginRoot);
+    for (const name of ["index.mjs", "package.json", "cordis.patch.yml"]) {
+      fs.copyFileSync(path.join(repoRoot, "integrations", "deepseek-harness", name), path.join(pluginRoot, name));
+    }
+    fs.writeFileSync(path.join(pluginRoot, "keep.txt"), "owned target must survive");
+    const home = path.join(root, "home");
+    const web = path.join(home, "profiles", "web");
+    fs.mkdirSync(web, { recursive: true });
+    fs.writeFileSync(path.join(web, "package.json"), '{"dependencies":{}}');
+    fs.writeFileSync(path.join(web, "cordis.patch.yml"), "[]\n");
+    const run = (remove = false) => spawnSync(powerShellExecutable, ["-NoProfile", "-File",
+      path.join(repoRoot, "scripts/install-dsh-plugin.ps1"), "-PluginRoot", pluginRoot, "-DshHome", home,
+      ...(remove ? ["-Remove"] : [])],
+      { encoding: "utf8", windowsHide: true, env: { ...process.env, LOCALAPPDATA: path.join(root, "local") } });
+    const first = run();
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    const link = path.join(web, "node_modules", "beauticode-dsh");
+    const created = fs.lstatSync(link).mtimeMs;
+    const second = run();
+    assert.equal(second.status, 0, second.stderr || second.stdout);
+    assert.equal(fs.lstatSync(link).mtimeMs, created);
+    const remove = run(true);
+    assert.equal(remove.status, 0, remove.stderr || remove.stdout);
+    assert.equal(fs.existsSync(link), false);
+    assert.equal(fs.readFileSync(path.join(pluginRoot, "keep.txt"), "utf8"), "owned target must survive");
+    assert.ok(fs.existsSync(path.join(pluginRoot, "index.mjs")));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test("install-dsh-plugin deduplicates a loader already shipped by the plugin", requiresWindowsPowerShell, () => {

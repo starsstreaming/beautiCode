@@ -256,30 +256,76 @@ function Write-BridgePatch([string]$Path, [string]$Body) {
   Write-RecoverableText $Path ($stripped.TrimEnd() + "`r`n`r`n" + $Body + "`r`n")
 }
 
+function Get-PluginEntry([string]$Path) {
+  $parent = Split-Path -Parent $Path
+  if (-not (Test-Path -LiteralPath $parent -PathType Container)) { return $null }
+  # Enumerate the entry itself: Test-Path follows a junction and misses a dangling target.
+  $leaf = Split-Path -Leaf $Path
+  $entries = @(Get-ChildItem -LiteralPath $parent -Force | Where-Object { $_.Name -eq $leaf })
+  if ($entries.Count -eq 0) { return $null }
+  return $entries[0]
+}
+
+function Assert-OwnedPluginJunction([string]$Path) {
+  $item = Get-PluginEntry $Path
+  if ($null -eq $item) { return }
+  if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.LinkType -ne "Junction") {
+    throw ("DSH plugin conflict: refusing to replace or remove unowned entry: {0}" -f $Path)
+  }
+  $target = $item.Target
+  if ($target -is [array]) {
+    if ($target.Count -ne 1) { throw ("DSH plugin conflict: ambiguous junction target: {0}" -f $Path) }
+    $target = $target[0]
+  }
+  if (-not $target -or -not [IO.Path]::IsPathRooted($target) -or
+      -not [string]::Equals([IO.Path]::GetFullPath($target).TrimEnd('\'), $PluginRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase) -or
+      -not (Test-Path -LiteralPath $target -PathType Container)) {
+    throw ("DSH plugin conflict: refusing unknown or dangling junction target: {0}" -f $Path)
+  }
+}
+
+function Remove-OwnedPluginJunction([string]$Path) {
+  Assert-OwnedPluginJunction $Path
+  if ($null -eq (Get-PluginEntry $Path)) { return $false }
+  # Non-recursive deletion removes only the junction, never its target directory.
+  [IO.Directory]::Delete($Path, $false)
+  return $true
+}
+
+function Assert-OwnedWebPackageDeps {
+  if (-not (Test-Path -LiteralPath $webPackage -PathType Leaf)) { return }
+  $json = [IO.File]::ReadAllText($webPackage) | ConvertFrom-Json
+  if (-not $json.dependencies) { return }
+  foreach ($name in @($pluginName, $legacyPluginName)) {
+    $property = $json.dependencies.PSObject.Properties[$name]
+    if ($null -eq $property) { continue }
+    $value = $property.Value
+    if ($value -isnot [string] -or -not $value.StartsWith("link:", [StringComparison]::OrdinalIgnoreCase)) {
+      throw ("DSH plugin conflict: dependency is not owned by this installation: {0}" -f $name)
+    }
+    $target = $value.Substring(5)
+    if (-not [IO.Path]::IsPathRooted($target) -or
+        -not [string]::Equals([IO.Path]::GetFullPath($target).TrimEnd('\'), $PluginRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+      throw ("DSH plugin conflict: dependency points at another installation: {0}" -f $name)
+    }
+  }
+}
+
+function Assert-SafePluginWiring {
+  # Check both entries and dependencies before any profile or filesystem mutation.
+  Assert-OwnedPluginJunction (Join-Path $webProfile "node_modules\$pluginName")
+  Assert-OwnedPluginJunction (Join-Path $webProfile "node_modules\@beauticode\dsh-plugin")
+  Assert-OwnedWebPackageDeps
+}
+
 function Ensure-PluginJunction {
   $link = Join-Path $webProfile "node_modules\$pluginName"
-  $legacyLink = Join-Path $webProfile "node_modules\@beauticode\dsh-plugin"
   $linkParent = Split-Path -Parent $link
   if (-not (Test-Path -LiteralPath $linkParent)) {
     New-Item -ItemType Directory -Path $linkParent -Force | Out-Null
   }
-  # npx beauticode-dsh installs used the scoped name; drop that wiring so the
-  # profile never carries two links to different plugin copies.
-  if (Test-Path -LiteralPath $legacyLink) {
-    Remove-Item -LiteralPath $legacyLink -Force -Recurse
-  }
-  if (Test-Path -LiteralPath $link) {
-    $item = Get-Item -LiteralPath $link -Force
-    $target = $null
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-      $target = $item.Target
-      if ($target -is [array]) { $target = $target[0] }
-    }
-    if ($target -and ([IO.Path]::GetFullPath($target) -eq $PluginRoot)) {
-      return
-    }
-    Remove-Item -LiteralPath $link -Force -Recurse
-  }
+  Assert-OwnedPluginJunction $link
+  if ($null -ne (Get-PluginEntry $link)) { return }
   New-Item -ItemType Junction -Path $link -Target $PluginRoot | Out-Null
 }
 
@@ -351,6 +397,8 @@ function Remove-WebPackageDeps {
   return $true
 }
 
+Assert-SafePluginWiring
+
 if ($Remove) {
   $removed = $false
   if (Remove-BridgeFromPatch $webPatch) { $removed = $true }
@@ -359,10 +407,7 @@ if ($Remove) {
       (Join-Path $webProfile "node_modules\$pluginName"),
       (Join-Path $webProfile "node_modules\@beauticode\dsh-plugin")
     )) {
-    if (Test-Path -LiteralPath $link) {
-      Remove-Item -LiteralPath $link -Force -Recurse
-      $removed = $true
-    }
+    if (Remove-OwnedPluginJunction $link) { $removed = $true }
   }
   if (Remove-WebPackageDeps) { $removed = $true }
   if ($removed) { Write-BcLog "Removed beautiCode DSH plugin wiring." }
@@ -402,6 +447,7 @@ if ($webExists) {
       [void](Remove-BridgeFromPatch $homePatch)
     }
   }
+  [void](Remove-OwnedPluginJunction (Join-Path $webProfile "node_modules\@beauticode\dsh-plugin"))
   Write-BcLog ("Linked $pluginName into $webProfile")
 } else {
   if (-not (Test-Path -LiteralPath $DshHome)) {
