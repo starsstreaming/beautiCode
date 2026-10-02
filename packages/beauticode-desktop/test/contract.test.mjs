@@ -8,12 +8,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 
-test("desktop aggregate manifest is a public test package with one CLI", () => {
+test("desktop development workspace is installable cross-platform and cannot be published directly", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
   assert.equal(manifest.name, "beauticode-desktop");
   assert.equal(manifest.version, "0.1.0-test.12");
-  assert.equal(manifest.private, false);
-  assert.deepEqual(manifest.os, ["win32"]);
+  assert.equal(manifest.private, true);
+  assert.equal(manifest.os, undefined);
   assert.equal(manifest.bin["beauticode-desktop"], "./bin/beauticode-desktop.mjs");
   assert.ok(manifest.files.includes("runtime"));
 });

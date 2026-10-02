@@ -23,9 +23,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm audit --audit-level=high
+      # Workspace type checks resolve their dependencies' generated declarations.
+      - run: npm run build
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
       - name: Parse JavaScript entry points
         run: |
           node --check apps/tray/session-host.mjs
