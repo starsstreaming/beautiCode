@@ -10,7 +10,7 @@
 </div>
 
 <p align="center">
-  <strong>给 AI 编程客户端换皮肤的本地工具。</strong>
+  <strong>一个工具，给所有 Agent 客户端换上动态皮肤。</strong>
 </p>
 
 <p align="center">
