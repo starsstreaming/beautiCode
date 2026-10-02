@@ -1,7 +1,0 @@
-{
-  "enabledPlugins": {
-    "chrome-devtools-mcp@qoder-marketplace": true,
-    "alibabacloud-core@qoder-marketplace": true,
-    "alibabacloud-spec-ops@qoder-marketplace": true
-  }
-}

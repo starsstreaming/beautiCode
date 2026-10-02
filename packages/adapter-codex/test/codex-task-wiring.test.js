@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { createCodexRunKeyAdapter, installCodexWiring, uninstallCodexWiring } from "../../../integrations/codex-desktop/task-wiring.mjs";
+import { createCodexRunKeyAdapter, uninstallCodexWiring } from "../../../integrations/codex-desktop/task-wiring.mjs";
 import * as taskWiring from "../../../integrations/codex-desktop/task-wiring.mjs";
 
 test("Codex guardian registration uses the current account name for Scheduler identities", async () => {
@@ -114,20 +114,14 @@ test("Windows Task Scheduler registers and reads back the owned Codex guardian i
   }
 });
 
-function fixture({ run = "old-command", task = null, failStart = false } = {}) {
+function fixture({ run = "old-command", task = null } = {}) {
   const state = { run, task };
   let stopped = 0;
-  let resumed = 0;
   const taskAdapter = {
     async read() { return state.task && { ...state.task }; },
-    async assertAbsentOrOwned() { if (state.task?.owner === "foreign") throw Error("task is not owned"); },
-    async register(starter) { state.task = { owner: "beauticode", action: starter, running: false }; },
     async assertOwned() { if (state.task?.owner !== "beauticode") throw Error("task is not owned"); },
-    async start() { if (failStart) throw Error("task start failed"); state.task.running = true; },
-    async isRunning() { return state.task?.running === true; },
     async stop() { if (state.task?.owner === "beauticode") state.task.running = false; },
     async removeOwned() { if (state.task?.owner === "beauticode") state.task = null; },
-    async restore(previous) { state.task = { ...previous }; },
   };
   return {
     state,
@@ -135,23 +129,11 @@ function fixture({ run = "old-command", task = null, failStart = false } = {}) {
     runKey: {
       async read() { return state.run; },
       async remove() { state.run = null; },
-      async restore(value) { state.run = value; },
     },
-    async stopOld() { stopped++; return 1; },
     async stopOwned() { stopped++; },
-    async resumeOld() { resumed++; },
     get stopped() { return stopped; },
-    get resumed() { return resumed; },
   };
 }
-
-test("install moves the single autostart wire to a running owned task", async () => {
-  const f = fixture();
-  await installCodexWiring({ ...f, starter: "C:\\bc\\start-watch.ps1" });
-  assert.equal(f.state.run, null);
-  assert.equal(f.state.task.running, true);
-  assert.equal(f.stopped, 1);
-});
 
 test("Codex guardian scheduled task is allowed to stay running on battery", async () => {
   const source = await readFile(
@@ -162,43 +144,19 @@ test("Codex guardian scheduled task is allowed to stay running on battery", asyn
   assert.match(source, /New-ScheduledTaskSettingsSet[^;]*-DontStopIfGoingOnBatteries/);
 });
 
-test("failed task start restores old Run wiring and removes new task", async () => {
-  const f = fixture({ failStart: true });
-  await assert.rejects(() => installCodexWiring({ ...f, starter: "C:\\bc\\start-watch.ps1" }), /task start failed/);
-  assert.deepEqual(f.state, { run: "old-command", task: null });
-  assert.equal(f.resumed, 1);
-});
-
 test("foreign task is neither replaced nor removed", async () => {
   const f = fixture({ task: { owner: "foreign", action: "other.exe" } });
-  await assert.rejects(() => installCodexWiring({ ...f, starter: "C:\\bc\\start-watch.ps1" }), /not owned/);
-  assert.equal(f.state.task.action, "other.exe");
   await assert.rejects(() => uninstallCodexWiring(f), /not owned/);
+  assert.equal(f.state.task.action, "other.exe");
   assert.equal(f.state.run, "old-command");
-});
-
-test("failed upgrade restores previous owned task and old guardian", async () => {
-  const oldTask = { owner: "beauticode", action: "old-starter.ps1", running: true };
-  const f = fixture({ task: oldTask, failStart: true });
-  await assert.rejects(() => installCodexWiring({ ...f, starter: "new-starter.ps1" }));
-  assert.deepEqual(f.state.task, oldTask);
-  assert.equal(f.resumed, 0);
-});
-
-test("failed upgrade restores the old runtime before restarting its task", async () => {
-  const f = fixture({ task: { owner: "beauticode", state: "Running" }, failStart: true });
-  const order = [];
-  f.task.restore = async () => { order.push("task-start"); };
-  f.rollbackRuntime = async () => { order.push("runtime-restored"); };
-  await assert.rejects(() => installCodexWiring({ ...f, starter: "new-starter.ps1" }));
-  assert.deepEqual(order, ["runtime-restored", "task-start"]);
-  assert.equal(f.resumed, 0);
+  assert.equal(f.stopped, 0);
 });
 
 test("uninstall removes only product wiring", async () => {
   const f = fixture({ task: { owner: "beauticode", action: "starter.ps1" } });
   await uninstallCodexWiring(f);
   assert.deepEqual(f.state, { run: null, task: null });
+  assert.equal(f.stopped, 1);
 });
 
 test("an absent Windows Run value is an empty optional wire, not an installation error", { skip: process.platform !== "win32" }, async () => {

@@ -22,6 +22,13 @@ test("packed Codex and WorkBuddy runtimes include new recovery modules", async (
       "workbuddy/scripts/wb-theme-name-diagnostic.mjs",
       "workbuddy/packages/adapter-workbuddy/dist/background-stage.js",
     ]) await fs.access(path.join(dest, "runtime", relative));
+    for (const relative of [
+      "codex/vendor/adapter-codex/msix-activation.js",
+      "codex/vendor/adapter-codex/msix-repair.js",
+      "codex/vendor/adapter-codex/msix-repair-state.js",
+      "codex/vendor/core/windows-process-generation.js",
+      "workbuddy/packages/adapter-workbuddy/dist/persist-state.js",
+    ]) await assert.rejects(fs.access(path.join(dest, "runtime", relative)), { code: "ENOENT" });
   } finally { await fs.rm(dest, { recursive: true, force: true }); }
 });
 

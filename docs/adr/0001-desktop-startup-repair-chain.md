@@ -2,6 +2,12 @@
 
 Status: accepted (2026-09-28)
 
+Implementation scope clarified on 2026-10-02: the shared repair chain is
+currently used by Cursor and Doubao. Codex deduplicates process generations
+in its controller; WorkBuddy applies its own fresh-process checks. Unused
+MSIX repair and generic Windows termination modules were removed after
+the active launch paths stopped calling them.
+
 ## Context
 
 Codex, WorkBuddy, Cursor and Doubao each have an independent guardian because
@@ -15,9 +21,9 @@ PID file also does not prove that a guardian is alive.
 - Keep the official launch path and per-host guardian. A guardian never starts
   a client merely because no client is running.
 - Repair only one verified main process with a known creation time less than
-  10 seconds old. Recheck the PID generation and executable in the operation
-  that terminates it. Missing or ambiguous evidence fails closed.
-- Share `StartupRepairChain` across the four CDP hosts. Once a repair is
+  10 seconds old. Each host uses its own process identity checks; the removed
+  generic termination helper does not provide a cross-host guarantee.
+- Share `StartupRepairChain` across Cursor and Doubao. Once a repair is
   attempted, its replacement cannot be repaired again. A verified host CDP
   endpoint releases the budget; a subsequently observed user close releases
   it for the next icon launch. If no replacement appears, the budget expires

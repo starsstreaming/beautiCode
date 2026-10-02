@@ -91,13 +91,13 @@ test("tray lifecycle owns leftover session-host and second-click show-panel", ()
   assert.match(host, /writeSessionHostFile/);
 });
 
-test("README documents installer auto-wiring, npx, and custom install paths", () => {
+test("README documents aggregate installation and standalone DSH startup", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
-  assert.match(readme, /不需要(?:安装)? ?pnpm/);
-  assert.match(readme, /npx @deepseek-ai\/dsh web/);
-  assert.match(readme, /npx @deepseek-ai\/dsh plugin/);
-  assert.match(readme, /集成说明\.txt/);
-  assert.match(readme, /(?:一般|也)不需要再执行 `dsh plugin add`/);
+  assert.match(readme, /npm install -g beauticode-desktop --foreground-scripts/);
+  assert.match(readme, /beauticode-desktop all install/);
+  assert.match(readme, /npx beauticode-dsh\s+dsh web/);
+  assert.match(readme, /beauticode-desktop all status/);
+  assert.match(readme, /beauticode-desktop all health/);
 });
 
 test("install-dsh-plugin writes an integration note for the actual install root", requiresPowerShell, () => {

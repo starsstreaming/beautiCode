@@ -289,6 +289,7 @@ export function apply(ctx, config = {}) {
       }),
       ctx.webServer.register({
         kind: "exact",
+        // Keep the existing route while serving the canonical lossless WebP.
         path: "/__beauticode/themes/bg-canvas.png",
         handler: async (req, res) => {
           if (req.method !== "GET" && req.method !== "HEAD") {

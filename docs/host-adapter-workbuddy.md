@@ -29,7 +29,7 @@ beautiCode 可以走和 Codex 同一条 CDP 注入路线，但比 Codex 更顺�
 | 5 | WebSocket 握手不需要 `Origin` 头 | 不带 Origin 直接 101；`--remote-allow-origins` 不构成阻塞 → **不需要引入 `ws` 包** |
 | 6 | 可以执行任意页面 JS | `Runtime.evaluate` 往返正常（含 `awaitPromise`） |
 | 7 | 页面根结构 | `html.class = "dark cb-dark vscode-dark"` / `"light cb-light vscode-light"`；`#root` 存在（`body` 子节点为 `div#root, script, div`）；`data-skin` 为空 |
-| 8 | 素材可用 `file://` 直引 | 页面内 `new Image().src = "file:///…/bg-canvas.png"` → onload 成功，**6.2 MB / 2600×1351 直接加载**，绕开 Codex 的 128 KiB inline 上限与 `setFileInputFiles` 搬运 |
+| 8 | 素材可用 `file://` 直引 | 页面内 `new Image().src = "file:///…/bg-canvas-4k.webp"` 直接加载本机素材，绕开 Codex 的 128 KiB inline 上限与 `setFileInputFiles` 搬运；内置画窗统一使用 3840×2160 的无损 WebP |
 | 9 | 注入能落地且不被擦除 | 注入 `#beauticode-bg-stage` 后舞台 1470×919 精确覆盖视口、横向溢出 0 px；3 秒后 stage / style / `data-bc-active` 均仍在 DOM |
 | 10 | 大面的颜色全部来自变量 | 见 §5 选择器表（用 `document.styleSheets` 逐条 `el.matches()` 溯源得到） |
 | 11 | 让大面透明后壁纸真的露出来 | 注入后「大面积不透明面」清单里 `.teams-container`(100%) / `.conversation-shell`(77%) / `.conversation-list`(18%) 全部消失，只剩内容卡（代码块 12.2%、输入框 7.5%、工具卡 7%、表头 2.9%） |
@@ -494,7 +494,7 @@ WorkBuddy 有真实回读通道（CDP + 页面内状态），所以**保留 `hos
 
 ### 14.1 入口与面板
 
-按已批准的设计语言（方向 C「媒体清单」，见 `design-demos/dsh-background-bar/direction-c-media-ledger.html`）
+按已批准的设计语言（方向 C「媒体清单」）
 渲染「背景清单」面板：
 
 | 编号 | 动作 | 说明 |

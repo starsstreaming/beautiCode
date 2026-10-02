@@ -1,17 +1,12 @@
 name: Publish GitHub npm package
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/publish-github-package.yml
   workflow_dispatch:
     inputs:
       version:
         description: npmjs version to mirror
         required: true
-        default: "1.0.5"
+        default: "1.0.26"
 
 permissions:
   contents: read
@@ -29,7 +24,7 @@ jobs:
 
       - name: Download the verified npmjs package
         env:
-          VERSION: ${{ inputs.version || '1.0.5' }}
+          VERSION: ${{ inputs.version }}
         run: |
           mkdir -p publish-source
           npm pack "beauticode-dsh@${VERSION}"             --registry=https://registry.npmjs.org             --pack-destination publish-source

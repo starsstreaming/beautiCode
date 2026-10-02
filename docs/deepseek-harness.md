@@ -79,7 +79,7 @@ npx @deepseek-ai/dsh plugin --profile web add file:%LOCALAPPDATA%\Programs\beaut
       inject: [webServer]
 ```
 
-也可以参考 [`integrations/deepseek-harness/cordis.patch.example.yml`](../integrations/deepseek-harness/cordis.patch.example.yml)。
+插件的加载配置见 [`integrations/deepseek-harness/cordis.patch.yml`](../integrations/deepseek-harness/cordis.patch.yml)。
 
 ## 网页控制台
 

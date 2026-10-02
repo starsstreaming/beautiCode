@@ -104,9 +104,7 @@ let PORT = args.port || parseInt(process.env.WORKBUDDY_REMOTE_DEBUGGING_PORT || 
 // 默认壁纸：舞台没有媒体时自动铺上（否则透明面透出的是 #101114 纯色，
 // 看起来就像"不透明没生效"——实测踩过）。--wallpaper 可换。
 const DEFAULT_WALLPAPER = args.wallpaper
-  || (fs.existsSync(path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.webp'))
-    ? path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.webp')
-    : path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.png'));
+  || path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.webp');
 
 const log = createWorkBuddyLogger({
   file: path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'logs', 'wb-runner.log'),

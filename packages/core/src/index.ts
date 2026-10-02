@@ -20,5 +20,4 @@ export * from "./bundled-gallery.js";
 export * from "./apply-transaction.js";
 export * from "./process-liveness.js";
 export * from "./startup-repair-chain.js";
-export * from "./windows-process-generation.js";
 export * from "./skin-catalog.js";

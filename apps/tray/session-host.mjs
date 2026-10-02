@@ -174,24 +174,15 @@ if (portArg) {
   sessionOpts.autoDiscover = false;
 }
 if (dataRoot) sessionOpts.dataRoot = path.resolve(dataRoot);
-const bundledGalleryHi = path.join(
+const bundledGalleryImage = path.join(
   repoRoot,
   "assets",
   "themes",
   "internal-beyond",
-  "bg-canvas-4k.png",
+  "bg-canvas-4k.webp",
 );
-const bundledGalleryLo = path.join(
-  repoRoot,
-  "assets",
-  "themes",
-  "internal-beyond",
-  "bg-canvas.png",
-);
-if (fs.existsSync(bundledGalleryHi)) {
-  sessionOpts.bundledGalleryImagePath = bundledGalleryHi;
-} else if (fs.existsSync(bundledGalleryLo)) {
-  sessionOpts.bundledGalleryImagePath = bundledGalleryLo;
+if (fs.existsSync(bundledGalleryImage)) {
+  sessionOpts.bundledGalleryImagePath = bundledGalleryImage;
 }
 
 const SessionClass = hostKind === "dsh" ? adapter.DshSession : adapter.BeautiSession;

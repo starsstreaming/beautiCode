@@ -43,8 +43,6 @@ export function themeAssetsDir() {
   for (const dir of candidates) {
     if (
       fs.existsSync(path.join(dir, "bg-canvas-4k.webp")) ||
-      fs.existsSync(path.join(dir, "bg-canvas-4k.png")) ||
-      fs.existsSync(path.join(dir, "bg-canvas.png")) ||
       fs.existsSync(path.join(dir, "bg-internal.jpg"))
     ) {
       return dir;
@@ -62,11 +60,7 @@ export function presetImagePath(id) {
 
 export function canvasImagePath() {
   const dir = themeAssetsDir();
-  const webp = path.join(dir, "bg-canvas-4k.webp");
-  if (fs.existsSync(webp)) return webp;
-  const hi = path.join(dir, "bg-canvas-4k.png");
-  if (fs.existsSync(hi)) return hi;
-  const filePath = path.join(dir, "bg-canvas.png");
+  const filePath = path.join(dir, "bg-canvas-4k.webp");
   return fs.existsSync(filePath) ? filePath : null;
 }
 

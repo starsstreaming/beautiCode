@@ -23,7 +23,6 @@ import {
   pickWorkBuddyTarget,
   readTheme,
   safeTargetLabel,
-  isInitialPersistState,
 } from "../dist/index.js";
 
 /** Exactly the shape measured on WorkBuddy 5.5.6 (query trimmed for readability). */

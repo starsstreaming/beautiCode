@@ -5,7 +5,7 @@ import { effectsForPreset, type BackgroundEffects } from "./types.js";
 export const BUNDLED_GALLERY_THEME_ID = "builtin-gallery";
 export const BUNDLED_GALLERY_THEME_NAME = "画窗";
 
-const GALLERY_FILES = ["bg-canvas-4k.webp", "bg-canvas-4k.png", "bg-canvas.png"] as const;
+const GALLERY_FILE = "bg-canvas-4k.webp";
 
 export interface BundledThemeSpec {
   id: string;
@@ -37,13 +37,11 @@ export function resolveBundledGalleryImagePath(
   for (const root of searchRoots) {
     if (!root) continue;
     const resolved = path.resolve(root);
-    for (const file of GALLERY_FILES) {
-      candidates.push(path.join(resolved, file));
-      candidates.push(path.join(resolved, "themes", "internal-beyond", file));
-      candidates.push(
-        path.join(resolved, "assets", "themes", "internal-beyond", file),
-      );
-    }
+    candidates.push(path.join(resolved, GALLERY_FILE));
+    candidates.push(path.join(resolved, "themes", "internal-beyond", GALLERY_FILE));
+    candidates.push(
+      path.join(resolved, "assets", "themes", "internal-beyond", GALLERY_FILE),
+    );
   }
   for (const filePath of candidates) {
     try {

@@ -24,6 +24,9 @@ design-demos/
 coverage/
 
 # Local agent/tool scratch directories (not part of the project)
+.cursor/
+.qoder/
+.qoder-cn/
 .mimosa/
 .workbuddy/
 .cache/

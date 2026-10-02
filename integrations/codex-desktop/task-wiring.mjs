@@ -107,30 +107,6 @@ export function createCodexRunKeyAdapter(starter, { valueName = RUN_VALUE } = {}
   };
 }
 
-export async function installCodexWiring({ task, runKey, stopOld, rollbackRuntime = async () => {}, resumeOld, starter }) {
-  const previous = await runKey.read();
-  const previousTask = await task.read();
-  await task.assertAbsentOrOwned();
-  let oldStopped = false;
-  try {
-    await task.register(starter);
-    await task.assertOwned();
-    await runKey.remove();
-    oldStopped = Number(await stopOld()) > 0;
-    await task.start();
-    if (!(await task.isRunning())) throw new Error("Codex guardian task did not start");
-  } catch (error) {
-    await task.stop().catch(() => {});
-    // Restore the pointer before the previous task can launch its versioned runtime.
-    await rollbackRuntime();
-    if (previousTask) await task.restore(previousTask);
-    else await task.removeOwned();
-    await runKey.restore(previous);
-    if (oldStopped && previousTask?.state !== "Running" && previousTask?.running !== true) await resumeOld();
-    throw error;
-  }
-}
-
 export async function uninstallCodexWiring({ task, runKey, stopOwned }) {
   await runKey.read();
   if (await task.read()) await task.assertOwned();
