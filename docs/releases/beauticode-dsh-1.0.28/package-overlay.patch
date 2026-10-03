@@ -1,0 +1,59 @@
+--- a/package/README.zh-CN.md
++++ b/package/README.zh-CN.md
+@@ -3,0 +4,2 @@
++
++DSH Web 和 Desktop 启动及普通点击不会自动进入全屏。需要全屏时，在「设置 → 背景 → 全屏显示」中主动开启，按 `Esc` 或点击「退出全屏」退出。
+--- a/package/client.js
++++ b/package/client.js
+@@ -1864,46 +1863,0 @@
+-
+-  // Fullscreen by default. A browser only grants fullscreen from inside a user
+-  // gesture, so a page cannot open in it; the closest honest reading of
+-  // "starts fullscreen" is the first click after load. Typing in the composer
+-  // must not count: DSH's main action is a keydown. Escape or the settings row
+-  // still exits. Stay armed until the request actually succeeds — a rejected
+-  // first gesture used to spend the listener and leave the page windowed.
+-  function armFullscreenDefault() {
+-    const root = document.documentElement;
+-    if (typeof root?.requestFullscreen !== "function" &&
+-        typeof root?.webkitRequestFullscreen !== "function") {
+-      return;
+-    }
+-    let spent = false;
+-    const enter = () => {
+-      if (spent) return;
+-      if (document.fullscreenElement || document.webkitFullscreenElement) {
+-        spent = true;
+-        document.removeEventListener?.("pointerdown", enter, true);
+-        return;
+-      }
+-      for (const name of ["requestFullscreen", "webkitRequestFullscreen"]) {
+-        const request = root?.[name];
+-        if (typeof request !== "function") continue;
+-        let started;
+-        try {
+-          started = request.call(root, { navigationUI: "hide" });
+-        } catch {
+-          continue;
+-        }
+-        Promise.resolve(started).then(
+-          () => {
+-            spent = true;
+-            document.removeEventListener?.("pointerdown", enter, true);
+-          },
+-          () => {
+-            /* gesture rejected — stay armed for the next click */
+-          },
+-        );
+-        return;
+-      }
+-    };
+-    document.addEventListener?.("pointerdown", enter, { capture: true });
+-  }
+-
+-  armFullscreenDefault();
+--- a/package/package.json
++++ b/package/package.json
+@@ -3 +3 @@
+-  "version": "1.0.27",
++  "version": "1.0.28",

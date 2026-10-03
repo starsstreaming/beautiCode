@@ -23,3 +23,13 @@ Issue #83 报告在 DSH Desktop 的无边框窗口中，进入 HTML 全屏会隐
 手动全屏仍可能隐藏 Desktop 原生窗口按钮；这是明确操作的结果，可通过 `Esc` 或设置按钮退出。自动化用例不替代真实 Electron 窗口验收。
 
 本次没有修改接口、背景数据或持久化偏好，不需要迁移。回滚代码会恢复首次点击自动全屏及其窗口控制风险。
+
+## npm 1.0.28 发布基线
+
+按用户指定，以 registry 的 `beauticode-dsh@1.0.27` 实际 tarball 加上 PR #84 构建并发布 `1.0.28`。基线 SHA-1 为 `4156e31bd0bad2bd167192f4b5788c3197d2043f`，SHA-512 integrity 为 `sha512-igQ8QtKb2IOhp4wa/dAAQYtC3BgWa4LPi7ISsY37klq7xOXfxaQC3RJoexDKiMc1Qcb+wlsiQt3UQF1p3a+XxA==`；下载后均核对一致。
+
+仅修改 `client.js`（删除 PR 对应的自动全屏入口）、`README.zh-CN.md`（加入主动全屏说明）及 `package.json`（版本号）。49 个包内文件中，其余 46 个文件逐字节保持基线内容，文件权限不变；保留 `1.0.27` 的功能面板不透明修复、原控制台、vendor、媒体资源和配置。没有直接从当前完整源码重新打包，因此不会带入基线之外的改动。
+
+对实际候选 tarball 解包后，运行取消自动全屏、手动全屏及面板保护的 9 项回归，全部通过。源包使用 CRLF，README 含混合换行；应用补丁时保留未修改内容的原始字节。精确覆盖补丁及逐文件摘要保存于 `docs/releases/beauticode-dsh-1.0.28/`，发布后以 registry tarball 再次核对。
+
+发布后的 registry tarball SHA-1 为 `a988f843e420c336ef7f365f60419ca714af8c5c`，SHA-512 integrity 为 `sha512-Bq5Lj3d+ShtKFFBlxqfWAdAB9Em4FppTwtSvJBZxkILyjM0Ol4YFKBCkQQh++7/7q25WzmlaKl4gnM22hbxMew==`。重新下载核验这两个摘要、49 个必需文件和精确版本均通过，与候选 tarball 完全一致，`latest` 指向 `1.0.28`。完整发布后证据见该目录的 `registry-verification.json`。
