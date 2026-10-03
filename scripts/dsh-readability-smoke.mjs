@@ -7,12 +7,14 @@ import { pathToFileURL } from 'node:url';
 const modulePath = process.argv[2];
 const { chromium } = await import(modulePath ? pathToFileURL(modulePath).href : 'playwright');
 const repo = path.resolve(import.meta.dirname, '..');
-const client = await fs.readFile(path.join(repo, 'integrations/deepseek-harness/client.js'), 'utf8');
-const atmosphere = await fs.readFile(path.join(repo, 'integrations/deepseek-harness/atmosphere.js'), 'utf8');
+// Optional package directory also verifies the actual npm release candidate.
+const pluginDir = process.argv[3] ? path.resolve(process.argv[3]) : path.join(repo, 'integrations/deepseek-harness');
+const client = await fs.readFile(path.join(pluginDir, 'client.js'), 'utf8');
+const atmosphere = await fs.readFile(path.join(pluginDir, 'atmosphere.js'), 'utf8');
 const css = /style.textContent = `([\s\S]*?)`;/;
 const clientCss = client.match(css)[1].replaceAll('${CROSSFADE_MS}', '180');
 const galleryCss = atmosphere.match(css)[1];
-const readablePath = path.join(repo, 'integrations/deepseek-harness/readability.js');
+const readablePath = path.join(pluginDir, 'readability.js');
 const readable = await fs.readFile(readablePath, 'utf8').catch(error => {
   if (error.code === 'ENOENT') return '';
   throw error;

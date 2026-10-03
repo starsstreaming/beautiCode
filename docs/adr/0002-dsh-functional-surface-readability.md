@@ -30,3 +30,13 @@
 ## 回滚
 
 用户关闭开关即可回到原有透明效果。版本回滚可移除脚本的拼接、打包项与控制台入口；独立偏好不会影响旧版背景客户端。不会改写 DSH 安装文件或原有背景状态。
+
+## npm 1.0.27 发布基线
+
+按用户要求以 registry 的 `beauticode-dsh@1.0.26` 实际 tarball 为基线。该包的 SHA-1 为 `856dac332b5a7d5f4840b65e7097871e1fce95ec`，SHA-512 integrity 为 `sha512-Rf0b/6n9MrAjHCEw2XNHDXGn3Xf5YqfSIz9etcWLIGiMz200WpoOiacLrw2nloy4msVmQ18s1q4MS2PlZUL6UQ==`；下载后核对 registry 完整性。
+
+仓库已有其他尚未包含在 npm 1.0.26 中的改动，因此本次正式发布不直接发布完整源码重新打包的产物。只向旧包应用本修复在 `index.mjs`、`console.js`、`readability.js`、`package.json` 的 diff，并补充 README 的功能说明。版本升至 1.0.27，新增 `readability.js`；没有移除旧包文件。其余媒体资源、vendor、配置及背景数据目录行为保持 1.0.26 的内容。
+
+1.0.26 的 `index.mjs` 和 `console.js` 与历史提交 `328d6675633f63a5f71f5af8bf88d93655f35b83` 一致。候选包使用该提交的控制台和插件路由测试，应用本修复的测试 diff，再加上新的偏好测试；避免以未发布的阴影默认值、重置箭头样式和 Host 检查契约判断旧包。仓库当前完整测试另行运行。
+
+浏览器脚本第三个参数可指定解包目录，以验证实际发布文件。发布后再次核对精确版本的 registry tarball、完整性和关键文件，并比对候选包。
