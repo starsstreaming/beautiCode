@@ -2,6 +2,8 @@
 
 该 Cordis 插件向 DSH Web 和官方 Desktop 注入 beautiCode 浏览器客户端，并提供本机鉴权接口。支持图片、MP4 / MOV、播放位置、静音、摸鱼模式以及清除背景。Web 和 Desktop 使用同一组结构化页面注入；Desktop 的页面请求经原生壳转发，回执由每次 Host 启动生成的页面密钥验证。
 
+DSH Web 和 Desktop 启动及普通点击不会自动进入全屏。需要全屏时，在「设置 → 背景 → 全屏显示」中主动开启，按 `Esc` 或点击「退出全屏」退出。
+
 ## 官方 Desktop
 
 先启动 Desktop 一次，让它创建 `desktop` profile，然后从系统托盘明确退出（关闭窗口通常只会隐藏）。可在 Desktop 的插件页面安装 `beauticode-dsh`，或使用 **Desktop 安装的** `dsh` 命令：
