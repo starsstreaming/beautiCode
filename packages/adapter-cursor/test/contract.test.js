@@ -23,7 +23,7 @@ test('Cursor uses its measured workbench target and direct Customize successor',
   assert.equal(CURSOR_CDP_SPEC.strings.entry, 'background');
   assert.deepEqual(CURSOR_CDP_SPEC.theme.highContrastClassTokens, ['cursor-high-contrast', 'hc-black']);
   assert.deepEqual(CURSOR_CDP_SPEC.theme.darkClassTokens, ['cursor-dark', 'vs-dark']);
-  assert.deepEqual(CURSOR_CDP_SPEC.theme.lightClassTokens, ['cursor-light']);
+  assert.deepEqual(CURSOR_CDP_SPEC.theme.lightClassTokens, ['cursor-light', 'vs', 'vs-light']);
   assert.deepEqual(CURSOR_CDP_SPEC.theme.observeAttributes, ['class', 'data-theme']);
   assert.equal(CURSOR_CDP_SPEC.targetUrl, 'vscode-file://vscode-app/');
   assert.deepEqual(CURSOR_CDP_SPEC.targetIdentity, {
