@@ -15,7 +15,7 @@ test("user-facing CDP errors are localized", () => {
   );
   assert.equal(
     toChineseErrorMessage("Live verify did not pass (fail): video node missing"),
-    "实时校验未通过（失败）：未找到视频节点。",
+    "正在媒体验证中，请等待30s再次导入",
   );
 });
 
