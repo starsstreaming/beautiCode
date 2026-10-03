@@ -134,6 +134,10 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     "</div>" +
     '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="fullscreen" aria-pressed="false">进入全屏</button></div></div>' +
     '<div class="bc-row"><div class="bc-row-text">' +
+    '<span class="bc-row-title">功能面板不透明</span>' +
+    '<span class="bc-row-desc">遮住设置、弹层和消息编辑栏后方的内容</span>' +
+    '</div><div class="bc-control"><button type="button" class="bc-btn bc-pill on" data-act="readability" aria-pressed="true">已开</button></div></div>' +
+    '<div class="bc-row"><div class="bc-row-text">' +
     '<span class="bc-row-title">背景阴影</span>' +
     '<span class="bc-row-desc">压暗背景，让内容更清楚</span>' +
     "</div>" +
@@ -213,6 +217,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   document.body.append(fileInput);
 
   const soundBtn = page.querySelector('[data-act="sound"]');
+  const readabilityBtn = page.querySelector('[data-act="readability"]');
   const dimSlider = page.querySelector(".bc-dim-slider");
   const dimValue = page.querySelector(".bc-dim-value");
   const dimReset = page.querySelector('[data-act="dim-reset"]');
@@ -252,6 +257,13 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     const percent = current == null ? AUTO_DIM_PERCENT : Math.round(current * 100);
     dimSlider.value = String(percent);
     dimValue.textContent = `${percent}%`;
+  }
+
+  function renderReadability() {
+    const enabled = globalThis.BeauticodeReadableSurfaces?.get?.() !== false;
+    readabilityBtn.classList.toggle("on", enabled);
+    readabilityBtn.textContent = enabled ? "已开" : "已关";
+    readabilityBtn.setAttribute("aria-pressed", String(enabled));
   }
 
   function isOurs(node) {
@@ -326,6 +338,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     }
     dialogEl.setAttribute("data-bc-page", "on");
     navButton.setAttribute("aria-current", "true");
+    renderReadability();
     renderDim();
   renderBlur();
     void refresh();
@@ -795,6 +808,14 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
       }
     })();
   });
+  readabilityBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const enabled = globalThis.BeauticodeReadableSurfaces?.get?.() !== false;
+    globalThis.BeauticodeReadableSurfaces?.set?.(!enabled);
+    renderReadability();
+  });
+  globalThis.addEventListener?.("beauticode-readability-change", renderReadability);
+  renderReadability();
   dimSlider.addEventListener("input", () => {
     const n = Number(dimSlider.value);
     if (!Number.isFinite(n)) return;

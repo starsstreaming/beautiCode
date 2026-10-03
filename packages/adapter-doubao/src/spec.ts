@@ -106,6 +106,8 @@ export const DOUBAO_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
       "#flow_chat_sidebar .bg-inherit",
       ".guidance-input-surface > *",
     ]),
+    readingSelectors: Object.freeze(['#chat-route-main', '#flow_chat_sidebar']),
+    opaqueSelectors: Object.freeze(['.guidance-input-surface']),
   }),
   theme: Object.freeze({
     rootAttribute: "data-theme",

@@ -89,7 +89,7 @@ export function toChineseErrorMessage(value: unknown): string {
     [/Another (.+) may be starting; lock owner is not readable yet\.?/i, (match) => `另一个${match[1] ?? "操作"}可能正在启动，暂时无法读取锁的所有者。`],
     [/Another background apply is already in progress\.?/i, "已有背景应用正在进行中，请等待当前操作完成。"],
     [/No active background\. Apply an image or video first\.?/i, "当前没有背景，请先应用图片或视频。"],
-    [/Live verify did not pass \(([^)]+)\):\s*(.*)/i, (match) => `实时校验未通过（${translateVerifyStatus(match[1] ?? "") }）：${translateReadinessReason(match[2] ?? "")}`],
+    [/Live verify did not pass \([^)]+\):/i, () => "正在媒体验证中，请等待30s再次导入"],
     [/Failed to inject background into any session:\s*(.*)/i, (match) => `未能向任何会话注入背景：${match[1]}`],
     [/Could not attach the local MP4 through CDP:\s*(.*)/i, (match) => `无法通过 CDP 附加本地 MP4：${translateMediaDetail(match[1] ?? "")}`],
     [/Could not toggle fish mode on any session/i, "无法在任何会话中切换摸鱼模式。"],
@@ -196,16 +196,6 @@ export function toChineseErrorMessage(value: unknown): string {
   }
 
   return message;
-}
-
-function translateReadinessReason(reason: string): string {
-  return toChineseErrorMessage(reason);
-}
-
-function translateVerifyStatus(status: string): string {
-  if (/^fail$/i.test(status)) return "失败";
-  if (/^inconclusive$/i.test(status)) return "无法确定";
-  return status;
 }
 
 function translateMediaDetail(detail: string): string {

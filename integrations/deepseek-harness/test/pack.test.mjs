@@ -23,6 +23,7 @@ test("staged npm plugin is a self-contained DSH bundle with a vendored engine", 
   await fs.access(adapter);
   await fs.access(path.join(dest, "browser-injection.mjs"));
   await fs.access(path.join(dest, "transport.js"));
+  await fs.access(path.join(dest, "readability.js"));
   await fs.access(canvas);
   for (const oldAsset of ["bg-canvas.png", "bg-canvas-4k.png"]) {
     await assert.rejects(fs.access(path.join(dest, "themes", "internal-beyond", oldAsset)), { code: "ENOENT" });

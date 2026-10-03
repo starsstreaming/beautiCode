@@ -124,11 +124,15 @@ export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
       ".part.sidebar > .content",
       ".part.panel > .content",
     ]),
+    readingSelectors: Object.freeze(['.agent-panel', '.monaco-editor', '.ui-sidebar', '.part.sidebar', '.part.panel', '.agent-sidebar-header-actions']),
+    opaqueSelectors: Object.freeze(['.ui-prompt-input__container']),
   }),
   theme: Object.freeze({
+    classElementSelector: '.monaco-workbench',
+    highContrastLightClassTokens: Object.freeze(['hc-light']),
     highContrastClassTokens: Object.freeze(["cursor-high-contrast", "hc-black"]),
     darkClassTokens: Object.freeze(["cursor-dark", "vs-dark"]),
-    lightClassTokens: Object.freeze(["cursor-light"]),
+    lightClassTokens: Object.freeze(["cursor-light", "vs", "vs-light"]),
     observeAttributes: Object.freeze(["class", "data-theme"]),
   }),
 });

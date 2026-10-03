@@ -1,7 +1,7 @@
 import type { DesktopCdpHostSpec } from "./types.js";
 
 export const DESKTOP_BACKGROUND_SCHEMA = "beauticode.desktop-background.v1";
-export const DESKTOP_BACKGROUND_VERSION = "v1.4";
+export const DESKTOP_BACKGROUND_VERSION = "v1.5";
 
 /**
  * Host-parameterized renderer payload. Media bytes never cross Runtime.evaluate:
@@ -57,20 +57,24 @@ if(CFG.mount==='cursor'){
 }
 entry.setAttribute('data-bc-desktop',CFG.kind);anchor.insertAdjacentElement('afterend',entry);
 
-function hasToken(tokens){var list=document.body&&document.body.classList;if(!list||!Array.isArray(tokens))return false;for(var i=0;i<tokens.length;i++)if(list.contains(tokens[i]))return true;return false}
-function hasRootValue(values){var attr=CFG.theme&&CFG.theme.rootAttribute;if(!attr||!Array.isArray(values))return false;var value=root.getAttribute(attr);for(var i=0;i<values.length;i++)if(value===values[i])return true;return false}
+function themeNodes(){return [CFG.theme&&CFG.theme.classElementSelector?document.querySelector(CFG.theme.classElementSelector):null,root,document.body].filter(Boolean)}
+function hasToken(tokens,n){return Array.isArray(tokens)&&tokens.some(function(t){return n.classList.contains(t)})}
+function hasRootValue(values,n){var attr=CFG.theme&&CFG.theme.rootAttribute;return !!attr&&Array.isArray(values)&&values.indexOf(n.getAttribute(attr))!==-1}
 function hostTheme(){
   var theme=CFG.theme||{};
-  if(hasToken(theme.highContrastClassTokens)||hasRootValue(theme.highContrastAttributeValues))return 'high-contrast';
-  if(hasToken(theme.darkClassTokens)||hasRootValue(theme.darkAttributeValues))return 'dark';
-  if(hasToken(theme.lightClassTokens)||hasRootValue(theme.lightAttributeValues))return 'light';
+  var nodes=themeNodes();for(var i=0;i<nodes.length;i++){var n=nodes[i];
+    if(hasToken(theme.highContrastLightClassTokens,n))return 'high-contrast-light';
+    if(hasToken(theme.highContrastClassTokens,n)||hasRootValue(theme.highContrastAttributeValues,n))return 'high-contrast';
+    if(hasToken(theme.darkClassTokens,n)||hasRootValue(theme.darkAttributeValues,n))return 'dark';
+    if(hasToken(theme.lightClassTokens,n)||hasRootValue(theme.lightAttributeValues,n))return 'light';
+  }
   if(theme.cssThemeVariable){var cssValue=getComputedStyle(root).getPropertyValue(theme.cssThemeVariable).trim();if(cssValue==='dark'||cssValue==='light')return cssValue}
   try{return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}catch(e){return 'dark'}
 }
 var lastTheme='';
 var themeObserver=null;
 var themeMedia=null;
-function refreshTheme(){var next=hostTheme();if(next===lastTheme)return false;lastTheme=next;root.setAttribute('data-bc-theme',next);root.setAttribute('data-bc-light',next==='light'?'true':'false');return true}
+function refreshTheme(){var next=hostTheme();if(next===lastTheme)return false;lastTheme=next;root.setAttribute('data-bc-theme',next);root.setAttribute('data-bc-light',next==='light'||next==='high-contrast-light'?'true':'false');return true}
 function observeTheme(){
   if(themeObserver)themeObserver.disconnect();
   themeObserver=new MutationObserver(function(){refreshTheme();if(document.body!==themeObserverBody)attachThemeBody()});
@@ -91,9 +95,12 @@ function scope(selectors){return selectors.map(function(selector){return 'html[d
 var backdrop=scope(CFG.contract.backdropSelectors);
 var surfaces=scope(CFG.contract.surfaceSelectors);
 var flatten=scope(CFG.contract.flattenSelectors);
+var reading=(CFG.contract.readingSelectors||[]).map(function(s){return 'html[data-bc-active="true"]:is([data-bc-light="true"],[data-bc-theme="high-contrast"]) '+s}).join(',');
+var opaque=scope(['[role="dialog"]','[role="alertdialog"]','[role="menu"]','[role="listbox"]','[role="tooltip"]'].concat(CFG.contract.opaqueSelectors||[]));
 style.textContent='html{--bc-surface-base:#1f1f1f;--bc-surface-alpha-pct:82%;--bc-scrim-val:.28;--bc-bg-blur:0px;--bc-stage-fallback:#101114;--bc-scrim-rgb:0,0,0;--bc-panel-bg:rgba(31,31,31,.97);--bc-panel-text:#eee;--bc-panel-border:rgba(255,255,255,.18);--bc-control-bg:rgba(255,255,255,.08);--bc-control-border:rgba(255,255,255,.17);--bc-overlay-rgb:0,0,0}' +
   'html[data-bc-theme="light"]{--bc-surface-base:#fff;--bc-scrim-val:.12;--bc-stage-fallback:#f7f8fa;--bc-scrim-rgb:255,255,255;--bc-panel-bg:rgba(255,255,255,.97);--bc-panel-text:#202124;--bc-panel-border:rgba(0,0,0,.16);--bc-control-bg:rgba(0,0,0,.05);--bc-control-border:rgba(0,0,0,.16);--bc-overlay-rgb:255,255,255}' +
   'html[data-bc-theme="high-contrast"]{--bc-surface-base:#000;--bc-surface-alpha-pct:90%;--bc-scrim-val:.18;--bc-stage-fallback:#000;--bc-scrim-rgb:0,0,0;--bc-panel-bg:#000;--bc-panel-text:#fff;--bc-panel-border:#fff;--bc-control-bg:#000;--bc-control-border:#fff;--bc-overlay-rgb:0,0,0}' +
+  'html[data-bc-theme="high-contrast-light"]{--bc-surface-base:#fff;--bc-stage-fallback:#fff;--bc-scrim-rgb:255,255,255;--bc-panel-bg:#fff;--bc-panel-text:#000;--bc-panel-border:#000;--bc-control-bg:#fff;--bc-control-border:#000;--bc-overlay-rgb:255,255,255}' +
   'html[data-bc-active="true"],html[data-bc-active="true"] body{background:transparent!important}body{isolation:isolate}' +
   '#beauticode-bg-stage{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:var(--bc-stage-fallback)}' +
   'html[data-bc-active="true"] #beauticode-bg-stage{background:var(--bc-stage-fallback)}' +
@@ -103,6 +110,9 @@ style.textContent='html{--bc-surface-base:#1f1f1f;--bc-surface-alpha-pct:82%;--b
   (backdrop?backdrop+'{background-color:transparent!important;background-image:none!important}':'') +
   (surfaces?surfaces+'{background-color:color-mix(in srgb,var(--bc-surface-base) var(--bc-surface-alpha-pct),transparent)!important;backdrop-filter:none!important}':'') +
   (flatten?flatten+'{background-color:transparent!important;background-image:none!important}':'') +
+  'html[data-bc-theme^="high-contrast"]{--bc-reading-min:100%}' +
+  (reading?reading+'{background-color:color-mix(in srgb,var(--bc-surface-base) max(var(--bc-reading-min,82%),var(--bc-surface-alpha-pct)),transparent)!important}':'') +
+  opaque+'{background-color:var(--bc-surface-base)!important}' +
   '.bc-desktop-pop,.bc-desktop-dialog *,.bc-desktop-pop *{box-sizing:border-box}' +
   '.bc-desktop-pop{position:fixed;z-index:2147483000;width:340px;max-height:calc(100vh - 24px);overflow:auto;padding:6px;border-radius:16px;background:var(--bc-panel-bg);color:var(--bc-panel-text);border:1px solid var(--bc-panel-border);box-shadow:0 22px 55px rgba(0,0,0,.42);font:14px -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;display:none}' +
   '.bc-desktop-item{display:flex;align-items:center;gap:10px;min-height:46px;padding:7px 10px;border-radius:10px}.bc-desktop-item:hover{background:var(--bc-control-bg)}' +

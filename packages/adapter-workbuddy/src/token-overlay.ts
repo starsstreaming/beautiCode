@@ -17,6 +17,7 @@
  */
 
 import { parseColorAlpha } from "./color.js";
+import { DARK_THEME_ROOT } from './theme-selectors.js';
 
 /**
  * Surface tokens we want. Kept as a source string so the page-side scan reuses it.
@@ -87,7 +88,7 @@ export const TOKEN_OVERLAY_STYLE_ID = "beauticode-token-overlay";
  */
 const DEFAULT_LIGHT_SELECTOR = "html:root";
 const DEFAULT_DARK_SELECTOR =
-  'html:root.dark,html:root.cb-dark,html.dark,html.cb-dark,body[data-theme="dark"],[data-theme="dark"]';
+  `html:root.dark,html:root.cb-dark,html.dark,html.cb-dark,body[data-theme="dark"],[data-theme="dark"],${DARK_THEME_ROOT}`;
 
 /**
  * Build the overlay CSS from a token scan.
@@ -153,8 +154,10 @@ export const TOKEN_SCAN_EXPRESSION = `(() => {
   const VAR_RE = /^var\\(\\s*(--[a-z0-9-]+)\\s*(?:,\\s*([^)]*))?\\)$/i;
 
   const root = document.documentElement;
-  const rootStyle = getComputedStyle(root);
-  const isDarkTheme = /(^|\\s)(dark|cb-dark)(\\s|$)/.test(root.className);
+  const rootStyle = getComputedStyle(document.body || root);
+  const isDarkTheme = [root, document.body].some((node) => node &&
+    (/(^|\\s)(dark|cb-dark|vscode-dark|vs-dark)(\\s|$)/.test(node.className)
+      || node.getAttribute?.('data-theme') === 'dark'));
 
   // Buckets by selector intent. The neutral bucket holds theme-agnostic
   // declarations (":root", "body"); several families such as --cr-* are

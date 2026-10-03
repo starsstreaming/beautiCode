@@ -16,6 +16,9 @@
  *   translucent but its content is opaque" mess we had.
  */
 
+import { DARK_THEME_ROOT } from './theme-selectors.js';
+import { buildReadableSurfaceCss } from './readability.js';
+
 export const STAGE_ID = "beauticode-bg-stage";
 export const STYLE_ID = "beauticode-contract-style";
 export const SCRIM_VAR = "--bc-scrim";
@@ -216,8 +219,8 @@ export const SCRIM_BY_THEME: Readonly<Record<WorkBuddyTheme, number>> = Object.f
  */
 export function readTheme(htmlClassName: string): WorkBuddyTheme | null {
   const tokens = htmlClassName.split(/\s+/).filter(Boolean);
-  if (tokens.includes("dark")) return "dark";
-  if (tokens.includes("light")) return "light";
+  if (tokens.some((token) => ['dark', 'cb-dark', 'vscode-dark', 'vs-dark'].includes(token))) return "dark";
+  if (tokens.some((token) => ['light', 'cb-light', 'vscode-light', 'vs', 'vs-light'].includes(token))) return "light";
   return null;
 }
 
@@ -261,7 +264,7 @@ export function buildContractCss(options: ContractCssOptions): string {
    * right block, so no re-injection is needed on a theme change.
    */
   const DARK_SELECTOR =
-    'html:root.dark,html.dark,html.cb-dark,body.dark,body.cb-dark,body[data-theme="dark"],[data-theme="dark"]';
+    `html:root.dark,html.dark,html.cb-dark,body.dark,body.cb-dark,body[data-theme="dark"],[data-theme="dark"],${DARK_THEME_ROOT}`;
   const themeVars = (b: string, sc: number): string =>
     `${SURFACE_ALPHA_VAR}:${alpha};${SURFACE_BASE_VAR}:${b};${SCRIM_VAR}:${sc};`;
 
@@ -306,7 +309,7 @@ export function buildContractCss(options: ContractCssOptions): string {
       `html[data-bc-active="true"][data-bc-media="video"][data-bc-video-ready="true"] #${STAGE_ID} img{display:none !important;}`,
   );
 
-  return parts.join("");
+  return parts.join("") + buildReadableSurfaceCss();
 }
 
 /** Attributes the injected runtime owns on `document.documentElement`. */

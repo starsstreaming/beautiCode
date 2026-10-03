@@ -86,7 +86,7 @@ html[data-bc-dim-user="true"][data-bc-active="true"] #beauticode-bg-stage::after
   background: rgba(0, 0, 0, var(--bc-dim)) !important;
 }
 
-html[data-bc-tone="light"][data-bc-dim-user="true"][data-bc-active="true"]
+html[data-bc-resolved-tone="light"][data-bc-dim-user="true"][data-bc-active="true"]
   #beauticode-bg-stage::after {
   background: rgba(255, 255, 255, var(--bc-dim)) !important;
 }
@@ -290,4 +290,19 @@ html[data-bc-active="true"][data-bc-fish="true"] #beauticode-video-input {
   opacity: 0 !important;
   pointer-events: none !important;
   visibility: hidden !important;
+}
+
+/* Light-theme text needs a reading substrate even when wallpaper shadow is 0.
+   Keep host text colors and media tone untouched; surface color follows the app. */
+html[data-bc-active="true"] { --bc-readable-fill: #1f1f1f; }
+html[data-bc-active="true"][data-bc-resolved-tone="light"] { --bc-readable-fill: #fff; }
+html[data-bc-active="true"][data-bc-resolved-tone="light"] body > #root main,
+html[data-bc-active="true"][data-bc-resolved-tone="light"] aside.app-shell-left-panel,
+html[data-bc-active="true"][data-bc-resolved-tone="light"] #app-shell-sidebar {
+  background-color: rgba(255,255,255,.82) !important;
+}
+html[data-bc-active="true"] :is([role="dialog"], [role="alertdialog"],
+  [role="menu"], [role="listbox"], [role="tooltip"],
+  [data-radix-popper-content-wrapper], form:has(textarea), form:has([contenteditable="true"])) {
+  background-color: var(--bc-readable-fill) !important;
 }

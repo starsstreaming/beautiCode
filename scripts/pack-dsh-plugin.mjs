@@ -18,6 +18,7 @@ const PLUGIN_FILES = [
   "browser-injection.mjs",
   "transport.js",
   "client.js",
+  "readability.js",
   "console.js",
   "atmosphere.js",
   "presets.mjs",

@@ -42,10 +42,17 @@ export interface DesktopBackgroundContract {
   surfaceSelectors: readonly string[];
   /** Children of a readable surface that must not stack another alpha layer. */
   flattenSelectors: readonly string[];
+  /** Light-theme text regions retain a minimum backing independently of shadow. */
+  readingSelectors?: readonly string[];
+  /** Sticky input surfaces must hide the transcript behind them. */
+  opaqueSelectors?: readonly string[];
 }
 
 /** Exact host markers used to resolve the rendered theme without text matching. */
 export interface DesktopThemeContract {
+  /** Some VS Code themes attach their marker to the workbench, rather than body. */
+  classElementSelector?: string;
+  highContrastLightClassTokens?: readonly string[];
   /** Exact class tokens on the host body that mean high contrast. */
   highContrastClassTokens?: readonly string[];
   /** Exact class tokens on the host body that mean dark. */
