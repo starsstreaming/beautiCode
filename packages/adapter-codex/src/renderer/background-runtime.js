@@ -1888,6 +1888,7 @@
         if (imageInput && !handoff) imageInput.remove();
       } catch (_) {}
       if (!handoff) {
+        window.__BEAUTICODE_THEME__?.stop();
         clearStage();
         root.removeAttribute("data-bc-active");
         root.removeAttribute("data-bc-media");

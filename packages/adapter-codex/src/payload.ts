@@ -10,13 +10,16 @@ export async function loadRendererSource(): Promise<{
   runtimeIife: string;
   consoleSource: string;
 }> {
-  const [cssText, runtimeIife, consoleJs, galleryJs] = await Promise.all([
+  const [cssText, runtimeIife, consoleJs, galleryJs, themeJs] = await Promise.all([
     fs.readFile(path.join(here, "renderer", "background.css"), "utf8"),
     fs.readFile(path.join(here, "renderer", "background-runtime.js"), "utf8"),
     fs.readFile(path.join(here, "renderer", "console.js"), "utf8"),
     fs.readFile(path.join(here, "renderer", "gallery.js"), "utf8"),
+    fs.readFile(path.join(here, "renderer", "theme.js"), "utf8"),
   ]);
-  return { cssText, runtimeIife, consoleSource: `${consoleJs}\n${galleryJs}` };
+  // Resolve host appearance after media installs, including healthy re-injects.
+  const themedRuntime = `((...args) => Promise.resolve((${runtimeIife})(...args)).then(result => { ${themeJs}\nreturn result; }))`;
+  return { cssText, runtimeIife: themedRuntime, consoleSource: `${consoleJs}\n${galleryJs}` };
 }
 
 /** 1×1 PNG. Video injects must not ship the live poster as a multi-MB data URL. */
