@@ -26,6 +26,7 @@
  */
 
 import { ensureBackgroundStage } from './background-stage.js';
+import { LIGHT_THEME_ROOT } from './theme-selectors.js';
 
 /** 注入节点共用的 data-bc-injected 值。 */
 export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
@@ -34,7 +35,7 @@ export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
  * payload 世代戳：每次改 payload 内容时递增。守卫用它判断页面上的注入
  * 是否为「当前代」——旧代按钮的闭包攥着已分离的节点引用，必须全拆重建。
  */
-export const BACKGROUND_BAR_VERSION = 'v10.2';
+export const BACKGROUND_BAR_VERSION = 'v10.3';
 
 /** 注入 IIFE 字符串；幂等（守卫同时校验 entry 是否仍在 DOM，侧栏收起/重挂后可重建）。 */
 export const BACKGROUND_BAR_INJECTION: string = (function () {
@@ -154,7 +155,7 @@ styleEl.textContent = [
   '.beauticode-theme-row[data-active="true"] .beauticode-theme-dot{background:#27d7a1;border-color:#27d7a1}',
   '.beauticode-theme-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
   '.beauticode-theme-kind{font-size:11px;opacity:.58}',
-].join('');
+].join('').replaceAll('html.light', ${JSON.stringify(LIGHT_THEME_ROOT)});
 document.head.appendChild(styleEl);
 
 // ── 侧栏条目 ─────────────────────────────────────────────────────────

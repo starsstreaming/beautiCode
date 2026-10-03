@@ -30,6 +30,12 @@ const REAL_PAGE_URL =
   "file:///Applications/WorkBuddy.app/Contents/Resources/app.asar/renderer/index.html" +
   "?locale=zh-CN&accountSnapshot=%7B%22version%22%3A1%7D";
 
+test('theme aliases used by the chat shell and VS Code resolve consistently', () => {
+  for (const marker of ['light', 'cb-light', 'vscode-light', 'vs', 'vs-light']) assert.equal(readTheme(marker), 'light');
+  for (const marker of ['dark', 'cb-dark', 'vscode-dark', 'vs-dark']) assert.equal(readTheme(marker), 'dark');
+  assert.equal(readTheme('theme-switching'), null);
+});
+
 test("descriptor advertises the capabilities this runner actually honours", () => {
   assert.equal(WORKBUDDY_HOST_DESCRIPTOR.kind, "workbuddy");
   assert.equal(WORKBUDDY_HOST_DESCRIPTOR.displayName, "WorkBuddy");
@@ -122,7 +128,7 @@ test("theme is read from the html class token list, and unknown themes fail clos
   assert.equal(readTheme("light cb-light vscode-light"), "light");
   // the host emits this intermediate state during a switch
   assert.equal(readTheme("theme-switching dark cb-dark vscode-dark"), "dark");
-  assert.equal(readTheme("cb-dark"), null);
+  assert.equal(readTheme("cb-dark"), "dark");
   assert.equal(readTheme(""), null);
 });
 
