@@ -525,7 +525,7 @@ async function updateGalleryConfig(c) {
 
 async function applyAll(c, options = {}) {
   // 1) 主题（fail-closed：读不出就不上 CSS，只上 UI 并说明原因）
-  const className = await evaluate(c, 'document.documentElement.className');
+  const className = await evaluate(c, `[document.documentElement,document.body].filter(Boolean).map(n=>n.className+' '+(n.getAttribute('data-theme')||'')).join(' ')`);
   const theme = readTheme(String(className || ''));
   if (!theme) log.warn('theme-unrecognized; UI-only');
 

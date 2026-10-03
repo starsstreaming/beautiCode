@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import type { BeautiSession } from "./session.js";
+import { toChineseErrorMessage } from "@beauticode/core";
 import { pickLocalMedia } from "./native-picker.js";
 import {
   installSkinFromCenter,
@@ -18,7 +19,8 @@ type PendingSelection = {
 };
 
 function fail(error: string, code?: string) {
-  return code ? { ok: false, error, code } : { ok: false, error };
+  const message = toChineseErrorMessage(error);
+  return code ? { ok: false, error: message, code } : { ok: false, error: message };
 }
 
 export function createConsoleHost(session: BeautiSession) {
