@@ -336,6 +336,27 @@ function mountSettingsDialog(document) {
 
 const okJson = (body) => ({ ok: true, status: 200, json: async () => body });
 
+test("the readability control switches the local preference and reflects its state", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const { context, tick } = await loadConsole(document);
+  let enabled = true;
+  context.BeauticodeReadableSurfaces = {
+    get: () => enabled,
+    set: (value) => { enabled = value; },
+  };
+  const button = pageEl(document).querySelector('[data-act="readability"]');
+  assert.equal(button.getAttribute("aria-pressed"), "true");
+  button.click();
+  assert.equal(enabled, false);
+  assert.equal(button.textContent, "已关");
+  assert.equal(button.getAttribute("aria-pressed"), "false");
+  button.click();
+  assert.equal(enabled, true);
+  assert.equal(button.getAttribute("aria-pressed"), "true");
+  tick();
+});
+
 function statusBody(extra = {}) {
   return {
     ok: true,
@@ -728,9 +749,9 @@ test("console page follows the settings row recipe", async () => {
     /data-act="(?:fullscreen|sound|gallery|clear)"/,
     "no other control sits between them",
   );
-  // 7 rows: fullscreen, dim, sound, background blur, import, gallery, clear.
-  assert.equal(page.querySelectorAll(".bc-row-title").length, 7);
-  assert.equal(page.querySelectorAll(".bc-row-desc").length, 7);
+  // Display preferences plus import, gallery and clear.
+  assert.equal(page.querySelectorAll(".bc-row-title").length, 8);
+  assert.equal(page.querySelectorAll(".bc-row-desc").length, 8);
   assert.ok(page.querySelector('[data-act="sound"]'));
   assert.ok(page.querySelector('[data-act="clear"]'));
   assert.ok(page.querySelector('[data-act="gallery"]'));

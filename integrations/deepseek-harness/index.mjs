@@ -340,7 +340,12 @@ export function apply(ctx, config = {}) {
             res.writeHead(405).end();
             return;
           }
-          const source = await fs.readFile(path.join(here, "client.js"));
+          // Keep one ordered client entry point: readability owns surface
+          // preferences; client.js owns the media/transport lifecycle.
+          const scripts = await Promise.all(["readability.js", "client.js"].map(
+            (file) => fs.readFile(path.join(here, file)),
+          ));
+          const source = Buffer.concat([scripts[0], Buffer.from("\n"), scripts[1]]);
           res.writeHead(200, {
             "content-type": "text/javascript; charset=utf-8",
             "cache-control": "no-store",

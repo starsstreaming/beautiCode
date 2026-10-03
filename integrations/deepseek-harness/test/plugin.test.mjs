@@ -151,6 +151,8 @@ test("plugin publishes one ordered browser injection table for Web and Desktop",
   const response = await fetch(`${plugin.origin}/__beauticode/client.js`);
   assert.equal(response.status, 200);
   const source = await response.text();
+  assert.ok(source.indexOf("BeauticodeReadableSurfaces") < source.indexOf("__beauticodeBridgeLoaded"),
+    "surface protection initializes before the media bridge");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /waitForStablePlayback/);
   assert.match(
