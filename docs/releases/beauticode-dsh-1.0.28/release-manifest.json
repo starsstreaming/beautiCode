@@ -1,0 +1,107 @@
+{
+  "package": "beauticode-dsh",
+  "version": "1.0.28",
+  "baseline": {
+    "version": "1.0.27",
+    "tarball": "https://registry.npmjs.org/beauticode-dsh/-/beauticode-dsh-1.0.27.tgz",
+    "shasum": "4156e31bd0bad2bd167192f4b5788c3197d2043f",
+    "integrity": "sha512-igQ8QtKb2IOhp4wa/dAAQYtC3BgWa4LPi7ISsY37klq7xOXfxaQC3RJoexDKiMc1Qcb+wlsiQt3UQF1p3a+XxA=="
+  },
+  "pull_request": "https://github.com/starsstreaming/beautiCode/pull/84",
+  "source_commit": "408ad33a0a65601ac9b088e7835d47b4012da0df",
+  "file_count": 49,
+  "added_files": [],
+  "removed_files": [],
+  "changed_files": [
+    {
+      "path": "README.zh-CN.md",
+      "baseline_sha256": "2a22800597f4b182db4b61cabbaf2e05bf818ebbf2468bf640ef0f2baffe32da",
+      "candidate_sha256": "56ae46b7655bcab2ab6dd103f916276bfdde790312296bc282cf4a48a438a979"
+    },
+    {
+      "path": "client.js",
+      "baseline_sha256": "d7b5e0867f639039d560b6458449bd8d68eba51934a9ae4a3da21f730439390a",
+      "candidate_sha256": "239959e3842353d58233fe75dff815b273fe200ccd1a62f44eb68105a6c82b82"
+    },
+    {
+      "path": "package.json",
+      "baseline_sha256": "d2199da796db8f4bb22d6374d631451b3ba61b0d27b388de62f2b39a836493a6",
+      "candidate_sha256": "1099c84d2d31609e36368539f601a8dda5329296f9973cbb4b4cb7df7724ba4c"
+    }
+  ],
+  "unchanged_file_count": 46,
+  "candidate_files_sha256": {
+    "agent.mjs": "0c7cb11e0a36b74795f37ea36eeab52383bbb64bf94fc8fef13e27051829437e",
+    "atmosphere.js": "7da90489543a321706bbae1a75d0d9f7e142cb8adb16ba1a41861f5f7002351d",
+    "bin/beauticode-dsh": "f5177db8b74278386454686de1586bfbbfc1bb88fe8688c1ec2d807bfbd9fd90",
+    "browser-injection.mjs": "2a503a2751369c281f5eacd0597a6826ab0db5c05598b6689bf71ee0b7081ce8",
+    "cli.js": "d2f978ecce5f85d21b5c7ba39fd2feb50079f0b561e30bbe217b1cde03566440",
+    "client.js": "239959e3842353d58233fe75dff815b273fe200ccd1a62f44eb68105a6c82b82",
+    "console.js": "25406ab4df2b345f6988120e3880c636b6212a5482b1db21b4d5b1fcac77ca72",
+    "control-client.mjs": "86d93a5f7610776c935da221ffbe0373f63e63cd96be1e65c629a90363c7f861",
+    "cordis.patch.yml": "789d336bfd2dfb2f9853c3bcecb109b66d78fc96d9d04d3714d5d0074b47733d",
+    "gallery-host.mjs": "81e25238c673d71b3b9b655e071a3f2e08c407ef03818afc879dbb77983dba49",
+    "gallery.js": "9f92dd4c4a270ca1ac56583dd24163ca969b204414ccf87e3ecc31d64d10b8fc",
+    "host-apply.mjs": "92201bfd6660d53f50621cda2ce018c1b91e24b92d401d84719014194a6276c8",
+    "index.mjs": "9d6b3c3a059162cb472e40ba2a6936665b77dab596d277cf55c4568e42d3afc7",
+    "LICENSE": "ed62bb5cba96e802e96fa1aacf7d859cd7e6bc22e71770750f22f073108e538f",
+    "package.json": "1099c84d2d31609e36368539f601a8dda5329296f9973cbb4b4cb7df7724ba4c",
+    "presets.mjs": "70cd5a0f591df30968fddaabc2f41a537b6cd2536a71cae1f775e334c215d31e",
+    "readability.js": "c132b1be8f0bce46c45295fa7a0695f4c3820f3659674c7ccbea376875a3dd68",
+    "README.zh-CN.md": "56ae46b7655bcab2ab6dd103f916276bfdde790312296bc282cf4a48a438a979",
+    "skin-center.json": "1ecb404f8e664d18ee8775d196755bb18558fa540f757302f7f522353d4dcb1d",
+    "themes/internal-beyond/bg-canvas-4k.png": "53a5f49cfbc3ede1de4c1c08b0f2465d1664888e4c9c25d5cb218abb55fb2ca8",
+    "themes/internal-beyond/bg-canvas.png": "2203f12f67313aa54ab2bc79bd7a108dec5a25115680637c67001a4a353aa4ad",
+    "themes/internal-beyond/bg-infernal.jpg": "240315e3e74593d6b2c9163c7498bee985f0afabd6380af074c3ad5cc0141f17",
+    "themes/internal-beyond/bg-internal.jpg": "3309416dbdc1cfa185a66e9a9305339e125153d343bf119303b52266be1f2bb3",
+    "themes/internal-beyond/NOTICE.md": "550cbdac9d07fac00ca5416cb290888b8febab7dc687b5421da8408f4eb8699c",
+    "transport.js": "30acf43546d32889b333ee245260e654c65491a3f5f642fd717bbd65598a9f26",
+    "ui-host.mjs": "2a9fa54e193ec291b5a1f7bddbb841e16947b58b20076468bc9a9f22f6845b64",
+    "vendor/adapter-dsh/bridge.js": "884c349a0e4c0320cdb474a8af84680830f62a88903cbda0a0da4655ebb5df65",
+    "vendor/adapter-dsh/host-descriptor.js": "10141d09b8a9eadee6922e8d482bbb6801d1f2b28f96d699aa55db1d70782e4d",
+    "vendor/adapter-dsh/index.js": "5469cc402fd06afa2d1159d3966ea1b924152942a86b100c87ed9487946e5ad7",
+    "vendor/adapter-dsh/injector-lock.js": "c194c2a083b4d85f5d2584017b68cad5a06c92387dc63206321f0dfd32f72b74",
+    "vendor/adapter-dsh/package.json": "e7e161bc9e0de87d18b82d95b944a11afdaec38975da319b0d5dfe8305a7982c",
+    "vendor/adapter-dsh/session.js": "ab7a4532781f58cb705f2427e4e3fa8e5167bd8973e3ceda75c0cb01387d514a",
+    "vendor/adapter-dsh/token.js": "d9ddbdfe3f92939727db85ea01afcafec71449d19f4067de146fb06e165141cd",
+    "vendor/adapter-dsh/tray-handoff.js": "b8b80fd1735d207a1c7f1157aa8035c6620cafa84e5065aa93c8adb43e2f0c8c",
+    "vendor/core/apply-transaction.js": "5ee08e70557fa75347f7588bf6fd5749b8c423284eabfea809d2291bf5ef9705",
+    "vendor/core/background-store.js": "17e07903e80033c9fd2e86666314c500856ae861b69cf897b4580d467151c6d4",
+    "vendor/core/bundled-gallery.js": "c194d35e4c079e70284b6e931979737b42cb2d823445adf414a55818b1c94a0c",
+    "vendor/core/constants.js": "9cb5dec3cdd2a5a9feff55a137b3e6d67dae90c66e2a3d4f99b1e25f4587baad",
+    "vendor/core/error-message.js": "757567b9a706bd5f773440be22f719703ac5db299ff74e7d1ae72ebb9128ef30",
+    "vendor/core/file-lock.js": "8d9db8d80744a3d8a6d7a180aa3de4d71416e68886b5a1d0dffc14b14560545b",
+    "vendor/core/host-session.js": "76aade5833cd30fcb3885f0abb51ab396514bfc1a90c02f00e36d425b84a4496",
+    "vendor/core/index.js": "be5130d7e5fd813a796e5308f8d93c776d8b972b7a88766db2e4baf6b2e7f4ff",
+    "vendor/core/media-server.js": "797cbc5246474db7d21ddf5b3e999a97b1fa4c42976a3ea17ef9a543c9f7c730",
+    "vendor/core/media-source.js": "11baa59d7ddc554e86f7e00df760e54c584e11837eff0ce65d185961ac285e19",
+    "vendor/core/media-validation.js": "996ae05f6f546c92dc1930ae6735381e4b780e3db84e98f6c60f30b981102f51",
+    "vendor/core/package.json": "245673d02497aa88bf7a316abb987c2bac3979a1f7a58f8f427f56952c119820",
+    "vendor/core/paths.js": "e64609c0f3fc9ed87cda3d97df4da22f7330d9330a0b380f37dcf8b86fe356b8",
+    "vendor/core/process-liveness.js": "bed489b7874db5ca15cbe69977c47bb2809c83e71b8a57f101542b0970b798e8",
+    "vendor/core/types.js": "ab174157581c04974a33d44b4ad9638882c90d328c20773f4dfba8520c784065"
+  },
+  "candidate_tarball": {
+    "filename": "beauticode-dsh-1.0.28.tgz",
+    "bytes": 18854416,
+    "shasum": "a988f843e420c336ef7f365f60419ca714af8c5c",
+    "integrity": "sha512-Bq5Lj3d+ShtKFFBlxqfWAdAB9Em4FppTwtSvJBZxkILyjM0Ol4YFKBCkQQh++7/7q25WzmlaKl4gnM22hbxMew==",
+    "files_match": true,
+    "permissions_match_baseline": true
+  },
+  "status": "published",
+  "validation": {
+    "real_desktop_verified": false,
+    "tests_failed": 0,
+    "tests_passed": 9,
+    "commands": [
+      "node scripts/test-runner.mjs --test artifacts/releases/beauticode-dsh-1.0.28/validation/package/test/fullscreen.test.mjs artifacts/releases/beauticode-dsh-1.0.28/validation/package/test/readability.test.mjs",
+      "node scripts/test-runner.mjs --test --test-name-pattern=fullscreen artifacts/releases/beauticode-dsh-1.0.28/validation/package/test/console.test.mjs"
+    ]
+  },
+  "registry_verified_at": "2026-10-03T15:29:03.0674705+00:00",
+  "published_tarball_matches_candidate": true,
+  "dist_tags": {
+    "latest": "1.0.28"
+  }
+}
