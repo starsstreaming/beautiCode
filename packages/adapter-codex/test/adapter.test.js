@@ -1097,7 +1097,7 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
   // Light readability rides on the veil, never on a panel plate: a plate on top
   // of a veil double-dips and hides the wallpaper the user chose, so the reading
   // surfaces carry no fill rule at all.
-  assert.match(css, /--bc-scrim-val:\s*var\(--bc-dim, 0\.55\)/);
+  assert.match(css, /--bc-scrim-val:\s*var\(--bc-dim, 0\.48\)/);
   assert.doesNotMatch(css, /--bc-reading-min/);
   assert.doesNotMatch(css, /--bc-surface-alpha-pct/);
   assert.doesNotMatch(css, /body > #root main,[\s\S]{0,320}background-color: color-mix/);

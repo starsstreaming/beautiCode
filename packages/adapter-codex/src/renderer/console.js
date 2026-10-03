@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const CONSOLE_REV = 11;
+  const CONSOLE_REV = 12;
   if (window.__beauticodeConsoleRev === CONSOLE_REV && window.__beauticodeConsoleLoaded) {
     try {
       window.__beauticodeConsolePlace?.();
@@ -163,7 +163,9 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
   const themeToggle = pop.querySelector(".bc-theme-toggle");
   const themeList = pop.querySelector(".bc-theme-list");
   const msgEl = pop.querySelector(".bc-msg");
-  const AUTO_DIM_PERCENT = 42;
+  // Thumb position while the row reads 自动 — must match the renderer's shipped
+  // default (background.css --bc-scrim-val fallback).
+  const AUTO_DIM_PERCENT = 48;
   let busy = false;
   let muted = true;
   let currentThemeId = "";

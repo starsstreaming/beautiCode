@@ -38,11 +38,13 @@ html[data-bc-active="true"]:is([data-bc-resolved-tone="light"], [data-theme="lig
      chrome outside the reading surfaces — so no panel plate is ever needed (a
      plate on top of a veil double-dips and hides the wallpaper: field report
      after the first light-mode build, which shipped 82% panels + a 47% veil).
-     Measured on the reported dusk wallpaper a 50% veil turns 1.07-3.36:1 raw
-     text into 5.3-8.4:1; 55% keeps >=4.5:1 even over a pure black picture
-     (50% lands at 4.3:1). A dark host keeps the media at source brightness. */
+     0.48 is the shipped default, pinned to the brightness the user settled on.
+     Over the reported dusk wallpaper that reads 5.6-8:1 (raw text measured
+     1.07-3.36:1); over a pure black picture it is ~4.0:1, so the slider — not a
+     floor — is what a darker wallpaper is expected to raise. A dark host keeps
+     the media at source brightness. */
   --bc-scrim-rgb: 255, 255, 255;
-  --bc-scrim-val: var(--bc-dim, 0.55);
+  --bc-scrim-val: var(--bc-dim, 0.48);
   --bc-readable-fill: #fff;
   --bc-stage-fallback: #f7f8fa;
 }
