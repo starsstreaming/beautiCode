@@ -37,10 +37,12 @@ const markers = {
 };
 const sidebars = {codex:'aside',workbuddy:'[data-view-id="sidebar"]',cursor:'.ui-sidebar',doubao:'#flow_chat_sidebar'};
 const composers = {codex:'form',workbuddy:'.cr-input-container',cursor:'.ui-prompt-input__container',doubao:'.guidance-input-surface',dsh:'[data-composer-card]'};
+function luminance(values) {
+  return values.map(c => c/255).map(c => c<=.04045?c/12.92:((c+.055)/1.055)**2.4)
+    .reduce((sum,c,i) => sum+c*[.2126,.7152,.0722][i],0);
+}
 function contrastOnBlack(surface) {
   const channels = surface.text.match(/[\d.]+/g).slice(0,3).map(Number);
-  const luminance = values => values.map(c => c/255).map(c => c<=.04045?c/12.92:((c+.055)/1.055)**2.4)
-    .reduce((sum,c,i) => sum+c*[.2126,.7152,.0722][i],0);
   const background = luminance(surface.rgba.slice(0,3).map(c=>c*surface.rgba[3]/255));
   const foreground = luminance(channels);
   return (Math.max(background,foreground)+.05)/(Math.min(background,foreground)+.05);
@@ -77,15 +79,21 @@ for (const host of Object.keys(doms)) {
       await page.addStyleTag({ content: client.match(/style.textContent = `([\s\S]*?)`;/)[1].replaceAll('${CROSSFADE_MS}','180') });
       await page.addScriptTag({ content: await fs.readFile(path.join(dshDir,'readability.js'),'utf8') });
     }
-    await page.evaluate(() => {
+    await page.evaluate((host) => {
       const stage = document.getElementById('beauticode-bg-stage');
       if(stage){stage.style.backgroundImage='linear-gradient(#000,#000)';window.testStage=stage;}
       document.documentElement.dataset.bcActive='true';
       document.documentElement.dataset.bcDimUser='true';
-      document.documentElement.style.setProperty('--bc-dim','0');
-      document.documentElement.style.setProperty('--bc-scrim-val','0');
+      // Codex reads light-mode text off its veil, so this host is exercised with
+      // the shipped tone defaults: zeroing the veil (or the shadow var that feeds
+      // it) would test a combination the renderer never ships by default. Its
+      // panel slider is still zeroed to prove the veil alone carries contrast.
+      if(host!=='codex'){
+        document.documentElement.style.setProperty('--bc-dim','0');
+        document.documentElement.style.setProperty('--bc-scrim-val','0');
+      }
       document.documentElement.style.setProperty('--bc-surface-alpha-pct','0%');
-    });
+    }, host);
     for (let i=0;i<3;i++) {
       const light = i!==1;
       await page.evaluate(({host,marker,light}) => {
@@ -101,8 +109,21 @@ for (const host of Object.keys(doms)) {
           ctx.fillStyle=cs.backgroundColor;ctx.fillRect(0,0,1,1);
           return {color:cs.backgroundColor,rgba:[...ctx.getImageData(0,0,1,1).data],text:cs.color};
         };
+        const stage=document.getElementById('beauticode-bg-stage');
+        const after=stage?getComputedStyle(stage,'::after'):null;
+        // Composite the stage overlay over the black stage so the veil strength
+        // is read as the pixels a user actually sees.
+        let veil=null;
+        if(after){
+          const ctx=document.createElement('canvas').getContext('2d');
+          ctx.fillStyle='#000';ctx.fillRect(0,0,1,1);
+          ctx.fillStyle=after.backgroundColor;ctx.fillRect(0,0,1,1);
+          veil=[...ctx.getImageData(0,0,1,1).data];
+        }
         return {theme:document.documentElement.dataset.bcResolvedTone||document.documentElement.dataset.bcTheme,
-          dialog:rgb('[role=dialog]'),main:rgb('main'),sidebar:sidebar?rgb(sidebar):null,composer:rgb(composer),stageStable:!window.testStage||window.testStage===document.getElementById('beauticode-bg-stage')};
+          dialog:rgb('[role=dialog]'),main:rgb('main'),sidebar:sidebar?rgb(sidebar):null,composer:rgb(composer),
+          veil,scrim:after?after.backgroundColor:null,
+          stageStable:!window.testStage||window.testStage===document.getElementById('beauticode-bg-stage')};
       }, {sidebar:sidebars[host],composer:composers[host]});
       assert.equal(state.stageStable,true, `${host}: theme switch rebuilt media`);
       if(host==='codex'||host==='cursor'||host==='doubao')assert.equal(state.theme,light?'light':'dark',`${host}: host theme must outrank system dark preference`);
@@ -110,7 +131,20 @@ for (const host of Object.keys(doms)) {
       assert.equal(state.composer.rgba[3],255,`${host}: composer must hide the transcript`);
       if(light){
         assert.ok(state.dialog.rgba[0]>=240,`${host}: light settings retain a dark fill`);
-        if(host!=='dsh'){
+        if(host==='codex'){
+          // Codex keeps the picture: reading surfaces stay transparent and the
+          // white veil above the media supplies the contrast instead.
+          assert.equal(state.main.rgba[3],0,`${host}: light reading area must not paint a plate over the wallpaper`);
+          assert.equal(state.sidebar.rgba[3],0,`${host}: light sidebar must not paint a plate over the wallpaper`);
+          assert.ok(state.veil&&state.veil[3]===255,`${host}: no light veil over the media (${state.scrim})`);
+          assert.ok(state.veil[0]>=128&&state.veil[0]===state.veil[1]&&state.veil[1]===state.veil[2],
+            `${host}: light veil must be white, got ${state.scrim}`);
+          const veiled=luminance(state.veil.slice(0,3));
+          const textL=luminance(state.main.text.match(/[\d.]+/g).slice(0,3).map(Number));
+          const ratio=(Math.max(veiled,textL)+.05)/(Math.min(veiled,textL)+.05);
+          assert.ok(ratio>=4.5,
+            `${host}: light text over the veil on a black wallpaper is ${ratio.toFixed(2)}:1 (${state.scrim})`);
+        } else if(host!=='dsh'){
           assert.ok(state.main.rgba[0]>=240&&state.main.rgba[3]>=209,`${host}: light reading area has no white backing at zero shadow`);
           assert.ok(contrastOnBlack(state.main)>=4.5,`${host}: light text contrast on a black wallpaper is insufficient`);
           assert.ok(state.sidebar.rgba[0]>=240&&state.sidebar.rgba[3]>=209,`${host}: light sidebar text has no white backing`);

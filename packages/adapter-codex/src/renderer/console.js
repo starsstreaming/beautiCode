@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const CONSOLE_REV = 6;
+  const CONSOLE_REV = 11;
   if (window.__beauticodeConsoleRev === CONSOLE_REV && window.__beauticodeConsoleLoaded) {
     try {
       window.__beauticodeConsolePlace?.();
@@ -9,23 +9,34 @@
     }
     return;
   }
+  // Release the superseded instance before mounting this one: its observer, its
+  // 500ms place() and its document listeners otherwise survive, and two consoles
+  // then insert their hosts into the same rail slot in turn — an insert ping-pong
+  // through their childList observers that wedges the Codex renderer (field: a hot
+  // upgrade hung the window twice before this hook existed).
   try {
-    document.getElementById("beauticode-console")?.remove();
-    document.getElementById("beauticode-console-pop")?.remove();
-    document.getElementById("beauticode-gallery")?.remove();
-    document.getElementById("beauticode-name-dialog")?.remove();
-    document.querySelectorAll('style[data-beauticode-console="true"]').forEach((node) => node.remove());
+    window.__beauticodeConsoleDispose?.();
   } catch {
     /* ignore */
   }
+  let disposed = false;
   window.__beauticodeConsoleLoaded = true;
   window.__beauticodeConsoleRev = CONSOLE_REV;
   window.__beauticodeGalleryLoaded = false;
+  try {
+    document.getElementById("beauticode-name-dialog")?.remove();
+  } catch {
+    /* ignore */
+  }
 
   const IMAGE_ACCEPT = ".jpg,.jpeg,.png,.webp,.avif,image/jpeg,image/png,image/webp,image/avif";
   const VIDEO_ACCEPT = ".mp4,.mov,video/mp4,video/quicktime";
 
-  const style = document.createElement("style");
+  // Reuse the existing shell rather than replacing it: an instance from a build
+  // without __beauticodeConsoleDispose keeps driving the node it mounted, so that
+  // node has to stay exactly where it is.
+  const style = document.querySelector('style[data-beauticode-console="true"]') ??
+    document.createElement("style");
   style.dataset.beauticodeConsole = "true";
   style.textContent = `
 #beauticode-console{display:block;width:100%}
@@ -86,7 +97,9 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
 `;
   document.head.append(style);
 
-  const host = document.createElement("div");
+  // Adopt the mounted shell when present so an older, non-disposable instance
+  // cannot re-insert a second console underneath this one.
+  const host = document.getElementById("beauticode-console") ?? document.createElement("div");
   host.id = "beauticode-console";
   host.innerHTML =
     '<button type="button" class="bc-trigger" aria-expanded="false" aria-controls="beauticode-console-pop">' +
@@ -97,8 +110,9 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     "</svg>" +
     '<span class="bc-label">背景</span></button>';
 
-  const pop = document.createElement("div");
+  const pop = document.getElementById("beauticode-console-pop") ?? document.createElement("div");
   pop.id = "beauticode-console-pop";
+  pop.setAttribute("data-bc-ui", "true");
   pop.hidden = true;
   pop.innerHTML =
     '<header class="bc-head"><h2 class="bc-title">背景清单</h2><span class="bc-status">未就绪</span></header>' +
@@ -111,9 +125,15 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     "</div>" +
     '<div class="bc-dim">' +
     '<span class="bc-dim-label">阴影</span>' +
-    '<input type="range" class="bc-dim-slider" min="0" max="100" step="1" value="42" aria-label="背景阴影"/>' +
+    '<input type="range" class="bc-dim-slider" min="0" max="100" step="1" value="42" aria-label="背景亮度"/>' +
     '<span class="bc-dim-value">自动</span>' +
     '<button type="button" class="bc-btn bc-link" data-act="dim-reset" hidden>恢复默认</button>' +
+    "</div>" +
+    '<div class="bc-dim">' +
+    '<span class="bc-dim-label">模糊</span>' +
+    '<input type="range" class="bc-dim-slider bc-blur-slider" min="0" max="100" step="1" value="0" aria-label="背景模糊"/>' +
+    '<span class="bc-dim-value bc-blur-value">关</span>' +
+    '<button type="button" class="bc-btn bc-link" data-act="blur-reset" hidden>恢复默认</button>' +
     "</div>" +
     '<div class="bc-themes" hidden>' +
     '<button type="button" class="bc-theme-toggle" aria-expanded="true"><span>SAVED / 00</span><span>−</span></button>' +
@@ -121,18 +141,24 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     "</div>" +
     '<p class="bc-msg" hidden></p>';
 
-  const fileInput = document.createElement("input");
+  const fileInput = document.getElementById("beauticode-console-file") ??
+    document.createElement("input");
   fileInput.id = "beauticode-console-file";
   fileInput.type = "file";
 
-  document.body.append(pop, fileInput);
+  // append() on a node that already sits in body is a no-op away from the end.
+  if (!host.isConnected) document.body.append(pop, fileInput);
 
   const trigger = host.querySelector(".bc-trigger");
   const statusEl = pop.querySelector(".bc-status");
   const soundBtn = pop.querySelector('[data-act="sound"]');
   const dimSlider = pop.querySelector(".bc-dim-slider");
   const dimValue = pop.querySelector(".bc-dim-value");
+  const dimLabel = pop.querySelector(".bc-dim-label");
   const dimReset = pop.querySelector('[data-act="dim-reset"]');
+  const blurSlider = pop.querySelector(".bc-blur-slider");
+  const blurValue = pop.querySelector(".bc-blur-value");
+  const blurReset = pop.querySelector('[data-act="blur-reset"]');
   const themesBox = pop.querySelector(".bc-themes");
   const themeToggle = pop.querySelector(".bc-theme-toggle");
   const themeList = pop.querySelector(".bc-theme-list");
@@ -229,6 +255,131 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     dimReset.hidden = false;
   }
 
+  // Media blur is page-local and page-owned, persisted for the next injection.
+  // The brightness row (shadow in a dark host, veil in a light one) is what keeps
+  // light-mode text readable.
+  const BLUR_STORAGE_KEY = "beauticode-bg-blur";
+  const BLUR_MAX_PX = 9;
+  // place() runs for every childList mutation in a very large page, so bound how
+  // often it may re-insert the host: two actors moving it in turn (a stale
+  // instance, or the host framework re-rendering the rail) would otherwise
+  // ping-pong forever.
+  const PLACE_INSERT_WINDOW_MS = 2000;
+  const PLACE_MAX_INSERTS = 5;
+  let insertWindowAt = 0;
+  let insertCount = 0;
+  let userBlur = null;
+
+  function clampPercent(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0 || n > 1) return null;
+    return n;
+  }
+
+  function readStoredPercent(key) {
+    try {
+      const raw = globalThis.localStorage?.getItem(key);
+      if (raw == null || raw === "") return null;
+      return clampPercent(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  function writeStoredPercent(key, value) {
+    try {
+      if (value == null) globalThis.localStorage?.removeItem(key);
+      else globalThis.localStorage?.setItem(key, String(value));
+    } catch {
+      /* private mode / quota */
+    }
+  }
+
+  // Writing identical text still replaces the text node, which wakes the page's
+  // childList observer and its forced layout.
+  function setText(node, value) {
+    if (node.textContent !== value) node.textContent = value;
+  }
+
+  // Mirrors the CSS tone selector: any light marker wins, so the row label can
+  // never describe the opposite of what the stylesheet paints.
+  function isLightTone() {
+    const el = document.documentElement;
+    if (
+      el.getAttribute("data-bc-resolved-tone") === "light" ||
+      el.getAttribute("data-theme") === "light" ||
+      el.classList?.contains?.("light")
+    ) {
+      return true;
+    }
+    const body = document.body;
+    return (
+      body?.getAttribute("data-theme") === "light" ||
+      Boolean(body?.classList?.contains?.("light"))
+    );
+  }
+
+  function applyUserBlur(value) {
+    const root = document.documentElement;
+    if (value == null) {
+      try {
+        root.removeAttribute("data-bc-blur-user");
+        root.style?.removeProperty?.("--bc-bg-blur");
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
+    try {
+      // Blur bleeds at the edges; the attribute grows the media box to cover it.
+      if (value > 0) {
+        root.setAttribute("data-bc-blur-user", "true");
+        root.style?.setProperty?.("--bc-bg-blur", `${(value * BLUR_MAX_PX).toFixed(2)}px`);
+      } else {
+        root.removeAttribute("data-bc-blur-user");
+        root.style?.removeProperty?.("--bc-bg-blur");
+      }
+    } catch {
+      /* ignore */
+    }
+    return value;
+  }
+
+  function setUserBlur(value) {
+    const next = clampPercent(value);
+    if (next == null) return userBlur;
+    userBlur = next;
+    writeStoredPercent(BLUR_STORAGE_KEY, next);
+    applyUserBlur(next);
+    return next;
+  }
+
+  function clearUserBlur() {
+    userBlur = null;
+    writeStoredPercent(BLUR_STORAGE_KEY, null);
+    applyUserBlur(null);
+    return null;
+  }
+
+  userBlur = readStoredPercent(BLUR_STORAGE_KEY);
+  if (userBlur != null) applyUserBlur(userBlur);
+  globalThis.BeauticodeBackgroundBlur = {
+    get: () => userBlur,
+    set: setUserBlur,
+    clear: clearUserBlur,
+  };
+
+  function renderBlur() {
+    const current = globalThis.BeauticodeBackgroundBlur?.get?.() ?? null;
+    const percent = current == null ? 0 : Math.round(current * 100);
+    blurSlider.value = String(percent);
+    setText(blurValue, percent > 0 ? `${percent}%` : "关");
+    blurReset.hidden = current == null;
+    // The shadow row paints a white veil in a light host: same slider, and the
+    // label has to describe the direction the picture actually moves.
+    setText(dimLabel, isLightTone() ? "亮度" : "阴影");
+  }
+
   function findExploreRow() {
     const nodes = [...document.querySelectorAll('button, a, [role="button"]')];
     const candidates = nodes.filter((node) => {
@@ -274,6 +425,9 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
   }
 
   function place() {
+    // A superseded instance must not keep moving the host it mounted.
+    if (disposed) return;
+    const now = Date.now();
     const explore = findExploreRow();
     if (!explore) {
       if (host.parentElement) host.remove();
@@ -294,6 +448,12 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
       return;
     }
     if (host.parentElement !== list || host.previousElementSibling !== row) {
+      if (now - insertWindowAt > PLACE_INSERT_WINDOW_MS) {
+        insertWindowAt = now;
+        insertCount = 0;
+      }
+      if (insertCount >= PLACE_MAX_INSERTS) return;
+      insertCount += 1;
       const after = row.nextElementSibling;
       if (after) list.insertBefore(host, after);
       else list.append(host);
@@ -311,6 +471,9 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     trigger.setAttribute("aria-expanded", open ? "true" : "false");
     if (open) {
       placePop();
+      // Host appearance can flip while the pop is closed; sampling it on open
+      // keeps a closed pop free of observers on a very large tree.
+      renderBlur();
       void refresh();
     }
   }
@@ -536,6 +699,7 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     return new Promise((resolve) => {
       const dialog = document.createElement("div");
       dialog.id = "beauticode-name-dialog";
+      dialog.setAttribute("data-bc-ui", "true");
       dialog.innerHTML =
         '<div class="bc-name-card" role="dialog" aria-modal="true" aria-labelledby="beauticode-name-title">' +
         '<p id="beauticode-name-title" class="bc-name-title">给主题取个名字</p>' +
@@ -673,6 +837,18 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     renderDim();
   });
   renderDim();
+  blurSlider.addEventListener("input", () => {
+    const n = Number(blurSlider.value);
+    if (!Number.isFinite(n)) return;
+    globalThis.BeauticodeBackgroundBlur?.set?.(n / 100);
+    renderBlur();
+  });
+  blurReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    globalThis.BeauticodeBackgroundBlur?.clear?.();
+    renderBlur();
+  });
+  renderBlur();
   themeToggle.addEventListener("click", (event) => {
     event.stopPropagation();
     themesExpanded = !themesExpanded;
@@ -739,22 +915,51 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     });
   });
 
-  document.addEventListener("click", (event) => {
-    if (pop.hidden) return;
+  document.addEventListener("click", onDocumentClick);
+  document.addEventListener("keydown", onDocumentKeydown);
+  document.addEventListener("beauticode-gallery-installed", onGalleryInstalled);
+
+  function onDocumentClick(event) {
+    if (disposed || pop.hidden) return;
     if (pop.contains(event.target) || trigger.contains(event.target)) return;
     setOpen(false);
-  });
-  document.addEventListener("keydown", (event) => {
+  }
+  function onDocumentKeydown(event) {
+    if (disposed) return;
     if (event.key === "Escape" && !pop.hidden) setOpen(false);
-  });
-  document.addEventListener("beauticode-gallery-installed", () => {
+  }
+  function onGalleryInstalled() {
+    if (disposed) return;
     void refresh();
-  });
+  }
 
   const observer = new MutationObserver(() => place());
   observer.observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener("resize", place);
-  setInterval(place, 500);
+  const placeTimer = setInterval(place, 500);
   window.__beauticodeConsolePlace = place;
+
+  // A superseded instance must stop observing, re-placing and swallowing events.
+  // Instances from an older build have no disposer; adopting their DOM above
+  // keeps their place() a no-op so they cannot fight this one for the slot.
+  window.__beauticodeConsoleDispose = () => {
+    disposed = true;
+    try {
+      observer.disconnect();
+      clearInterval(placeTimer);
+      window.removeEventListener("resize", place);
+      document.removeEventListener("click", onDocumentClick);
+      document.removeEventListener("keydown", onDocumentKeydown);
+      document.removeEventListener("beauticode-gallery-installed", onGalleryInstalled);
+      host.remove();
+      pop.remove();
+      style.remove();
+      if (window.__beauticodeConsolePlace === place) delete window.__beauticodeConsolePlace;
+      delete window.__beauticodeConsoleDispose;
+    } catch {
+      /* ignore */
+    }
+  };
+
   place();
 })();

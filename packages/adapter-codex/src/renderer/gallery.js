@@ -3,7 +3,11 @@
   if (window.__beauticodeGalleryLoaded) return;
   window.__beauticodeGalleryLoaded = true;
 
-  const style = document.createElement("style");
+  // Reuse the mounted overlay when present: replacing it would drop the node an
+  // older console instance still tracks.
+  const style = document.querySelector('style[data-beauticode-gallery="true"]') ??
+    document.createElement("style");
+  style.dataset.beauticodeGallery = "true";
   style.textContent = `
 #beauticode-gallery{position:fixed;inset:0;z-index:4000;display:flex;align-items:center;justify-content:center;background:rgba(11,13,18,.62);pointer-events:auto}
 #beauticode-gallery[hidden]{display:none}
@@ -20,9 +24,13 @@
   `;
   document.head.append(style);
 
-  const host = document.createElement("div");
+  const mounted = document.getElementById("beauticode-gallery");
+  const host = mounted ?? document.createElement("div");
   host.id = "beauticode-gallery";
-  host.hidden = true;
+  // Marks the subtree as beautiCode's own UI: the renderer's readable-surface
+  // rule must not repaint it (this panel keeps its own dark palette).
+  host.setAttribute("data-bc-ui", "true");
+  if (!mounted) host.hidden = true;
   host.innerHTML =
     '<div class="bcg-panel" role="dialog" aria-modal="true" aria-labelledby="bcg-title">' +
     '<div class="bcg-head">' +
@@ -35,7 +43,7 @@
     '<p class="bcg-msg"></p>' +
     '<p class="bcg-foot"></p>' +
     "</div>";
-  document.body.append(host);
+  if (!mounted) document.body.append(host);
 
   const grid = host.querySelector(".bcg-grid");
   const msg = host.querySelector(".bcg-msg");
@@ -189,12 +197,17 @@
         busy = false;
       });
   });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !host.hidden) {
-      event.stopPropagation();
-      close();
-    }
-  });
+  // Registered once per page: a console revision change re-runs this file, and
+  // every extra keydown listener would close the same adopted overlay.
+  if (!window.__beauticodeGalleryKeydown) {
+    window.__beauticodeGalleryKeydown = (event) => {
+      if (event.key === "Escape" && !host.hidden) {
+        event.stopPropagation();
+        close();
+      }
+    };
+    document.addEventListener("keydown", window.__beauticodeGalleryKeydown);
+  }
 
   window.BeauticodeGallery = { open, close };
 })();

@@ -1084,6 +1084,45 @@ test("fish mode CSS and runtime expose data-bc-fish helpers", async () => {
     css,
     /html\[data-bc-active="true"\]\[data-bc-media="video"\]\s+#beauticode-bg-stage::before/,
   );
+  // Light handling must not hinge on theme.js: CSS also matches the host's own
+  // appearance attribute, because a stale/missing marker left near-black text on
+  // an untreated wallpaper (measured 1.07:1 contrast).
+  assert.match(
+    css,
+    /\[data-bc-resolved-tone="light"\], \[data-theme="light"\], \.light/,
+  );
+  // No :has() fallback: the tone attribute lives on <html> in every observed
+  // Codex build, and document-wide selectors are re-evaluated on each swap.
+  assert.doesNotMatch(css, /:has\(> body\[data-theme="light"\]/);
+  // Light readability rides on the veil, never on a panel plate: a plate on top
+  // of a veil double-dips and hides the wallpaper the user chose, so the reading
+  // surfaces carry no fill rule at all.
+  assert.match(css, /--bc-scrim-val:\s*var\(--bc-dim, 0\.55\)/);
+  assert.doesNotMatch(css, /--bc-reading-min/);
+  assert.doesNotMatch(css, /--bc-surface-alpha-pct/);
+  assert.doesNotMatch(css, /body > #root main,[\s\S]{0,320}background-color: color-mix/);
+  assert.match(css, /--bc-scrim-rgb:\s*255, 255, 255/);
+  assert.match(css, /\[data-composer-body\]/);
+  // beautiCode's own surfaces carry role=dialog too; the reader must not paint
+  // them — by id for already-mounted UI, and by marker for future surfaces.
+  assert.match(css, /:not\(\[data-bc-ui\], \[data-bc-ui\] \*,/);
+  assert.match(css, /#beauticode-gallery, #beauticode-gallery \*/);
+  assert.match(css, /#beauticode-console-pop, #beauticode-console-pop \*/);
+  assert.match(css, /--bc-bg-blur/);
+  // Blur stays behind an opt-in attribute: a blur filter on the full-window
+  // media is a per-frame convolution and must never sit on the default path.
+  assert.match(
+    css,
+    /\[data-bc-blur-user="true"\] #beauticode-bg-stage img[\s\S]{0,240}filter:\s*blur\(var\(--bc-bg-blur\)\)/,
+  );
+  // Blur must not move or resize the media: an inset offset with a width that
+  // cannot follow it shifted the picture and left a bare strip on the right.
+  assert.doesNotMatch(css, /\[data-bc-blur-user="true"\][\s\S]{0,200}inset:\s*-/);
+  assert.doesNotMatch(css, /\[data-bc-blur-user="true"\][\s\S]{0,200}width:\s*calc\(100% \+/);
+  assert.match(css, /--bc-stage-fallback/);
+  // The default media path keeps the plain tone filter.
+  assert.match(css, /border:\s*0;\s*filter:\s*var\(--bc-video-filter\);/);
+  assert.doesNotMatch(css, /rgba\(255,255,255,\.82\)/);
 });
 
 test("BeautiSession video mute defaults on and toggles without rebuild", async () => {

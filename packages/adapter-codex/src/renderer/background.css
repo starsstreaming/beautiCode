@@ -16,6 +16,37 @@ html[data-bc-tone="light"] {
   }
 }
 
+/* ---- Tone tokens (same model as adapter-desktop-cdp) ----
+   One model for both appearances: a scrim over the media and an opaque fill for
+   functional panels; reading chrome stays transparent so the wallpaper shows at
+   source strength. Tone prefers the marker theme.js writes and falls back to the
+   host's own appearance attribute on <html> (field: Codex 26.x sets
+   data-theme="light" there), because light handling must not hinge on a script
+   that runs after media installs. No :has() fallback on purpose: every extra
+   document-wide selector is re-evaluated on each injected-stylesheet swap. */
+html[data-bc-active="true"] {
+  --bc-scrim-rgb: 0, 0, 0;
+  --bc-scrim-val: var(--bc-dim, 0);
+  --bc-readable-fill: #1f1f1f;
+  --bc-bg-blur: 0px;
+  --bc-stage-fallback: #101114;
+}
+
+html[data-bc-active="true"]:is([data-bc-resolved-tone="light"], [data-theme="light"], .light) {
+  /* Light chrome paints near-black text, so the media needs a white veil. The
+     veil carries readability on its own — it lifts every pixel, including the
+     chrome outside the reading surfaces — so no panel plate is ever needed (a
+     plate on top of a veil double-dips and hides the wallpaper: field report
+     after the first light-mode build, which shipped 82% panels + a 47% veil).
+     Measured on the reported dusk wallpaper a 50% veil turns 1.07-3.36:1 raw
+     text into 5.3-8.4:1; 55% keeps >=4.5:1 even over a pure black picture
+     (50% lands at 4.3:1). A dark host keeps the media at source brightness. */
+  --bc-scrim-rgb: 255, 255, 255;
+  --bc-scrim-val: var(--bc-dim, 0.55);
+  --bc-readable-fill: #fff;
+  --bc-stage-fallback: #f7f8fa;
+}
+
 /* Clear opaque page backdrops so the fixed stage can show through. */
 html[data-bc-active="true"],
 html[data-bc-active="true"] body {
@@ -82,13 +113,12 @@ html[data-bc-active="true"] body >
   background: none;
 }
 
-html[data-bc-dim-user="true"][data-bc-active="true"] #beauticode-bg-stage::after {
-  background: rgba(0, 0, 0, var(--bc-dim)) !important;
-}
-
-html[data-bc-resolved-tone="light"][data-bc-dim-user="true"][data-bc-active="true"]
+/* Scrim colour follows the tone, so shadow never darkens a light host.
+   Light always paints its veil; dark paints only a user shadow. */
+html[data-bc-dim-user="true"][data-bc-active="true"] #beauticode-bg-stage::after,
+html[data-bc-active="true"]:is([data-bc-resolved-tone="light"], [data-theme="light"], .light)
   #beauticode-bg-stage::after {
-  background: rgba(255, 255, 255, var(--bc-dim)) !important;
+  background: rgba(var(--bc-scrim-rgb), var(--bc-scrim-val)) !important;
 }
 
 #beauticode-bg-stage img,
@@ -102,6 +132,25 @@ html[data-bc-resolved-tone="light"][data-bc-dim-user="true"][data-bc-active="tru
   object-position: 50% 50%;
   pointer-events: none;
   border: 0;
+  filter: var(--bc-video-filter);
+}
+
+/* Blur is opt-in: a blur() on the full-window media forces an intermediate
+   surface plus a convolution every frame, which stalls software compositing
+   (field: renderer spun at ~75% CPU with Runtime.evaluate stuck). Never add it
+   for the default path.
+   The media box stays exactly where it is: growing it (inset + width) shifted
+   the picture and, because the width could not follow the offset, left a bare
+   strip along the right edge that showed the page behind it as a white band.
+   A blur of r bleeds ~r past the box instead, which blends into the tone
+   backdrop below. */
+html[data-bc-blur-user="true"] #beauticode-bg-stage {
+  background: var(--bc-stage-fallback) !important;
+}
+
+html[data-bc-blur-user="true"] #beauticode-bg-stage img,
+html[data-bc-blur-user="true"] #beauticode-bg-stage video {
+  filter: blur(var(--bc-bg-blur)) var(--bc-video-filter);
 }
 
 #beauticode-bg-stage img {
@@ -114,7 +163,6 @@ html[data-bc-resolved-tone="light"][data-bc-dim-user="true"][data-bc-active="tru
      Pending replacements stay opacity:0 via inline style so a handed-off
      previous video (no inline opacity) can remain visible underneath. */
   opacity: 0;
-  filter: var(--bc-video-filter);
 }
 
 /* Ready video: beat leftover inline opacity:0 from a second blob attach. */
@@ -292,17 +340,21 @@ html[data-bc-active="true"][data-bc-fish="true"] #beauticode-video-input {
   visibility: hidden !important;
 }
 
-/* Light-theme text needs a reading substrate even when wallpaper shadow is 0.
-   Keep host text colors and media tone untouched; surface color follows the app. */
-html[data-bc-active="true"] { --bc-readable-fill: #1f1f1f; }
-html[data-bc-active="true"][data-bc-resolved-tone="light"] { --bc-readable-fill: #fff; }
-html[data-bc-active="true"][data-bc-resolved-tone="light"] body > #root main,
-html[data-bc-active="true"][data-bc-resolved-tone="light"] aside.app-shell-left-panel,
-html[data-bc-active="true"][data-bc-resolved-tone="light"] #app-shell-sidebar {
-  background-color: rgba(255,255,255,.82) !important;
-}
+/* Functional panels hold their own text; keep them opaque in both tones.
+   Reading chrome is deliberately absent from this rule: its transparency is the
+   point, and the veil above the media supplies the contrast. Codex mounts the
+   composer as [data-composer-body], not a form. beautiCode's own surfaces are
+   excluded — the skin centre panel carries role="dialog" and paints its own dark
+   palette — by id (works for already-mounted UI) and by the data-bc-ui marker
+   (covers surfaces added later). */
 html[data-bc-active="true"] :is([role="dialog"], [role="alertdialog"],
   [role="menu"], [role="listbox"], [role="tooltip"],
-  [data-radix-popper-content-wrapper], form:has(textarea), form:has([contenteditable="true"])) {
+  [data-radix-popper-content-wrapper], [data-composer-body],
+  form:has(textarea),
+  form:has([contenteditable="true"])):not([data-bc-ui], [data-bc-ui] *,
+    #beauticode-console, #beauticode-console *,
+    #beauticode-console-pop, #beauticode-console-pop *,
+    #beauticode-gallery, #beauticode-gallery *,
+    #beauticode-name-dialog, #beauticode-name-dialog *) {
   background-color: var(--bc-readable-fill) !important;
 }
