@@ -98,20 +98,29 @@ var flatten=scope(CFG.contract.flattenSelectors);
 var reading=(CFG.contract.readingSelectors||[]).map(function(s){return 'html[data-bc-active="true"]:is([data-bc-light="true"],[data-bc-theme="high-contrast"]) '+s}).join(',');
 var opaque=scope(['[role="dialog"]','[role="alertdialog"]','[role="menu"]','[role="listbox"]','[role="tooltip"]'].concat(CFG.contract.opaqueSelectors||[]));
 style.textContent='html{--bc-surface-base:#1f1f1f;--bc-surface-alpha-pct:82%;--bc-scrim-val:.28;--bc-bg-blur:0px;--bc-stage-fallback:#101114;--bc-scrim-rgb:0,0,0;--bc-panel-bg:rgba(31,31,31,.97);--bc-panel-text:#eee;--bc-panel-border:rgba(255,255,255,.18);--bc-control-bg:rgba(255,255,255,.08);--bc-control-border:rgba(255,255,255,.17);--bc-overlay-rgb:0,0,0}' +
-  'html[data-bc-theme="light"]{--bc-surface-base:#fff;--bc-scrim-val:.12;--bc-stage-fallback:#f7f8fa;--bc-scrim-rgb:255,255,255;--bc-panel-bg:rgba(255,255,255,.97);--bc-panel-text:#202124;--bc-panel-border:rgba(0,0,0,.16);--bc-control-bg:rgba(0,0,0,.05);--bc-control-border:rgba(0,0,0,.16);--bc-overlay-rgb:255,255,255}' +
+  // A light host reads its text off the white veil, not off panel plates (same
+  // call as the Codex adapter): reading surfaces get no floor and the veil takes
+  // the contrast, so the wallpaper stays visible. High contrast still floors at
+  // 100% below.
+  'html[data-bc-theme="light"]{--bc-surface-base:#fff;--bc-scrim-val:.48;--bc-reading-min:0%;--bc-stage-fallback:#f7f8fa;--bc-scrim-rgb:255,255,255;--bc-panel-bg:rgba(255,255,255,.97);--bc-panel-text:#202124;--bc-panel-border:rgba(0,0,0,.16);--bc-control-bg:rgba(0,0,0,.05);--bc-control-border:rgba(0,0,0,.16);--bc-overlay-rgb:255,255,255}' +
   'html[data-bc-theme="high-contrast"]{--bc-surface-base:#000;--bc-surface-alpha-pct:90%;--bc-scrim-val:.18;--bc-stage-fallback:#000;--bc-scrim-rgb:0,0,0;--bc-panel-bg:#000;--bc-panel-text:#fff;--bc-panel-border:#fff;--bc-control-bg:#000;--bc-control-border:#fff;--bc-overlay-rgb:0,0,0}' +
   'html[data-bc-theme="high-contrast-light"]{--bc-surface-base:#fff;--bc-stage-fallback:#fff;--bc-scrim-rgb:255,255,255;--bc-panel-bg:#fff;--bc-panel-text:#000;--bc-panel-border:#000;--bc-control-bg:#fff;--bc-control-border:#000;--bc-overlay-rgb:255,255,255}' +
   'html[data-bc-active="true"],html[data-bc-active="true"] body{background:transparent!important}body{isolation:isolate}' +
   '#beauticode-bg-stage{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:var(--bc-stage-fallback)}' +
   'html[data-bc-active="true"] #beauticode-bg-stage{background:var(--bc-stage-fallback)}' +
-  '#beauticode-bg-stage .bc-media{position:absolute;inset:-12px;width:calc(100% + 24px);height:calc(100% + 24px);object-fit:cover;filter:blur(var(--bc-bg-blur));pointer-events:none}' +
+  // The media keeps its exact box: growing it shifted the picture and, when the
+  // width could not follow the offset, left a bare strip that showed the page
+  // behind. Blur is opt-in as well — a per-frame convolution must not sit on the
+  // default path.
+  '#beauticode-bg-stage .bc-media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}' +
+  'html[data-bc-blur-user] #beauticode-bg-stage .bc-media{filter:blur(var(--bc-bg-blur))}' +
   '#beauticode-bg-stage:after{content:"";position:absolute;inset:0;background:transparent;pointer-events:none}' +
   'html[data-bc-active="true"] #beauticode-bg-stage:after{background:rgba(var(--bc-scrim-rgb),var(--bc-scrim-val))}' +
   (backdrop?backdrop+'{background-color:transparent!important;background-image:none!important}':'') +
   (surfaces?surfaces+'{background-color:color-mix(in srgb,var(--bc-surface-base) var(--bc-surface-alpha-pct),transparent)!important;backdrop-filter:none!important}':'') +
   (flatten?flatten+'{background-color:transparent!important;background-image:none!important}':'') +
   'html[data-bc-theme^="high-contrast"]{--bc-reading-min:100%}' +
-  (reading?reading+'{background-color:color-mix(in srgb,var(--bc-surface-base) max(var(--bc-reading-min,82%),var(--bc-surface-alpha-pct)),transparent)!important}':'') +
+  (reading?reading+'{background-color:color-mix(in srgb,var(--bc-surface-base) max(var(--bc-reading-min,0%),var(--bc-surface-alpha-pct)),transparent)!important}':'') +
   opaque+'{background-color:var(--bc-surface-base)!important}' +
   '.bc-desktop-pop,.bc-desktop-dialog *,.bc-desktop-pop *{box-sizing:border-box}' +
   '.bc-desktop-pop{position:fixed;z-index:2147483000;width:340px;max-height:calc(100vh - 24px);overflow:auto;padding:6px;border-radius:16px;background:var(--bc-panel-bg);color:var(--bc-panel-text);border:1px solid var(--bc-panel-border);box-shadow:0 22px 55px rgba(0,0,0,.42);font:14px -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;display:none}' +
@@ -134,7 +143,7 @@ window.__bcDesktopPersistStore=PERSIST;if(!Array.isArray(PERSIST.themes))PERSIST
 function persist(){PERSIST.schema=CFG.schema;window.__bcDesktopPersistDirty=(window.__bcDesktopPersistDirty||0)+1}
 window.__bcDesktopPersistGet=function(){return JSON.stringify(PERSIST)};
 function clearMedia(){stage.querySelectorAll('.bc-media').forEach(function(n){var u=n.dataset.blobUrl;if(u)URL.revokeObjectURL(u);n.remove()});root.removeAttribute('data-bc-active');root.removeAttribute('data-bc-media')}
-function setVars(){root.style.setProperty('--bc-scrim-val',String(Math.max(0,Math.min(100,+PERSIST.dim||0))/100));root.style.setProperty('--bc-bg-blur',(Math.max(0,Math.min(100,+PERSIST.blur||0))*.09).toFixed(2)+'px');root.style.setProperty('--bc-surface-alpha-pct',(100-Math.max(0,Math.min(100,+PERSIST.alpha||0)))+'%')}
+function setVars(){root.style.setProperty('--bc-scrim-val',String(Math.max(0,Math.min(100,+PERSIST.dim||0))/100));root.style.setProperty('--bc-bg-blur',(Math.max(0,Math.min(100,+PERSIST.blur||0))*.09).toFixed(2)+'px');root.style.setProperty('--bc-surface-alpha-pct',(100-Math.max(0,Math.min(100,+PERSIST.alpha||0)))+'%');var b=Math.max(0,Math.min(100,+PERSIST.blur||0));if(b>0)root.setAttribute('data-bc-blur-user','');else root.removeAttribute('data-bc-blur-user')}
 setVars();
 
 var pop=document.createElement('div');pop.id=PANEL;pop.className='bc-desktop-pop';pop.setAttribute('data-bc-desktop',CFG.kind);document.body.appendChild(pop);
@@ -187,5 +196,5 @@ root.setAttribute('data-bc-desktop-host',CFG.kind);root.setAttribute('data-bc-de
 }
 
 export function buildDesktopBackgroundCleanup(kind: "cursor" | "doubao"): string {
-  return `(()=>{if(window.__bcDesktopAbort){try{window.__bcDesktopAbort.abort()}catch(e){}}if(window.__bcDesktopThemeObserver){try{window.__bcDesktopThemeObserver.disconnect()}catch(e){}}document.querySelectorAll('[data-bc-desktop="${kind}"]').forEach(n=>n.remove());const r=document.documentElement;r.removeAttribute('data-bc-desktop-host');r.removeAttribute('data-bc-desktop-build');r.removeAttribute('data-bc-active');r.removeAttribute('data-bc-media');r.removeAttribute('data-bc-light');r.removeAttribute('data-bc-theme');r.style.removeProperty('--bc-scrim-val');r.style.removeProperty('--bc-bg-blur');r.style.removeProperty('--bc-surface-alpha-pct');delete window.__bcDesktopAbort;delete window.__bcDesktopThemeObserver;delete window.__bcDesktopThemeMedia;delete window.__bcDesktopPersistStore;delete window.__bcDesktopPersistGet;delete window.__bcDesktopRestoreState;delete window.__bcDesktopPrepareFile;delete window.__bcDesktopApplyGallery;delete window.__bcDesktopApplyRequest;delete window.__bcDesktopPickRequest;delete window.__bcDesktopSkinCenterRequest;return 'cleaned'})()`;
+  return `(()=>{if(window.__bcDesktopAbort){try{window.__bcDesktopAbort.abort()}catch(e){}}if(window.__bcDesktopThemeObserver){try{window.__bcDesktopThemeObserver.disconnect()}catch(e){}}document.querySelectorAll('[data-bc-desktop="${kind}"]').forEach(n=>n.remove());const r=document.documentElement;r.removeAttribute('data-bc-desktop-host');r.removeAttribute('data-bc-desktop-build');r.removeAttribute('data-bc-active');r.removeAttribute('data-bc-media');r.removeAttribute('data-bc-light');r.removeAttribute('data-bc-theme');r.removeAttribute('data-bc-blur-user');r.style.removeProperty('--bc-scrim-val');r.style.removeProperty('--bc-bg-blur');r.style.removeProperty('--bc-surface-alpha-pct');delete window.__bcDesktopAbort;delete window.__bcDesktopThemeObserver;delete window.__bcDesktopThemeMedia;delete window.__bcDesktopPersistStore;delete window.__bcDesktopPersistGet;delete window.__bcDesktopRestoreState;delete window.__bcDesktopPrepareFile;delete window.__bcDesktopApplyGallery;delete window.__bcDesktopApplyRequest;delete window.__bcDesktopPickRequest;delete window.__bcDesktopSkinCenterRequest;return 'cleaned'})()`;
 }

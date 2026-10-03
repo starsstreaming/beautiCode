@@ -211,6 +211,7 @@ function createConsoleDocument() {
   document.body = body;
   documentElement.append(head, body);
   document.querySelectorAll = (selector) => documentElement.querySelectorAll(selector);
+  document.querySelector = (selector) => documentElement.querySelector(selector);
   document.getElementById = (id) => documentElement.querySelector(`#${id}`);
   return document;
 }
@@ -259,6 +260,7 @@ async function loadConsole(document, initialState = {}) {
     tick() {
       for (const fn of ticks) fn();
     },
+    context,
   };
 }
 
@@ -277,8 +279,41 @@ test("a previous console revision is replaced on reinjection after Codex UI upgr
   assert.equal(document.getElementById("beauticode-console")?.previousElementSibling?.id, explore.id);
 });
 
-test("console mounts below 探索 in the Codex rail", async () => {
+test("a superseded console instance is disposed on reinjection", async () => {
   const document = createConsoleDocument();
+  mountCodexSidebar(document);
+  let disposed = 0;
+  const runtime = await loadConsole(document, {
+    __beauticodeConsoleRev: 4,
+    __beauticodeConsoleDispose: () => { disposed += 1; },
+  });
+  assert.equal(disposed, 1, "the previous instance must be released before remounting");
+  assert.equal(typeof runtime.context.__beauticodeConsoleDispose, "function", "a disposer is left for the next upgrade");
+});
+
+test("an older instance without a disposer cannot add a second console to the rail", async () => {
+  const document = createConsoleDocument();
+  mountCodexSidebar(document);
+  const first = await loadConsole(document);
+  first.tick();
+  const mounted = document.getElementById("beauticode-console");
+  assert.ok(mounted, "first instance mounts a console");
+  // The upgrade runs in the same page: the mounted instance is older, has no
+  // disposer, and keeps re-asserting whatever host it mounted.
+  const second = await loadConsole(document, {
+    __beauticodeConsoleRev: 1,
+    __beauticodeConsolePlace: () => {
+      const stale = document.getElementById("beauticode-console");
+      if (stale) document.body.append(stale);
+    },
+  });
+  second.tick();
+  const hosts = document.documentElement.querySelectorAll("#beauticode-console");
+  assert.equal(hosts.length, 1, "two consoles in one rail fight through their observers and wedge the renderer");
+  assert.equal(hosts[0], mounted, "the new instance adopts the mounted shell instead of replacing it");
+});
+
+test("console mounts below 探索 in the Codex rail", async () => {  const document = createConsoleDocument();
   const { nav, explore } = mountCodexSidebar(document);
   const runtime = await loadConsole(document);
 
@@ -379,6 +414,11 @@ test("console pop keeps DSH 背景清单 controls", async () => {
   assert.match(pop.innerHTML, /class="bc-dim-slider"/);
   assert.match(pop.innerHTML, /恢复默认/);
   assert.equal(pop.querySelector(".bc-dim-value")?.textContent, "自动");
+  assert.match(pop.innerHTML, /class="bc-dim-slider bc-blur-slider"/);
+  assert.equal(pop.querySelector(".bc-blur-value")?.textContent, "关");
+  // The panel control is gone: reading chrome stays transparent by design.
+  assert.doesNotMatch(pop.innerHTML, /bc-surface-slider/);
+  assert.equal(pop.querySelectorAll(".bc-dim").length, 2, "only brightness and blur remain");
 });
 
 test("console wires dim API and opens gallery overlay", async () => {
@@ -391,6 +431,17 @@ test("console wires dim API and opens gallery overlay", async () => {
     "utf8",
   );
   assert.match(consoleSource, /BeauticodeBackgroundDim/);
+  assert.match(consoleSource, /BeauticodeBackgroundBlur/);
+  assert.doesNotMatch(consoleSource, /BeauticodeBackgroundSurface/);
+  assert.match(consoleSource, /--bc-bg-blur/);
+  // The brightness row renames itself with host appearance: white veil in light,
+  // shadow in dark.
+  assert.match(consoleSource, /isLightTone\(\) \? "亮度" : "阴影"/);
+  // place() must stay bounded: it runs per childList mutation and forces layout.
+  assert.match(consoleSource, /PLACE_MAX_INSERTS/);
+  assert.match(consoleSource, /if \(disposed\) return;/);
+  assert.match(consoleSource, /data-bc-ui/);
+  assert.match(gallerySource, /data-bc-ui/);
   assert.match(consoleSource, /BeauticodeGallery\.open/);
   assert.doesNotMatch(consoleSource, /Codex 无法打开远程皮肤中心/);
   assert.match(gallerySource, /window\.BeauticodeGallery = \{ open, close \}/);

@@ -7,6 +7,7 @@ import {
   FLATTEN_SELECTORS,
   MASK_SELECTORS,
   SCRIM_BY_THEME,
+  SCRIM_RGB_VAR,
   SCRIM_VAR,
   SEMANTIC_TINT_SELECTORS,
   STAGE_ID,
@@ -228,6 +229,20 @@ test("scrim and surface alpha are overridable", () => {
   assert.ok(buildContractCss({ theme: "light" }).includes(`${SCRIM_VAR}:${SCRIM_BY_THEME.light}`));
   assert.ok(buildContractCss({ theme: "dark", scrim: 0.5 }).includes(`${SCRIM_VAR}:0.5`));
   assert.ok(buildContractCss({ theme: "dark", surfaceAlpha: 0.9 }).includes(`${SURFACE_ALPHA_VAR}:0.9`));
+});
+
+test("light mode reads off the white veil instead of a panel plate", () => {
+  const css = buildContractCss({ theme: "light" });
+  // Same call as the Codex adapter: the veil carries light-mode contrast.
+  assert.equal(SCRIM_BY_THEME.light, 0.48);
+  assert.match(css, new RegExp(`${SCRIM_RGB_VAR}:255,255,255`));
+  assert.match(css, new RegExp(`${SCRIM_RGB_VAR}:0,0,0`));
+  assert.match(css, /background:rgba\(var\(--bc-scrim-rgb,0,0,0\),var\(--bc-scrim\)\)/);
+  // Reading areas honour the transparency the user picked — no 82% floor, which
+  // used to stack with the veil and hide the wallpaper.
+  assert.equal(css.includes("max(82%"), false);
+  assert.match(css, /color-mix\(in srgb,#fff var\(--bc-surface-alpha-pct,0%\),transparent\)/);
+  assert.match(css, /rgba\(255,255,255,var\(--bc-scrim-val,0\.48\)\)/);
 });
 
 test("contract anchors and attributes stay in sync with the self-check", () => {
