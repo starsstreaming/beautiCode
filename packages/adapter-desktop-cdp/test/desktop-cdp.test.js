@@ -441,8 +441,25 @@ test('desktop renderer has an explicit host theme contract and idempotent live r
   assert.match(source, /data-bc-active="true"/);
 });
 
-test('desktop runners fail closed on stale identities and preserve video skin types', () => {
-  const source = fs.readFileSync(new URL('../../../scripts/desktop-cdp-runner.mjs', import.meta.url), 'utf8');
+test('light hosts read off the veil, and blur never moves the media', () => {
+  const source = buildDesktopBackgroundInjection(spec);
+  // Same call as the Codex adapter: the light veil carries the contrast, so the
+  // reading surfaces carry no floor (that 82% plate stacked with the veil and hid
+  // the wallpaper). High contrast still floors at 100%.
+  assert.match(source, /html\[data-bc-theme="light"\]\{--bc-surface-base:#fff;--bc-scrim-val:\.48;--bc-reading-min:0%/);
+  assert.match(source, /max\(var\(--bc-reading-min,0%\),var\(--bc-surface-alpha-pct\)\)/);
+  assert.match(source, /html\[data-bc-theme\^="high-contrast"\]\{--bc-reading-min:100%\}/);
+  // The media keeps its exact box (an inflated box shifted the picture and left
+  // a bare strip on the right) and blur stays behind an opt-in attribute.
+  assert.match(source, /\.bc-media\{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none\}/);
+  assert.match(source, /html\[data-bc-blur-user\] #beauticode-bg-stage \.bc-media\{filter:blur\(var\(--bc-bg-blur\)\)\}/);
+  assert.doesNotMatch(source, /inset:-12px/);
+  assert.doesNotMatch(source, /calc\(100% \+ 24px\)/);
+  assert.match(source, /setAttribute\('data-bc-blur-user'/);
+  assert.match(source, /removeAttribute\('data-bc-blur-user'\)/);
+});
+
+test('desktop runners fail closed on stale identities and preserve video skin types', () => {  const source = fs.readFileSync(new URL('../../../scripts/desktop-cdp-runner.mjs', import.meta.url), 'utf8');
   assert.match(source, /assertStableMedia\(resolved, checked\.identity\)/);
   assert.match(source, /downloadApprovedAsset\(item, item\.type/);
   assert.match(source, /createElement\(s\.type==='video'\?'video':'img'\)/);

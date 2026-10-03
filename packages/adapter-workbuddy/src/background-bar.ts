@@ -77,9 +77,10 @@ styleEl.setAttribute('data-bc-injected', BC);
 styleEl.textContent = [
   '#beauticode-bg-stage{background-color:#101114}',
   // 蒙版：!important 压过契约的字面量规则（html:root 前缀特异性更高，不用 !important 赢不了）；
-  // 颜色跟主题（深=黑纱 / 浅=白纱），浓度由滑杆驱动的 --bc-scrim-val 控制，0 = 主题默认
+  // 颜色跟主题（深=黑纱 / 浅=白纱），浓度由滑杆驱动的 --bc-scrim-val 控制；
+  // 未动滑杆时回落到主题默认——浅色 0.48 与 codex 的出厂白纱一致（浅色下可读性靠它，不靠面板白底）
   'html:root #beauticode-bg-stage::after{background:rgba(0,0,0,var(--bc-scrim-val,0)) !important}',
-  'html.light #beauticode-bg-stage::after{background:rgba(255,255,255,var(--bc-scrim-val,0)) !important}',
+  'html.light #beauticode-bg-stage::after{background:rgba(255,255,255,var(--bc-scrim-val,0.48)) !important}',
   '#beauticode-bg-stage .bc-media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}',
   'html[data-bc-bg-blur] #beauticode-bg-stage .bc-media{filter:blur(var(--bc-bg-blur,0px))}',
   // 弹窗表面（宿主 popover 配方实测值，深/浅两套）

@@ -22,6 +22,8 @@ import { buildReadableSurfaceCss } from './readability.js';
 export const STAGE_ID = "beauticode-bg-stage";
 export const STYLE_ID = "beauticode-contract-style";
 export const SCRIM_VAR = "--bc-scrim";
+/** Scrim colour, keyed per theme: white lift for light, black shade for dark. */
+export const SCRIM_RGB_VAR = "--bc-scrim-rgb";
 export const SURFACE_ALPHA_VAR = "--bc-surface-alpha";
 /** Our own neutral base colour for explicit surface rules. */
 export const SURFACE_BASE_VAR = "--bc-surface-base";
@@ -202,10 +204,19 @@ export const CONTRACT_ANCHORS: readonly ContractAnchor[] = Object.freeze([
 
 export type WorkBuddyTheme = "dark" | "light";
 
-/** Scrim opacity by theme. Starting points, to be tuned during M1 acceptance. */
+/** Scrim opacity by theme. Light matches the Codex light veil default. */
 export const SCRIM_BY_THEME: Readonly<Record<WorkBuddyTheme, number>> = Object.freeze({
   dark: 0.28,
-  light: 0.12,
+  light: 0.48,
+});
+
+/**
+ * Scrim colour by theme. The veil lifts a light host and shades a dark one; a
+ * black veil on a light UI is what the theme-keyed rules now cannot produce.
+ */
+export const SCRIM_RGB_BY_THEME: Readonly<Record<WorkBuddyTheme, string>> = Object.freeze({
+  dark: "0,0,0",
+  light: "255,255,255",
 });
 
 /**
@@ -265,16 +276,16 @@ export function buildContractCss(options: ContractCssOptions): string {
    */
   const DARK_SELECTOR =
     `html:root.dark,html.dark,html.cb-dark,body.dark,body.cb-dark,body[data-theme="dark"],[data-theme="dark"],${DARK_THEME_ROOT}`;
-  const themeVars = (b: string, sc: number): string =>
-    `${SURFACE_ALPHA_VAR}:${alpha};${SURFACE_BASE_VAR}:${b};${SCRIM_VAR}:${sc};`;
+  const themeVars = (b: string, sc: number, rgb: string): string =>
+    `${SURFACE_ALPHA_VAR}:${alpha};${SURFACE_BASE_VAR}:${b};${SCRIM_VAR}:${sc};${SCRIM_RGB_VAR}:${rgb};`;
 
   // An explicit scrim override applies to the theme in effect; the other theme
   // keeps its default so a later switch still looks right.
   const scrimLight = theme === "light" ? (options.scrim ?? SCRIM_BY_THEME.light) : SCRIM_BY_THEME.light;
   const scrimDark = theme === "dark" ? (options.scrim ?? SCRIM_BY_THEME.dark) : SCRIM_BY_THEME.dark;
 
-  parts.push(`html:root{${themeVars(SURFACE_BASE_BY_THEME.light, scrimLight)}}`);
-  parts.push(`${DARK_SELECTOR}{${themeVars(SURFACE_BASE_BY_THEME.dark, scrimDark)}}`);
+  parts.push(`html:root{${themeVars(SURFACE_BASE_BY_THEME.light, scrimLight, SCRIM_RGB_BY_THEME.light)}}`);
+  parts.push(`${DARK_SELECTOR}{${themeVars(SURFACE_BASE_BY_THEME.dark, scrimDark, SCRIM_RGB_BY_THEME.dark)}}`);
 
   parts.push(`${BACKDROP_SELECTORS.join(",")}{background-color:transparent !important;}`);
 
@@ -300,11 +311,11 @@ export function buildContractCss(options: ContractCssOptions): string {
       `#${STAGE_ID} img,#${STAGE_ID} video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;}` +
       `#${STAGE_ID} img{z-index:1;}` +
       `#${STAGE_ID} video{z-index:2;opacity:0;}` +
-      // reads the theme-keyed variable, so the scrim follows a theme switch too
-      `#${STAGE_ID}::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:rgba(0,0,0,var(${SCRIM_VAR}));}` +
+      // reads the theme-keyed colour+opacity, so the scrim follows a theme switch
+      `#${STAGE_ID}::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:rgba(var(${SCRIM_RGB_VAR},0,0,0),var(${SCRIM_VAR}));}` +
       (scrimForStage === undefined
         ? ""
-        : `html:root #${STAGE_ID}::after{background:rgba(0,0,0,${scrimForStage});}`) +
+        : `html:root #${STAGE_ID}::after{background:rgba(var(${SCRIM_RGB_VAR},0,0,0),${scrimForStage});}`) +
       `html[data-bc-active="true"][data-bc-media="video"][data-bc-video-ready="true"] #${STAGE_ID} video{opacity:1;}` +
       `html[data-bc-active="true"][data-bc-media="video"][data-bc-video-ready="true"] #${STAGE_ID} img{display:none !important;}`,
   );
