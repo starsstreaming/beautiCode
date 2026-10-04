@@ -13,7 +13,7 @@ import {
 import { acquireCodexGuardianLease, startCodexHelperWatchdog } from "../../../integrations/codex-desktop/codex-watchdog.mjs";
 import { classifyCodexStartupProcess } from "../dist/launch.js";
 
-const HELPER_HOME = "C:\\Users\\me\\AppData\\Local\\beautiCode\\codex-plugin";
+const HELPER_HOME = path.resolve(os.tmpdir(), "beauticode-test", "codex-plugin");
 
 test("second outer guardian cannot acquire a live lease", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-guardian-"));

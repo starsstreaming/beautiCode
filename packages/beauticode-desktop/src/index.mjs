@@ -441,6 +441,9 @@ export function resolveRoute(host, command, options = {}) {
 }
 
 export function runHostCommand(host, command, options = {}) {
+  if ((command === "install" || command === "uninstall") && defaultOptions(options).platform !== "win32") {
+    throw new Error("desktop install/uninstall 仅支持 Windows。");
+  }
   const route = resolveRoute(host, command, options);
   if (command === "health") throw new Error("Use the asynchronous runHostHealth API for health checks.");
   if (route.readOnly) return getHostStatus(host, options);

@@ -24,7 +24,7 @@ test("runner logs without inherited stdio and rotates within a bound", async () 
 
 test("log failure is nonfatal and reports once to foreground stderr", () => {
   const errors = [];
-  const logger = createWorkBuddyLogger({ file: "\\0invalid", stderr: (message) => errors.push(message) });
+  const logger = createWorkBuddyLogger({ file: "\0invalid", stderr: (message) => errors.push(message) });
   logger.info("one"); logger.info("two");
   assert.equal(errors.length, 1);
 });
