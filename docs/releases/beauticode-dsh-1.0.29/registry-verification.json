@@ -1,0 +1,281 @@
+{
+  "artifact": {
+    "bytes": 18854906,
+    "entry_count": 49,
+    "integrity": {
+      "sha512": "sha512-OEg4anQHoLgmERrNaDa025/qQW3dCDM3MJcZTkxZ+mm2Dj8jpmQvYPDoYVoe3e8AyYdeITvWDA9mQQ+v0YMx8Q=="
+    },
+    "integrity_matches": {
+      "sha512": true
+    },
+    "package_json": {
+      "name": "beauticode-dsh",
+      "version": "1.0.29"
+    },
+    "required_files": [
+      {
+        "path": "LICENSE",
+        "present": true
+      },
+      {
+        "path": "README.zh-CN.md",
+        "present": true
+      },
+      {
+        "path": "agent.mjs",
+        "present": true
+      },
+      {
+        "path": "atmosphere.js",
+        "present": true
+      },
+      {
+        "path": "bin/beauticode-dsh",
+        "present": true
+      },
+      {
+        "path": "browser-injection.mjs",
+        "present": true
+      },
+      {
+        "path": "cli.js",
+        "present": true
+      },
+      {
+        "path": "client.js",
+        "present": true
+      },
+      {
+        "path": "console.js",
+        "present": true
+      },
+      {
+        "path": "control-client.mjs",
+        "present": true
+      },
+      {
+        "path": "cordis.patch.yml",
+        "present": true
+      },
+      {
+        "path": "gallery-host.mjs",
+        "present": true
+      },
+      {
+        "path": "gallery.js",
+        "present": true
+      },
+      {
+        "path": "host-apply.mjs",
+        "present": true
+      },
+      {
+        "path": "index.mjs",
+        "present": true
+      },
+      {
+        "path": "package.json",
+        "present": true
+      },
+      {
+        "path": "presets.mjs",
+        "present": true
+      },
+      {
+        "path": "readability.js",
+        "present": true
+      },
+      {
+        "path": "skin-center.json",
+        "present": true
+      },
+      {
+        "path": "themes/internal-beyond/NOTICE.md",
+        "present": true
+      },
+      {
+        "path": "themes/internal-beyond/bg-canvas-4k.png",
+        "present": true
+      },
+      {
+        "path": "themes/internal-beyond/bg-canvas.png",
+        "present": true
+      },
+      {
+        "path": "themes/internal-beyond/bg-infernal.jpg",
+        "present": true
+      },
+      {
+        "path": "themes/internal-beyond/bg-internal.jpg",
+        "present": true
+      },
+      {
+        "path": "transport.js",
+        "present": true
+      },
+      {
+        "path": "ui-host.mjs",
+        "present": true
+      },
+      {
+        "path": "vendor/adapter-dsh/bridge.js",
+        "present": true
+      },
+      {
+        "path": "vendor/adapter-dsh/host-descriptor.js",
+        "present": true
+      },
+      {
+        "path": "vendor/adapter-dsh/index.js",
+        "present": true
+      },
+      {
+        "path": "vendor/adapter-dsh/injector-lock.js",
+        "present": true
+      },
+      {
+        "path": "vendor/adapter-dsh/package.json",
+        "present": true
+      },
+      {
+        "path": "vendor/adapter-dsh/session.js",
+        "present": true
+      },
+      {
+        "path": "vendor/adapter-dsh/token.js",
+        "present": true
+      },
+      {
+        "path": "vendor/adapter-dsh/tray-handoff.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/apply-transaction.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/background-store.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/bundled-gallery.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/constants.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/error-message.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/file-lock.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/host-session.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/index.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/media-server.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/media-source.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/media-validation.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/package.json",
+        "present": true
+      },
+      {
+        "path": "vendor/core/paths.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/process-liveness.js",
+        "present": true
+      },
+      {
+        "path": "vendor/core/types.js",
+        "present": true
+      }
+    ],
+    "sha1": "bbf64619febf30e9b0407bbe39a88c64d8647a6d",
+    "tarball": "https://registry.npmjs.org/beauticode-dsh/-/beauticode-dsh-1.0.29.tgz"
+  },
+  "errors": [],
+  "failure_category": null,
+  "metadata": {
+    "integrity": "sha512-OEg4anQHoLgmERrNaDa025/qQW3dCDM3MJcZTkxZ+mm2Dj8jpmQvYPDoYVoe3e8AyYdeITvWDA9mQQ+v0YMx8Q==",
+    "name": "beauticode-dsh",
+    "shasum": "bbf64619febf30e9b0407bbe39a88c64d8647a6d",
+    "tarball": "https://registry.npmjs.org/beauticode-dsh/-/beauticode-dsh-1.0.29.tgz",
+    "url": "https://registry.npmjs.org/beauticode-dsh/1.0.29",
+    "version": "1.0.29"
+  },
+  "ok": true,
+  "package": "beauticode-dsh",
+  "registry": "https://registry.npmjs.org",
+  "required": [
+    "LICENSE",
+    "README.zh-CN.md",
+    "agent.mjs",
+    "atmosphere.js",
+    "bin/beauticode-dsh",
+    "browser-injection.mjs",
+    "cli.js",
+    "client.js",
+    "console.js",
+    "control-client.mjs",
+    "cordis.patch.yml",
+    "gallery-host.mjs",
+    "gallery.js",
+    "host-apply.mjs",
+    "index.mjs",
+    "package.json",
+    "presets.mjs",
+    "readability.js",
+    "skin-center.json",
+    "themes/internal-beyond/NOTICE.md",
+    "themes/internal-beyond/bg-canvas-4k.png",
+    "themes/internal-beyond/bg-canvas.png",
+    "themes/internal-beyond/bg-infernal.jpg",
+    "themes/internal-beyond/bg-internal.jpg",
+    "transport.js",
+    "ui-host.mjs",
+    "vendor/adapter-dsh/bridge.js",
+    "vendor/adapter-dsh/host-descriptor.js",
+    "vendor/adapter-dsh/index.js",
+    "vendor/adapter-dsh/injector-lock.js",
+    "vendor/adapter-dsh/package.json",
+    "vendor/adapter-dsh/session.js",
+    "vendor/adapter-dsh/token.js",
+    "vendor/adapter-dsh/tray-handoff.js",
+    "vendor/core/apply-transaction.js",
+    "vendor/core/background-store.js",
+    "vendor/core/bundled-gallery.js",
+    "vendor/core/constants.js",
+    "vendor/core/error-message.js",
+    "vendor/core/file-lock.js",
+    "vendor/core/host-session.js",
+    "vendor/core/index.js",
+    "vendor/core/media-server.js",
+    "vendor/core/media-source.js",
+    "vendor/core/media-validation.js",
+    "vendor/core/package.json",
+    "vendor/core/paths.js",
+    "vendor/core/process-liveness.js",
+    "vendor/core/types.js"
+  ],
+  "version": "1.0.29"
+}

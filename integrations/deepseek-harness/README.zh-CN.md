@@ -64,3 +64,16 @@ npx @deepseek-ai/dsh web
 4. 打开页面后在「设置」里点「背景」，或输入 `/bg <本机绝对路径>`，或直接跟 AI 说把某个视频/图片设为背景。
 
 安全边界：DSH Web 必须绑定本机回环地址；控制端点需要随机令牌；媒体 URL 仅允许带令牌的回环 HTTP 地址；浏览器回执只接受同源请求。
+
+## 背景渲染回归测试
+
+`node --test integrations/deepseek-harness/test/*.test.mjs` 运行插件测试。
+其中 `background-rendering.browser.test.mjs` 需要真实 Chromium 布局：
+设置 `BEAUTICODE_PLAYWRIGHT_MODULE` 为现有 Playwright 模块的可导入路径（例如
+`playwright` 或其 `index.mjs` 的 `file:///` URL），可用
+`BEAUTICODE_BROWSER_CHANNEL=msedge` 选择已安装的 Edge。未指定运行时会明确跳过
+浏览器测试；无需给生产插件增加依赖。
+
+该测试覆盖 #86 的画窗磨砂、深浅色遮罩与关闭画窗后的媒体恢复，以及 #87 的
+原生渐隐滚动内容高度和位置。正式验收还需在 Desktop 中展开已有长思考、调整滑块，
+确认画窗和普通背景均正常；DOM 模拟器不能替代浏览器或 Desktop 的布局测量。
