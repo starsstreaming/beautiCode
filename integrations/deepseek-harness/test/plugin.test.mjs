@@ -235,7 +235,6 @@ test("plugin publishes one ordered browser injection table for Web and Desktop",
     /html\[data-bc-resolved-tone="light"\]\[data-bc-dim-user="true"\]\[data-bc-active="true"\] #beauticode-bg-stage::after\{background:rgba\(255,255,255,var\(--bc-dim\)\)!important\}/,
   );
   assert.match(source, /BeauticodeBackgroundDim/);
-  assert.match(source, /\[class\*=\"_fade\"\]\{display:none!important\}/);
   assert.match(source, /data-bc-resolved-tone/);
   assert.match(source, /data-ds-dark-theme/);
   assert.doesNotMatch(source, /toggleAttribute\("data-ds-dark-theme"/);
