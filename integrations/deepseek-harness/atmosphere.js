@@ -74,6 +74,11 @@
 #beauticode-gallery-bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:#0b1018}
 #beauticode-gallery-bg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center center;display:block;pointer-events:none;z-index:0;image-rendering:auto;-webkit-backface-visibility:hidden}
 #beauticode-gallery-bg canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;mix-blend-mode:soft-light;opacity:.32}
+/* Gallery replaces the ordinary media stage: consume the same preferences
+   here, with the dim layer above water highlights and below foreground UI (#86). */
+html[data-bc-gallery="true"][data-bc-bg-blur="true"] #beauticode-gallery-bg img{filter:blur(var(--bc-bg-blur,0px))}
+html[data-bc-gallery="true"][data-bc-dim-user="true"] #beauticode-gallery-bg::after{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;background:rgba(0,0,0,var(--bc-dim))}
+html[data-bc-gallery="true"][data-bc-dim-user="true"][data-bc-resolved-tone="light"] #beauticode-gallery-bg::after{background:rgba(255,255,255,var(--bc-dim))}
 html[data-bc-gallery="true"] #beauticode-bg-stage{background:transparent!important}
 html[data-bc-gallery="true"] #beauticode-bg-stage::after{display:none!important;background:transparent!important}
 html[data-bc-gallery="true"],html[data-bc-gallery="true"] body{background:transparent!important}
