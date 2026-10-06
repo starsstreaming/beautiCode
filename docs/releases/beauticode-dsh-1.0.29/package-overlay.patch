@@ -1,0 +1,30 @@
+--- a/package/README.zh-CN.md
++++ b/package/README.zh-CN.md
+@@ -66,0 +67,4 @@
++
++## 1.0.29 背景修复
++
++画窗现在响应背景磨砂和阴影滑块，并随 DSH 深浅色切换遮罩。背景模式保留宿主的渐隐滚动内容，修复长思考展开后的持续抖动（#86、#87）。
+--- a/package/atmosphere.js
++++ b/package/atmosphere.js
+@@ -76,0 +77,5 @@
++/* Gallery replaces the ordinary media stage: consume the same preferences
++   here, with the dim layer above water highlights and below foreground UI (#86). */
++html[data-bc-gallery="true"][data-bc-bg-blur="true"] #beauticode-gallery-bg img{filter:blur(var(--bc-bg-blur,0px))}
++html[data-bc-gallery="true"][data-bc-dim-user="true"] #beauticode-gallery-bg::after{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;background:rgba(0,0,0,var(--bc-dim))}
++html[data-bc-gallery="true"][data-bc-dim-user="true"][data-bc-resolved-tone="light"] #beauticode-gallery-bg::after{background:rgba(255,255,255,var(--bc-dim))}
+@@ -95 +100,2 @@
+-html[data-bc-gallery="true"] [class*="_fade"]{display:none!important}
++/* Native fade classes belong to scroll content, not decorative overlays.
++   Hiding them feeds zero geometry back into DSH's ResizeObserver loop (#87). */
+--- a/package/client.js
++++ b/package/client.js
+@@ -213 +213,2 @@
+-html[data-bc-active="true"] [class*="_fade"]{display:none!important}
++/* Preserve DSH's native fading scroll bodies; hiding them causes the
++   ResizeObserver to alternate content between visible and zero height (#87). */
+--- a/package/package.json
++++ b/package/package.json
+@@ -3 +3 @@
+-  "version": "1.0.28",
++  "version": "1.0.29",

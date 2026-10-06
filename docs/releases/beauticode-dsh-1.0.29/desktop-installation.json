@@ -1,0 +1,6 @@
+{
+  "installed_version": "1.0.29",
+  "files_verified": 49,
+  "matches_tested_tarball": true,
+  "installation": "dsh plugin --profile desktop add beauticode-dsh@1.0.29"
+}

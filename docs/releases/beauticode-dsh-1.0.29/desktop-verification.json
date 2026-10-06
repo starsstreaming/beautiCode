@@ -1,0 +1,110 @@
+{
+  "source": {
+    "candidate": false,
+    "styles": [
+      {
+        "name": "client",
+        "matches": true,
+        "sourceSha256": "b9efe52a677a7880bc58fcbf4cc8e5ea7b060a27d972ada63a279deb9fefbddd",
+        "loadedSha256": "b9efe52a677a7880bc58fcbf4cc8e5ea7b060a27d972ada63a279deb9fefbddd"
+      },
+      {
+        "name": "atmosphere",
+        "matches": true,
+        "sourceSha256": "888125e9652cbc627ce45d0d96a67e01f6a0852618891fa91bf250effc40951c",
+        "loadedSha256": "888125e9652cbc627ce45d0d96a67e01f6a0852618891fa91bf250effc40951c"
+      }
+    ]
+  },
+  "long_thought": {
+    "frames": 180,
+    "body": {
+      "index": 8,
+      "min": 400,
+      "max": 400,
+      "transitions": 0,
+      "hiddenFrames": 0,
+      "classes": [
+        "WW4l1q_body   WW4l1q_fadeBottom"
+      ]
+    }
+  },
+  "dark": {
+    "url": "dsh-app://app/",
+    "active": "true",
+    "gallery": "true",
+    "tone": "dark",
+    "blur": 100,
+    "dim": 0.8,
+    "blurVariable": "9.00px",
+    "dimVariable": "0.8",
+    "galleryFilter": "blur(9px)",
+    "galleryOverlay": "rgba(0, 0, 0, 0.8)",
+    "galleryOverlayContent": "\"\"",
+    "oldOverlayDisplay": "none",
+    "thoughts": 40,
+    "expandedThoughts": 1,
+    "processBodies": 37,
+    "media": [
+      {
+        "tag": "IMG",
+        "filter": "blur(9px)",
+        "opacity": "0"
+      }
+    ],
+    "video": [],
+    "candidate": false
+  },
+  "light": {
+    "url": "dsh-app://app/",
+    "active": "true",
+    "gallery": "true",
+    "tone": "light",
+    "blur": 100,
+    "dim": 0.8,
+    "blurVariable": "9.00px",
+    "dimVariable": "0.8",
+    "galleryFilter": "blur(9px)",
+    "galleryOverlay": "rgba(255, 255, 255, 0.8)",
+    "galleryOverlayContent": "\"\"",
+    "oldOverlayDisplay": "none",
+    "thoughts": 40,
+    "expandedThoughts": 1,
+    "processBodies": 37,
+    "media": [
+      {
+        "tag": "IMG",
+        "filter": "blur(9px)",
+        "opacity": "0"
+      }
+    ],
+    "video": [],
+    "candidate": false
+  },
+  "restored": {
+    "url": "dsh-app://app/",
+    "active": "true",
+    "gallery": "true",
+    "tone": "dark",
+    "blur": 0,
+    "dim": 0,
+    "blurVariable": "0.00px",
+    "dimVariable": "0",
+    "galleryFilter": "none",
+    "galleryOverlay": "rgba(0, 0, 0, 0)",
+    "galleryOverlayContent": "\"\"",
+    "oldOverlayDisplay": "none",
+    "thoughts": 40,
+    "expandedThoughts": 1,
+    "processBodies": 37,
+    "media": [
+      {
+        "tag": "IMG",
+        "filter": "none",
+        "opacity": "0"
+      }
+    ],
+    "video": [],
+    "candidate": false
+  }
+}
