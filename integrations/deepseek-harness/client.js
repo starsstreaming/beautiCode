@@ -210,7 +210,8 @@ html[data-bc-bg-blur="true"] #beauticode-bg-stage .beauticode-media-slot video{
 }
 @media (prefers-reduced-motion:reduce){#beauticode-bg-stage .beauticode-media-slot,#beauticode-bg-stage .beauticode-media-slot img,#beauticode-bg-stage .beauticode-media-slot video{transition:none!important}}
 html[data-bc-active="true"] #root{position:relative;z-index:1;background:transparent!important}
-html[data-bc-active="true"] [class*="_fade"]{display:none!important}
+/* Preserve DSH's native fading scroll bodies; hiding them causes the
+   ResizeObserver to alternate content between visible and zero height (#87). */
 html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
 `;
   document.head.append(style);

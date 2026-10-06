@@ -96,6 +96,26 @@ browserTest("gallery consumes blur and dim preferences in dark and light appeara
   assert.equal(reset.overlay, "rgba(255, 255, 255, 0)", "light overlay becomes fully transparent");
 });
 
+browserTest("background modes preserve native fading scroll bodies and scroll position (#87)", async (t) => {
+  const page = await openFixture(t);
+  for (const mode of ["ordinary", "gallery"]) {
+    if (mode === "gallery") await openGallery(page);
+    const frames = await page.evaluate(async () => {
+      const body = document.querySelector("[data-step-process-body]");
+      body.scrollTop = 200;
+      const frames = [];
+      for (let i = 0; i < 90; i++) {
+        await new Promise(requestAnimationFrame);
+        frames.push({ height: body.clientHeight, top: body.scrollTop, mask: getComputedStyle(body).maskImage });
+      }
+      return frames;
+    });
+    assert.ok(frames.every(frame => frame.height === 400), `${mode}: native content must stay in layout`);
+    assert.ok(frames.every(frame => frame.top === 200), `${mode}: scrolling must remain stable`);
+    assert.ok(frames.every(frame => frame.mask.startsWith("linear-gradient")), "retain native fading masks");
+  }
+});
+
 browserTest("closing gallery restores ordinary image and video preference rendering", async (t) => {
   const page = await openFixture(t);
   await openGallery(page);

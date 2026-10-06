@@ -97,7 +97,8 @@ html[data-bc-resolved-tone="light"][data-bc-gallery="true"] body{
   --dsw-specific-sidebar-fill:rgba(255,255,255,.36);
 }
 html[data-bc-gallery="true"] #root{position:relative;z-index:1;background:transparent!important}
-html[data-bc-gallery="true"] [class*="_fade"]{display:none!important}
+/* Native fade classes belong to scroll content, not decorative overlays.
+   Hiding them feeds zero geometry back into DSH's ResizeObserver loop (#87). */
 html[data-bc-gallery="true"] #beauticode-bg-stage img,
 html[data-bc-gallery="true"] #beauticode-bg-stage video{opacity:0!important}
 html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
