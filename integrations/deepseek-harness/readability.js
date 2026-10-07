@@ -35,7 +35,17 @@ html[data-bc-active="true"][data-bc-resolved-tone="light"] body{
    Semantic roles and data-composer-card are shipped DSH contracts, not hashes. */
 html[data-bc-active="true"]:not([data-bc-readable-surfaces="false"]) :is(
   [role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"],
-  [role="tooltip"],[data-composer-card]
+  [role="tooltip"],[data-composer-card],
+  /* DSH pending-interaction panels — user questions, plan review and approval —
+     are NOT dialogs. Each is a transparent flex frame wrapping an inner card
+     that paints var(--dsw-specific-input-major), the very token this bridge
+     re-expresses as translucent, so the transcript bled through the question
+     card. Target the inner card by the stable data-* key on its frame (the
+     class names are CSS-module hashes and must not be relied on): painting the
+     frame instead would produce a solid bar across its side padding. */
+  [data-question-key] > section,
+  [data-plan-review-key] > section,
+  [data-approval-key] > div
 ){
   --dsw-alias-bg-base:var(--bc-readable-fill);
   --dsw-alias-bg-layer-1:var(--bc-readable-fill);
