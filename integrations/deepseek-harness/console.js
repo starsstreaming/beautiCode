@@ -135,7 +135,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="fullscreen" aria-pressed="false">进入全屏</button></div></div>' +
     '<div class="bc-row"><div class="bc-row-text">' +
     '<span class="bc-row-title">功能面板不透明</span>' +
-    '<span class="bc-row-desc">遮住设置、弹层和消息编辑栏后方的内容</span>' +
+    '<span class="bc-row-desc">遮住设置、弹层、消息编辑栏和提问窗口后方的内容</span>' +
     '</div><div class="bc-control"><button type="button" class="bc-btn bc-pill on" data-act="readability" aria-pressed="true">已开</button></div></div>' +
     '<div class="bc-row"><div class="bc-row-text">' +
     '<span class="bc-row-title">背景阴影</span>' +

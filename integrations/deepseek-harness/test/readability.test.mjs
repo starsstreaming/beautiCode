@@ -78,3 +78,21 @@ test("reloading the client does not duplicate styles or reset an opt-out", () =>
   assert.equal(context.BeauticodeReadableSurfaces, api);
   assert.equal(api.get(), false);
 });
+
+test("pending-interaction panels are protected by their frame's semantic key", () => {
+  const { styles } = load();
+  const [style] = styles;
+  // The selector must name each panel's inner card, never the wrapper: the
+  // wrapper owns the frame's side padding and must stay transparent.
+  for (const [frame, card] of [
+    ["data-question-key", "[data-question-key] > section"],
+    ["data-plan-review-key", "[data-plan-review-key] > section"],
+    ["data-approval-key", "[data-approval-key] > div"],
+  ]) {
+    assert.ok(style.textContent.includes(card), `missing protection for ${frame}`);
+    assert.ok(!style.textContent.includes(`:is([${frame}])`), `${frame} frame itself must not be painted`);
+  }
+  // These panels carry no dialog role, which is why role protection missed them.
+  assert.ok(style.textContent.includes("--dsw-specific-input-major:var(--bc-readable-fill)"),
+    "panels must repaint the same token the composer uses");
+});

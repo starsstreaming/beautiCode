@@ -36,10 +36,19 @@ try {
     [role=dialog] {position:fixed;z-index:1000;inset:100px 240px 200px;padding:36px;border-radius:20px;background:var(--dsw-alias-bg-layer-2)}
     [role=menu] {position:fixed;z-index:1001;right:10px;top:20px;padding:20px;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-3))}
     [data-composer-card] {position:fixed;z-index:10;bottom:30px;left:200px;right:200px;padding:24px;border-radius:20px;background:var(--dsw-specific-input-major)}
+    /* DSH pending-interaction panels: a transparent flex frame wraps the card
+       that paints input-major. They carry no dialog role, so role-based
+       protection alone left them translucent. */
+    [data-question-key],[data-plan-review-key],[data-approval-key] {position:fixed;z-index:30;left:200px;right:200px;padding:6px 0;display:flex;justify-content:center}
+    [data-question-key] {bottom:250px} [data-plan-review-key] {bottom:190px} [data-approval-key] {bottom:130px}
+    [data-question-key] > section,[data-plan-review-key] > section,[data-approval-key] > div {width:100%;padding:24px;border-radius:20px;background:var(--dsw-specific-input-major)}
     ${clientCss}
   </style></head><body><div id=wallpaper></div><div id=root><div id=phase data-phase=hero>
     <div class=transcript>${'<p>Underlying conversation text must stay behind the functional panel.</p>'.repeat(15)}</div>
     <div data-composer-card><div data-composer-input role=textbox contenteditable=true>Draft message</div></div>
+    <div data-question-key=q1><section>Question card</section></div>
+    <div data-plan-review-key=p1><section>Plan review card</section></div>
+    <div data-approval-key=a1><div>Approval card</div></div>
   </div></div><div role=dialog aria-modal=true><nav>Settings</nav><div data-slot="settings.section">General settings</div></div>
   <div role=menu>Menu item</div></body></html>`);
   if (readable) await page.addScriptTag({ content: readable });
@@ -59,7 +68,9 @@ try {
           }, { tone, phase, dim, gallery });
           const surfaces = await page.evaluate(() => {
             const ctx = document.createElement('canvas').getContext('2d');
-            return ['[role=dialog]', '[role=menu]', '[data-composer-card]'].map(selector => {
+            const selectors = ['[role=dialog]', '[role=menu]', '[data-composer-card]',
+              '[data-question-key] > section', '[data-plan-review-key] > section', '[data-approval-key] > div'];
+            return selectors.map(selector => {
               const color = getComputedStyle(document.querySelector(selector)).backgroundColor;
               ctx.clearRect(0, 0, 1, 1);
               ctx.fillStyle = color;
@@ -69,6 +80,12 @@ try {
           });
           for (const surface of surfaces) assert.equal(surface.alpha, 255,
             `${JSON.stringify({ tone, phase, dim, gallery })} ${surface.selector} must hide text behind it: ${surface.color}`);
+          // The wrapper must stay transparent: painting it would draw a solid bar
+          // across the frame's side padding.
+          const frames = await page.evaluate(() => ['[data-question-key]', '[data-plan-review-key]', '[data-approval-key]']
+            .map(selector => ({ selector, color: getComputedStyle(document.querySelector(selector)).backgroundColor })));
+          for (const frame of frames) assert.match(frame.color, /^rgba\(0, 0, 0, 0\)$/,
+            `${JSON.stringify({ tone, phase, dim, gallery })} ${frame.selector} frame must stay transparent: ${frame.color}`);
           results.push({ tone, phase, dim, gallery });
         }
       }
