@@ -17,13 +17,14 @@ const env = {
 };
 
 function fakeOptions(hostFiles, spawnSync) {
-  const normalized = new Set(hostFiles.map((file) => path.normalize(file)));
+  const normalize = (file) => path.normalize(file.replaceAll("\\", "/"));
+  const normalized = new Set(hostFiles.map(normalize));
   return {
     home,
     runtimeRoot,
     env,
     platform: "win32",
-    exists: (file) => path.normalize(file).startsWith(path.normalize(runtimeRoot)) || normalized.has(path.normalize(file)),
+    exists: (file) => normalize(file).startsWith(normalize(runtimeRoot)) || normalized.has(normalize(file)),
     probeAppxCodex: () => false,
     queryRegistered: () => [],
     verifyHostInstall: () => ({ ready: true, state: "guardian-ready" }),

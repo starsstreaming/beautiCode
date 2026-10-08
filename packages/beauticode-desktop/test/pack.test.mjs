@@ -40,6 +40,7 @@ test("staging produces one self-contained runtime for all five hosts", async () 
     assert.equal(pkg.name, "beauticode-desktop");
     assert.equal(pkg.version, "0.1.0-test.12");
     assert.equal(pkg.private, false);
+    assert.deepEqual(pkg.os, ["win32"], "published desktop packages must remain Windows-only");
     assert.equal(pkg.bin["beauticode-desktop"], "./bin/beauticode-desktop.mjs");
     for (const [host, config] of Object.entries(HOST_RUNTIME)) {
       for (const relative of config.required) {

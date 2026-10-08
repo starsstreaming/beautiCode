@@ -166,7 +166,12 @@ export async function stageDesktopAggregate(destRoot = defaultStageDir(), opts =
   if (opts.build !== false) runBuild();
   await fsp.rm(destRoot, { recursive: true, force: true });
   await fsp.mkdir(destRoot, { recursive: true });
-  await fsp.copyFile(path.join(sourceRoot, "package.json"), path.join(destRoot, "package.json"));
+  // The private workspace must install on CI's Linux runners; only the
+  // self-contained release carries the public Windows-only package contract.
+  const manifest = JSON.parse(await fsp.readFile(path.join(sourceRoot, "package.json"), "utf8"));
+  manifest.private = false;
+  manifest.os = ["win32"];
+  await fsp.writeFile(path.join(destRoot, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   for (const name of ["README.md", "LICENSE"]) {
     const source = name === "LICENSE" ? path.join(repoRoot, name) : path.join(sourceRoot, name);
     if (fs.existsSync(source)) await fsp.copyFile(source, path.join(destRoot, name));

@@ -2,6 +2,12 @@
 
 Windows-only aggregate package for the beautiCode desktop hosts. Requires Node.js 22 or newer.
 
+The source workspace is private and can be installed on Linux for development
+and CI. Build release packages with `npm run desktop:pack`; the staged package
+under `artifacts/desktop-aggregate` is public and retains `os: ["win32"]`.
+Do not publish the source workspace directly. Host install/uninstall commands
+remain Windows-only; use `beauticode-dsh` separately for cross-platform DSH.
+
 Codex MSIX safety notice: direct launching an executable inside WindowsApps
 loses its package identity and can prevent Codex from starting. This package
 uses package-aware activation and refuses the unsafe direct-launch route, but

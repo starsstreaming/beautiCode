@@ -10,13 +10,14 @@ test("per-host health commands are read-only", () => {
 });
 
 test("each host resolves install and uninstall to a package-local script", () => {
+  const runtimeRoot = path.resolve("package", "runtime");
   for (const host of HOSTS) {
     for (const command of ["install", "uninstall"]) {
-      const route = resolveRoute(host, command, { runtimeRoot: "C:/package/runtime" });
+      const route = resolveRoute(host, command, { runtimeRoot });
       assert.equal(route.host, host);
       assert.equal(route.command, command);
-      assert.equal(route.script.replaceAll("\\", "/").startsWith("C:/package/runtime/"), true);
-      assert.equal(route.script.includes("desktop"), host === "cursor" || host === "doubao");
+      assert.equal(route.script.replaceAll("\\", "/").startsWith(runtimeRoot.replaceAll("\\", "/") + "/"), true);
+      assert.equal(path.relative(runtimeRoot, route.script).split(path.sep).includes("desktop"), host === "cursor" || host === "doubao");
       assert.ok(Array.isArray(route.args));
       assert.equal(path.isAbsolute(route.script), true);
     }
@@ -34,6 +35,7 @@ test("status has no child-process route", () => {
 test("install route is executable through an injected child-process seam", () => {
   let call;
   const result = runHostCommand("workbuddy", "install", {
+    platform: "win32",
     runtimeRoot: "C:/package/runtime",
     env: { TEST_ENV: "1" },
     spawnSync(...args) {
@@ -46,4 +48,15 @@ test("install route is executable through an injected child-process seam", () =>
   assert.match(call[1][0].replaceAll("\\", "/"), /runtime\/workbuddy\/scripts\/wb-setup\.mjs$/);
   assert.deepEqual(call[1].slice(1), ["install"]);
   assert.equal(call[2].env.BEAUTICODE_PACKAGED_RUNTIME, "1");
+});
+
+test("non-Windows workspace installs and uninstalls fail before invoking any host script", () => {
+  for (const host of HOSTS) {
+    for (const command of ["install", "uninstall"]) {
+      assert.throws(() => runHostCommand(host, command, {
+        platform: "linux",
+        spawnSync() { throw new Error("must not invoke a host installer"); },
+      }), /仅支持 Windows/);
+    }
+  }
 });
