@@ -18,8 +18,27 @@ export async function loadRendererSource(): Promise<{
     fs.readFile(path.join(here, "renderer", "theme.js"), "utf8"),
     fs.readFile(path.join(here, "renderer", "dim.js"), "utf8"),
   ]);
-  // Resolve host appearance after media installs, including healthy re-injects.
-  const themedRuntime = `((...args) => { ${dimJs}\nreturn Promise.resolve((${runtimeIife})(...args)).then(result => { ${themeJs}\nreturn result; }); })`;
+  const factories = {
+    createWorkingState: "runtime-working.js",
+    createPlaybackControls: "runtime-controls.js",
+    createMediaSources: "runtime-sources.js",
+    createMediaWaiter: "runtime-media-wait.js",
+    createImageRuntime: "runtime-image.js",
+    createVideoLifecycle: "runtime-video-lifecycle.js",
+    createVideoElementBinding: "runtime-video-element.js",
+    createVideoRuntime: "runtime-video.js",
+    createBackgroundApi: "runtime-api.js",
+    createGuestPolicy: "guest-policy.js",
+    createGuestController: "guest-wallpaper.js",
+    createGuestOwner: "guest-install.js",
+  };
+  const modules = await Promise.all(Object.entries(factories).map(async ([name,file]) =>
+    `const ${name} = ${await fs.readFile(path.join(here,"renderer",file),"utf8")};`));
+  // Factories remain lexical to the injected payload. Only the document-scoped
+  // guest owner survives media handoffs; modules expose operations, not state bags.
+  const themedRuntime = `((...args) => { ${dimJs}\n${modules.join("\n")}
+    const guest = createGuestOwner({createController:createGuestController,policy:createGuestPolicy()});
+    return Promise.resolve((${runtimeIife})(...args)).then(result => { ${themeJs}\nreturn result; }); })`;
   return { cssText, runtimeIife: themedRuntime, consoleSource: `${dimJs}\n${consoleJs}\n${galleryJs}` };
 }
 
