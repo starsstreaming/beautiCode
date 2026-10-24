@@ -53,6 +53,190 @@
   const root = document.documentElement;
   const previous = window.__BEAUTICODE_BG__;
 
+  // Full-page ChatGPT routes (Plugins, Skills, Library, Plans) live in an
+  // Electron <webview>. Host CSS cannot cross that document boundary, so clear
+  // the guest's opaque shell tokens from the host through executeJavaScript.
+  // Controls keep their own borders and foregrounds; only page-sized surfaces
+  // are made transparent so the full-window wallpaper remains the base layer.
+  const GUEST_STYLE_ID = "beauticode-guest-wallpaper-style";
+  const GUEST_CSS = `
+    html, body, body > #root, body > #__next {
+      background: transparent !important;
+      background-color: transparent !important;
+      background-image: none !important;
+    }
+  `;
+  const guestExpression = `(() => {
+    const id = ${JSON.stringify(GUEST_STYLE_ID)};
+    let style = document.getElementById(id);
+    if (!style) {
+      style = document.createElement("style");
+      style.id = id;
+      (document.head || document.documentElement).appendChild(style);
+    }
+    style.textContent = ${JSON.stringify(GUEST_CSS)};
+    const ATTR = "data-beauticode-guest-cleared";
+    const paint = () => {
+      if (!document.body) return;
+      const vw = window.innerWidth || 1;
+      const vh = window.innerHeight || 1;
+      const visit = (el, depth) => {
+        if (!(el instanceof HTMLElement) || depth > 6) return;
+        if (!el.hasAttribute(ATTR)) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width >= vw * 0.9 && rect.height >= vh * 0.9) {
+            const bg = getComputedStyle(el).backgroundColor;
+            if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") {
+              el.setAttribute(ATTR, el.style.backgroundColor || "");
+              el.style.setProperty("background-color", "transparent", "important");
+            }
+          }
+        }
+        for (const child of el.children) visit(child, depth + 1);
+      };
+      for (const child of document.body.children) visit(child, 0);
+    };
+    paint();
+    if (!window.__beauticodeGuestObserver) {
+      const observer = new MutationObserver(() => {
+        if (window.__beauticodeGuestPaintTimer) return;
+        window.__beauticodeGuestPaintTimer = setTimeout(() => {
+          window.__beauticodeGuestPaintTimer = 0;
+          try { paint(); } catch (_) {}
+        }, 300);
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      window.__beauticodeGuestObserver = observer;
+    }
+    return true;
+  })()`;
+  const clearGuestExpression = `(() => {
+    document.getElementById(${JSON.stringify(GUEST_STYLE_ID)})?.remove();
+    try {
+      window.__beauticodeGuestObserver?.disconnect();
+      window.__beauticodeGuestObserver = null;
+      if (window.__beauticodeGuestPaintTimer) {
+        clearTimeout(window.__beauticodeGuestPaintTimer);
+        window.__beauticodeGuestPaintTimer = 0;
+      }
+    } catch (_) {}
+    document.querySelectorAll("[data-beauticode-guest-cleared]").forEach((el) => {
+      const prev = el.getAttribute("data-beauticode-guest-cleared");
+      el.removeAttribute("data-beauticode-guest-cleared");
+      if (prev) el.style.backgroundColor = prev;
+      else el.style.removeProperty("background-color");
+    });
+    return true;
+  })()`;
+  const guestTransparencyAllowed = (webview) => {
+    try {
+      const src = webview.getAttribute("src") || "";
+      return !src.startsWith("codex-sandbox:");
+    } catch (_) {
+      return false;
+    }
+  };
+  const installGuestTransparency = (webview) => {
+    if (
+      !webview ||
+      !guestTransparencyAllowed(webview) ||
+      typeof webview.executeJavaScript !== "function"
+    ) {
+      return;
+    }
+    try {
+      const result = webview.executeJavaScript(guestExpression);
+      if (result && typeof result.catch === "function") result.catch(() => {});
+    } catch (_) {}
+    if (!webview.__beauticodeGuestTransparencyBound) {
+      webview.__beauticodeGuestTransparencyBound = true;
+      const refresh = () => installGuestTransparency(webview);
+      webview.__beauticodeGuestTransparencyRefresh = refresh;
+      try { webview.addEventListener("dom-ready", refresh); } catch (_) {}
+      try { webview.addEventListener("did-finish-load", refresh); } catch (_) {}
+    }
+  };
+  const syncGuestTransparency = () => {
+    try {
+      document.querySelectorAll('webview:not([src^="codex-sandbox:"])')
+        .forEach(installGuestTransparency);
+    } catch (_) {}
+  };
+  const clearGuestTransparency = () => {
+    try {
+      document.querySelectorAll("webview").forEach((webview) => {
+        if (!webview.__beauticodeGuestTransparencyBound) return;
+        if (typeof webview.executeJavaScript === "function") {
+          try {
+            const result = webview.executeJavaScript(clearGuestExpression);
+            if (result && typeof result.catch === "function") {
+              result.catch(() => {});
+            }
+          } catch (_) {}
+        }
+        const refresh = webview.__beauticodeGuestTransparencyRefresh;
+        if (refresh) {
+          try { webview.removeEventListener("dom-ready", refresh); } catch (_) {}
+          try {
+            webview.removeEventListener("did-finish-load", refresh);
+          } catch (_) {}
+        }
+        try {
+          webview.__beauticodeGuestTransparencyBound = false;
+          delete webview.__beauticodeGuestTransparencyRefresh;
+        } catch (_) {}
+      });
+    } catch (_) {}
+  };
+  const isBackgroundActive = () =>
+    root.getAttribute("data-bc-active") === "true";
+  let guestSyncTimer = null;
+  const scheduleGuestSync = () => {
+    if (!isBackgroundActive() || guestSyncTimer) return;
+    guestSyncTimer = setTimeout(() => {
+      guestSyncTimer = null;
+      if (isBackgroundActive()) syncGuestTransparency();
+    }, 200);
+  };
+  let guestObserver = null;
+  try {
+    guestObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        if (
+          record.type === "attributes" &&
+          record.target instanceof Element &&
+          record.target.tagName === "WEBVIEW"
+        ) {
+          scheduleGuestSync();
+          return;
+        }
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node.tagName === "WEBVIEW" || node.querySelector("webview")) {
+            scheduleGuestSync();
+            return;
+          }
+        }
+      }
+    });
+    guestObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src"],
+    });
+  } catch (_) {}
+  const stopGuestWatchers = () => {
+    try {
+      guestObserver?.disconnect();
+    } catch (_) {}
+    guestObserver = null;
+    if (guestSyncTimer) {
+      clearTimeout(guestSyncTimer);
+      guestSyncTimer = null;
+    }
+  };
+
   // ---- Same-generation short-circuit (critical anti-flash) ----
   // The tray watch loop re-publishes the active payload every ~1s. Rebuilding
   // the stage on every poll creates stacked <video> nodes + poster flashes.
@@ -111,6 +295,7 @@
             }
           } catch (_) {}
         }
+        if (isBackgroundActive()) syncGuestTransparency();
         return { skipped: true, generation: gen, reason: "same-generation" };
       }
     } catch (_) {
@@ -789,6 +974,7 @@
   };
 
   const setAttrs = () => {
+    const wasActive = root.getAttribute("data-bc-active") === "true";
     const handoffReady =
       videoEnabled &&
       !videoFailed &&
@@ -816,9 +1002,11 @@
       root.removeAttribute("data-bc-tone");
       fishMode = false;
       stopWorkingWatch();
+      if (wasActive) clearGuestTransparency();
       return;
     }
     root.setAttribute("data-bc-active", "true");
+    if (!wasActive) syncGuestTransparency();
     // Keep media=video during handoff so CSS does not snap back to image-only
     // while the previous frame is still covering the stage.
     const media =
@@ -1722,6 +1910,7 @@
       teardownImageBlob();
       releaseHandoff();
       clearStage();
+      clearGuestTransparency();
       resolvedPoster = null;
       stopWorkingWatch();
       setAttrs();
@@ -1863,6 +2052,7 @@
       // Always stop working-state watchers; the next generation starts its own.
       // Do not leave MutationObservers / intervals from a superseded runtime.
       stopWorkingWatch();
+      stopGuestWatchers();
       const handoff = Boolean(opts && opts.handoff);
       if (!handoff) {
         teardownVideo();
@@ -1889,6 +2079,7 @@
       } catch (_) {}
       if (!handoff) {
         window.__BEAUTICODE_THEME__?.stop();
+        clearGuestTransparency();
         clearStage();
         root.removeAttribute("data-bc-active");
         root.removeAttribute("data-bc-media");
@@ -2011,7 +2202,11 @@
   // every Codex video import then sat in verify until the console timed out.
   return Promise.resolve()
     .then(apply)
-    .then(() => ({ installed: true, generation: gen }))
+    .then(() => {
+      if (isBackgroundActive()) syncGuestTransparency();
+      else clearGuestTransparency();
+      return { installed: true, generation: gen };
+    })
     .catch((err) => {
       if (isCurrent()) {
         imageFailed = true;

@@ -198,7 +198,6 @@ html[data-bc-active="true"] aside[class*="_ResponsiveLeftPanel_"] {
   background-color: transparent !important;
   background-image: none !important;
   border: 0 !important;
-  border-radius: 0 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -232,7 +231,6 @@ html[data-bc-active="true"] body > #root main {
   background: transparent !important;
   background-image: none !important;
   border: 0 !important;
-  border-radius: 0 !important;
   box-shadow: none !important;
 }
 
@@ -274,7 +272,6 @@ html[data-bc-active="true"] body > #root main
   > div:first-child
   > div:first-child {
   border: 0 !important;
-  border-radius: 0 !important;
   background: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
@@ -350,8 +347,7 @@ html[data-bc-active="true"][data-bc-fish="true"] #beauticode-video-input {
    palette — by id (works for already-mounted UI) and by the data-bc-ui marker
    (covers surfaces added later). */
 html[data-bc-active="true"] :is([role="dialog"], [role="alertdialog"],
-  [role="menu"], [role="listbox"], [role="tooltip"],
-  [data-radix-popper-content-wrapper], [data-composer-body],
+  [role="menu"], [role="listbox"], [data-composer-body],
   form:has(textarea),
   form:has([contenteditable="true"])):not([data-bc-ui], [data-bc-ui] *,
     #beauticode-console, #beauticode-console *,
@@ -359,4 +355,105 @@ html[data-bc-active="true"] :is([role="dialog"], [role="alertdialog"],
     #beauticode-gallery, #beauticode-gallery *,
     #beauticode-name-dialog, #beauticode-name-dialog *) {
   background-color: var(--bc-readable-fill) !important;
+}
+
+/* A tooltip keeps the host's own dark surface and light label; forcing the
+   readable fill here left near-white text on white. The Radix popper wrapper
+   only positions a rounded panel, so painting it leaves a square plate behind
+   an otherwise correct menu. */
+html[data-bc-active="true"] [data-radix-popper-content-wrapper] {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Full-page ChatGPT routes mount in an Electron <webview>. Keep the host frame
+   clear so the wallpaper stays the window base; the runtime also clears the
+   guest document's own opaque surfaces. */
+html[data-bc-active="true"] body > #root
+  webview:not([src^="codex-sandbox:"]) {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Composer chrome: Codex paints a tinted band behind the input and a tinted
+   notice above it. Drop that wash so the wallpaper stays the base layer; the
+   input body keeps its own white card. */
+html[data-bc-active="true"] body > #root main
+  [class*="_background_"][class*="_surface_"],
+html[data-bc-active="true"] body > #root main
+  [class*="_ComposerLayoutRoot_"] {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html[data-bc-active="true"] body > #root main aside {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  background-image: none !important;
+}
+
+/* Scroll fade above the composer: Codex fades into the themed surface, which
+   leaves a tinted strip over the wallpaper. Let the wallpaper carry it. */
+html[data-bc-active="true"] body > #root main
+  [class*="_background_"][class*="_fade_"] {
+  background-image: none !important;
+  background-color: transparent !important;
+}
+
+/* Content routes (Library, Sites, Images) paint a page-sized tinted surface
+   plus a header plate on the shell's ::before. Keep both on the wallpaper. */
+html[data-bc-active="true"] body > #root main
+  div.bg-surface:has([class*="_shell_"]) {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html[data-bc-active="true"] body > #root main
+  [class*="_shell_"]::before {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html[data-bc-active="true"] body > #root main
+  div.bg-surface:has([class*="empty-state-pag"]) {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Hover previews and other floating cards keep a light plate so the card
+   separates from the page behind it. Only overlay surfaces match, so a page
+   stays on the wallpaper after navigating there. */
+html[data-bc-active="true"]
+  :is([data-overlay-owner], [data-overlay-owner] *)
+  :is(.bg-surface, .bg-surface-secondary, .bg-surface-elevated,
+      .bg-surface-elevated-secondary):not([role="tooltip"], [role="tooltip"] *) {
+  background-color: rgba(253, 252, 254, 0.94) !important;
+  background-image: none !important;
+}
+
+html[data-bc-active="true"] [data-overlay-owner]:is(
+  .bg-surface, .bg-surface-secondary, .bg-surface-elevated,
+  .bg-surface-elevated-secondary):not([role="tooltip"]) {
+  background-color: rgba(253, 252, 254, 0.94) !important;
+  background-image: none !important;
+}
+
+/* Project and page peeks: the card's inner wrapper paints a square white
+   plate over the rounded shell, so the preview reads as a hard rectangle.
+   Inherit the radius and clip the wrapper; a hairline ring keeps the rounded
+   silhouette visible on light wallpapers. */
+html[data-bc-active="true"]
+  [role="tooltip"][data-overlay-owner="slate-sidebar"] {
+  border-radius: 18px !important;
+  background-color: rgba(250, 249, 253, 0.97) !important;
+  overflow: hidden !important;
+  box-shadow:
+    0 18px 44px rgba(40, 22, 54, 0.22),
+    0 0 0 1px rgba(74, 35, 95, 0.1) !important;
+}
+
+html[data-bc-active="true"]
+  [role="tooltip"][data-overlay-owner="slate-sidebar"] > * {
+  border-radius: inherit !important;
 }
