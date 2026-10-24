@@ -198,7 +198,6 @@ html[data-bc-active="true"] aside[class*="_ResponsiveLeftPanel_"] {
   background-color: transparent !important;
   background-image: none !important;
   border: 0 !important;
-  border-radius: 0 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -232,7 +231,6 @@ html[data-bc-active="true"] body > #root main {
   background: transparent !important;
   background-image: none !important;
   border: 0 !important;
-  border-radius: 0 !important;
   box-shadow: none !important;
 }
 
@@ -285,7 +283,6 @@ html[data-bc-active="true"] body > #root main
   > div:first-child
   > div:first-child {
   border: 0 !important;
-  border-radius: 0 !important;
   background: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
@@ -361,8 +358,7 @@ html[data-bc-active="true"][data-bc-fish="true"] #beauticode-video-input {
    palette — by id (works for already-mounted UI) and by the data-bc-ui marker
    (covers surfaces added later). */
 html[data-bc-active="true"] :is([role="dialog"], [role="alertdialog"],
-  [role="menu"], [role="listbox"], [role="tooltip"],
-  [data-radix-popper-content-wrapper], [data-composer-body],
+  [role="menu"], [role="listbox"], [data-composer-body],
   form:has(textarea),
   form:has([contenteditable="true"])):not([data-bc-ui], [data-bc-ui] *,
     #beauticode-console, #beauticode-console *,
@@ -370,4 +366,84 @@ html[data-bc-active="true"] :is([role="dialog"], [role="alertdialog"],
     #beauticode-gallery, #beauticode-gallery *,
     #beauticode-name-dialog, #beauticode-name-dialog *) {
   background-color: var(--bc-readable-fill) !important;
+}
+
+/* Positioning shells must not paint square plates behind rounded panels. */
+html[data-bc-active="true"] [data-radix-popper-content-wrapper] {
+  background: transparent !important;
+}
+
+/* Floating surface plates follow the host palette. Ordinary tooltips and
+   beautiCode UI retain their own colors. */
+html[data-bc-active="true"]
+  :is([data-overlay-owner], [data-overlay-owner] *)
+  :is(.bg-surface, .bg-surface-secondary, .bg-surface-elevated,
+      .bg-surface-elevated-secondary):not([role="tooltip"], [role="tooltip"] *):not(
+      [data-bc-ui], [data-bc-ui] *, #beauticode-console, #beauticode-console *,
+      #beauticode-console-pop, #beauticode-console-pop *,
+      #beauticode-gallery, #beauticode-gallery *,
+      #beauticode-name-dialog, #beauticode-name-dialog *) {
+  background-color: var(--bc-readable-fill) !important;
+  background-image: none !important;
+}
+html[data-bc-active="true"] [data-overlay-owner]:is(
+  .bg-surface, .bg-surface-secondary, .bg-surface-elevated,
+  .bg-surface-elevated-secondary):not([role="tooltip"]):not(
+    [data-bc-ui], [data-bc-ui] *, #beauticode-console, #beauticode-console *,
+    #beauticode-console-pop, #beauticode-console-pop *,
+    #beauticode-gallery, #beauticode-gallery *,
+    #beauticode-name-dialog, #beauticode-name-dialog *) {
+  background-color: var(--bc-readable-fill) !important;
+}
+
+/* Sidebar peeks are cards represented as tooltips. Preserve the native
+   radius and clip the painted direct surface wrapper, not its controls. */
+html[data-bc-active="true"] [role="tooltip"][data-overlay-owner="slate-sidebar"]:not(
+    [data-bc-ui], [data-bc-ui] *, #beauticode-console, #beauticode-console *,
+    #beauticode-console-pop, #beauticode-console-pop *,
+    #beauticode-gallery, #beauticode-gallery *,
+    #beauticode-name-dialog, #beauticode-name-dialog *) {
+  background-color: var(--bc-readable-fill) !important;
+  overflow: hidden !important;
+  box-shadow: 0 12px 32px #0003,
+    0 0 0 1px color-mix(in srgb, currentColor 12%, transparent) !important;
+}
+html[data-bc-active="true"] [role="tooltip"][data-overlay-owner="slate-sidebar"]:not(
+    [data-bc-ui], [data-bc-ui] *, #beauticode-console, #beauticode-console *,
+    #beauticode-console-pop, #beauticode-console-pop *,
+    #beauticode-gallery, #beauticode-gallery *,
+    #beauticode-name-dialog, #beauticode-name-dialog *) >
+  :is(.bg-surface, .bg-surface-secondary, .bg-surface-elevated, .bg-surface-elevated-secondary) {
+  border-radius: inherit !important;
+  background-color: inherit !important;
+}
+
+/* Native content route contract observed on 26.1016 (Sites): workspace slot,
+   full-height shell and centered tab panels. Nested reading cards are absent
+   from these selectors. No generated class names or viewport-size guesses. */
+html[data-bc-active="true"] main
+  .outline-none.flex.h-full.min-h-0.min-w-0.flex-1.flex-col >
+  .bg-surface.flex.h-full.min-h-0.flex-col:has([role="tabpanel"],
+    > .contents > .h-full.min-h-0.flex-1.overflow-y-auto >
+      .flex.min-h-full.w-full.flex-col > .border-transparent h1),
+html[data-bc-active="true"] main
+  .outline-none.flex.h-full.min-h-0.min-w-0.flex-1.flex-col >
+  .bg-surface.flex.h-full.min-h-0.flex-col
+  .mx-auto.bg-surface:has(> [role="tabpanel"]),
+html[data-bc-active="true"] main
+  .outline-none.flex.h-full.min-h-0.min-w-0.flex-1.flex-col >
+  .bg-surface.flex.h-full.min-h-0.flex-col
+  [role="tabpanel"].mx-auto.bg-surface {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* The native header plate is a pseudo-element on the scroll shell, not h1.
+   Anchor to its observed layout hierarchy rather than the generated _shell_ hash. */
+html[data-bc-active="true"] main
+  .outline-none.flex.h-full.min-h-0.min-w-0.flex-1.flex-col .contents >
+  .h-full.min-h-0.flex-1.overflow-y-auto > .flex.min-h-full.w-full.flex-col >
+  .border-transparent:has(> .mx-auto.w-full h1):not([data-bc-ui], [data-bc-ui] *)::before {
+  background-color: transparent !important;
+  background-image: none !important;
 }
