@@ -267,6 +267,17 @@ html[data-bc-active="true"] body > #root main
   background: transparent !important;
 }
 
+/* Codex 26.1016: an empty, non-interactive surface behind the composer paints
+   a large black rectangle outside the rounded input. Target its layout role,
+   not the generated CSS-module hash or every bg-surface (which includes cards).
+   The data-composer-body and functional panels below retain their opaque fill. */
+html[data-bc-active="true"] body > #root main
+  .pointer-events-none.absolute.inset-x-0.bottom-0 >
+  .pointer-events-none.absolute.inset-x-0.bottom-0.bg-surface:empty {
+  background: transparent !important;
+  background-image: none !important;
+}
+
 /* Home hero card chrome — keep interactive, drop solid fill. */
 html[data-bc-active="true"] body > #root main
   [role="main"]:has([data-testid="home-icon"])

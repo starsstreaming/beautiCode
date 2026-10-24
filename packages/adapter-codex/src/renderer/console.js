@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const CONSOLE_REV = 12;
+  const CONSOLE_REV = 13;
   if (window.__beauticodeConsoleRev === CONSOLE_REV && window.__beauticodeConsoleLoaded) {
     try {
       window.__beauticodeConsolePlace?.();
@@ -171,82 +171,10 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
   let currentThemeId = "";
   let themesExpanded = true;
 
-  const DIM_STORAGE_KEY = "beauticode-dim";
-  let userDim = null;
-
-  function clampDim(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0 || n > 1) return null;
-    return n;
-  }
-
-  function readStoredDim() {
-    try {
-      const raw = globalThis.localStorage?.getItem(DIM_STORAGE_KEY);
-      if (raw == null || raw === "") return null;
-      return clampDim(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  function writeStoredDim(value) {
-    try {
-      if (value == null) globalThis.localStorage?.removeItem(DIM_STORAGE_KEY);
-      else globalThis.localStorage?.setItem(DIM_STORAGE_KEY, String(value));
-    } catch {
-      /* private mode / quota */
-    }
-  }
-
-  function applyUserDim(value) {
-    const root = document.documentElement;
-    if (value == null) {
-      try {
-        root.removeAttribute("data-bc-dim-user");
-        root.style?.removeProperty?.("--bc-dim");
-      } catch {
-        /* ignore */
-      }
-      return null;
-    }
-    try {
-      root.setAttribute("data-bc-dim-user", "true");
-      root.style?.setProperty?.("--bc-dim", String(value));
-    } catch {
-      /* ignore */
-    }
-    return value;
-  }
-
-  function setUserDim(value) {
-    const next = clampDim(value);
-    if (next == null) return userDim;
-    userDim = next;
-    writeStoredDim(next);
-    applyUserDim(next);
-    return next;
-  }
-
-  function clearUserDim() {
-    userDim = null;
-    writeStoredDim(null);
-    applyUserDim(null);
-    return null;
-  }
-
-  userDim = readStoredDim();
-  if (userDim != null) applyUserDim(userDim);
-  globalThis.BeauticodeBackgroundDim = {
-    get: () => userDim,
-    set: setUserDim,
-    clear: clearUserDim,
-  };
-
   function renderDim() {
     const current = globalThis.BeauticodeBackgroundDim?.get?.() ?? null;
     if (current == null) {
-      dimSlider.value = String(AUTO_DIM_PERCENT);
+      dimSlider.value = String(isLightTone() ? AUTO_DIM_PERCENT : 0);
       dimValue.textContent = "自动";
       dimReset.hidden = true;
       return;
@@ -476,6 +404,7 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
       // Host appearance can flip while the pop is closed; sampling it on open
       // keeps a closed pop free of observers on a very large tree.
       renderBlur();
+      renderDim();
       void refresh();
     }
   }
