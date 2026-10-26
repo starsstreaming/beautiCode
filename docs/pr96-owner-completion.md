@@ -96,6 +96,20 @@ navigation-sampled.webm 是这六帧的回放，不是连续录屏，不能证�
 - Plans/结算/认证等未验证页面：保留原生，不扩大透明范围。
 - 未安装旧版客户端，没有将本版本结论推广至 PR 描述的旧版本。
 
+## 2026-10-26 输入框上方渐变补充
+
+现场定位并清除了聊天滚动区粘滞页脚的空 from-surface 渐变层。
+当前窗口应用独立、带背景活动门控的样式修正；不修改安装包，窗口重载后须由更新的载荷重新注入。
+读取修正前后的计算样式：渐变由 linear-gradient 变为 none，输入框仍为 rgb(31, 31, 31)。
+截图 composer-fade-after.png 与脱敏计算结果 composer-fade-live.json 位于本地 artifacts/pr96。
+新增回归先失败后通过，覆盖浅→深→浅、相似元素不受影响及 dispose 后恢复。
+appearance 浏览器测试实际执行 5 项，全部通过、零跳过（composer-fade-browser.log）。
+本次全仓复跑为 435 通过、20 显式跳过、0 失败（composer-fade-full-test.log）；
+新打包 CSS 与源码 SHA256 一致。包内载荷浏览器测试首次视频用例仅录得 171 字节文件头而失败，
+未改测试或运行时代码，原样复跑 4 项全部通过、零跳过。
+首次失败与复跑日志分别为 composer-fade-packaged-browser.log、composer-fade-packaged-recheck.log；
+这是现有实时录制样例的时序波动，不能将该次首次执行记为通过。
+
 ## 复跑
 
 从仓库根运行 npm run typecheck、npm test、npm run build。

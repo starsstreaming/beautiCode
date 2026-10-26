@@ -260,7 +260,12 @@ html[data-bc-active="true"] body > #root main
 
 html[data-bc-active="true"] body > #root main
   .thread-scroll-container
-  .bg-gradient-to-t.from-token-main-surface-primary {
+  .bg-gradient-to-t.from-token-main-surface-primary,
+/* 26.1016 puts the bottom fade in an empty absolute child of the sticky
+   thread footer. Its from-surface gradient survives the older token rule. */
+html[data-bc-active="true"] body > #root main .thread-scroll-container
+  .pointer-events-none.sticky.bottom-0 >
+  .pointer-events-none.absolute.inset-x-0.from-surface:empty {
   background-image: none !important;
   background: transparent !important;
 }

@@ -21,6 +21,8 @@
 
 只在背景活动时，将 main 内底部定位容器的空、不可交互 bg-surface 子装饰层设为透明。输入框、对话框和其他 surface 保留底色；清除背景恢复宿主样式。不引入通用 surface 透明规则。
 
+2026-10-26 补充：用户继续报告输入框上方的黑色渐变。现场确认它属于 thread-scroll-container 内 sticky bottom-0 页脚的空、不可交互、横向绝对定位 from-surface 子层；实际背景为从 #181818 到透明的线性渐变。旧的 bg-gradient-to-t/from-token-main-surface-primary 规则不匹配该结构。新增仅针对这一布局职责的规则，不依赖 _background_ / _fade_ 生成类名，不改变有内容的节点、非粘滞结构或聊天区之外的渐变。背景清除后由 data-bc-active 门控恢复宿主渐变。
+
 ## 验证与边界
 
 appearance.browser.test.js 使用 Edge 实际渲染，覆盖首次恢复、根样式替换、零值、非法值、浅深色、清除偏好不重建舞台及输入区边界。通过 BEAUTICODE_PLAYWRIGHT_MODULE 指向已有 Playwright 运行时；没有运行时时显式跳过，不添加发布依赖。

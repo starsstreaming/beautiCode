@@ -13,8 +13,19 @@ async function fixture(t, stored = '0.46', tone = 'dark') {
   const page = await browser.newPage();
   await page.route('http://127.0.0.1:19335/**', route => route.fulfill({ body: `<!doctype html><html data-theme="${tone}"><head><style>
     .bg-surface {background:rgb(24,24,24)} [data-composer-body]{background:#333}
+    .from-surface {background-image:linear-gradient(to top, #181818, transparent)}
     main{height:600px} .decoration{height:240px}
   </style></head><body><div id="root"><main>
+    <div class="thread-scroll-container"><div>
+      <div class="pointer-events-none sticky bottom-0">
+        <div id="thread-fade" class="pointer-events-none absolute inset-x-0 from-surface"></div>
+        <div id="nonempty-fade" class="pointer-events-none absolute inset-x-0 from-surface">Content</div>
+      </div>
+      <div id="unpositioned-fade" class="pointer-events-none absolute inset-x-0 from-surface"></div>
+    </div></div>
+    <div class="pointer-events-none sticky bottom-0">
+      <div id="unrelated-fade" class="pointer-events-none absolute inset-x-0 from-surface"></div>
+    </div>
     <div class="pointer-events-none absolute inset-x-0 bottom-0">
       <div id="decoration" class="decoration pointer-events-none absolute inset-x-0 bottom-0 bg-surface"></div>
       <div data-composer-body><textarea aria-label="Draft"></textarea></div>
@@ -70,4 +81,19 @@ browserTest('new composer decoration is transparent while composer and dialogs s
   assert.equal(await bg('#unrelated'), 'rgb(24, 24, 24)');
   await page.evaluate(() => window.__BEAUTICODE_BG__.dispose());
   assert.equal(await bg('#decoration'), 'rgb(24, 24, 24)');
+});
+
+browserTest('empty sticky thread fade above the composer clears only while wallpaper is active', async t => {
+  const { page } = await fixture(t);
+  const gradient = selector => page.locator(selector).evaluate(n => getComputedStyle(n).backgroundImage);
+  for (const tone of ['light', 'dark', 'light']) {
+    await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), tone);
+    assert.equal(await gradient('#thread-fade'), 'none');
+    for (const selector of ['#nonempty-fade', '#unpositioned-fade', '#unrelated-fade']) {
+      assert.match(await gradient(selector), /linear-gradient/);
+    }
+    assert.notEqual(await page.locator('[data-composer-body]').evaluate(n => getComputedStyle(n).backgroundColor), 'rgba(0, 0, 0, 0)');
+  }
+  await page.evaluate(() => window.__BEAUTICODE_BG__.dispose());
+  assert.match(await gradient('#thread-fade'), /linear-gradient/);
 });
