@@ -260,9 +260,25 @@ html[data-bc-active="true"] body > #root main
 
 html[data-bc-active="true"] body > #root main
   .thread-scroll-container
-  .bg-gradient-to-t.from-token-main-surface-primary {
+  .bg-gradient-to-t.from-token-main-surface-primary,
+/* 26.1016 puts the bottom fade in an empty absolute child of the sticky
+   thread footer. Its from-surface gradient survives the older token rule. */
+html[data-bc-active="true"] body > #root main .thread-scroll-container
+  .pointer-events-none.sticky.bottom-0 >
+  .pointer-events-none.absolute.inset-x-0.from-surface:empty {
   background-image: none !important;
   background: transparent !important;
+}
+
+/* Codex 26.1016: an empty, non-interactive surface behind the composer paints
+   a large black rectangle outside the rounded input. Target its layout role,
+   not the generated CSS-module hash or every bg-surface (which includes cards).
+   The data-composer-body and functional panels below retain their opaque fill. */
+html[data-bc-active="true"] body > #root main
+  .pointer-events-none.absolute.inset-x-0.bottom-0 >
+  .pointer-events-none.absolute.inset-x-0.bottom-0.bg-surface:empty {
+  background: transparent !important;
+  background-image: none !important;
 }
 
 /* Home hero card chrome — keep interactive, drop solid fill. */
@@ -357,103 +373,82 @@ html[data-bc-active="true"] :is([role="dialog"], [role="alertdialog"],
   background-color: var(--bc-readable-fill) !important;
 }
 
-/* A tooltip keeps the host's own dark surface and light label; forcing the
-   readable fill here left near-white text on white. The Radix popper wrapper
-   only positions a rounded panel, so painting it leaves a square plate behind
-   an otherwise correct menu. */
+/* Positioning shells must not paint square plates behind rounded panels. */
 html[data-bc-active="true"] [data-radix-popper-content-wrapper] {
   background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
 }
 
-/* Full-page ChatGPT routes mount in an Electron <webview>. Keep the host frame
-   clear so the wallpaper stays the window base; the runtime also clears the
-   guest document's own opaque surfaces. */
-html[data-bc-active="true"] body > #root
-  webview:not([src^="codex-sandbox:"]) {
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
-/* Composer chrome: Codex paints a tinted band behind the input and a tinted
-   notice above it. Drop that wash so the wallpaper stays the base layer; the
-   input body keeps its own white card. */
-html[data-bc-active="true"] body > #root main
-  [class*="_background_"][class*="_surface_"],
-html[data-bc-active="true"] body > #root main
-  [class*="_ComposerLayoutRoot_"] {
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
-html[data-bc-active="true"] body > #root main aside {
-  background-color: rgba(255, 255, 255, 0.9) !important;
-  background-image: none !important;
-}
-
-/* Scroll fade above the composer: Codex fades into the themed surface, which
-   leaves a tinted strip over the wallpaper. Let the wallpaper carry it. */
-html[data-bc-active="true"] body > #root main
-  [class*="_background_"][class*="_fade_"] {
-  background-image: none !important;
-  background-color: transparent !important;
-}
-
-/* Content routes (Library, Sites, Images) paint a page-sized tinted surface
-   plus a header plate on the shell's ::before. Keep both on the wallpaper. */
-html[data-bc-active="true"] body > #root main
-  div.bg-surface:has([class*="_shell_"]) {
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
-html[data-bc-active="true"] body > #root main
-  [class*="_shell_"]::before {
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
-html[data-bc-active="true"] body > #root main
-  div.bg-surface:has([class*="empty-state-pag"]) {
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
-/* Hover previews and other floating cards keep a light plate so the card
-   separates from the page behind it. Only overlay surfaces match, so a page
-   stays on the wallpaper after navigating there. */
+/* Floating surface plates follow the host palette. Ordinary tooltips and
+   beautiCode UI retain their own colors. */
 html[data-bc-active="true"]
   :is([data-overlay-owner], [data-overlay-owner] *)
   :is(.bg-surface, .bg-surface-secondary, .bg-surface-elevated,
-      .bg-surface-elevated-secondary):not([role="tooltip"], [role="tooltip"] *) {
-  background-color: rgba(253, 252, 254, 0.94) !important;
+      .bg-surface-elevated-secondary):not([role="tooltip"], [role="tooltip"] *):not(
+      [data-bc-ui], [data-bc-ui] *, #beauticode-console, #beauticode-console *,
+      #beauticode-console-pop, #beauticode-console-pop *,
+      #beauticode-gallery, #beauticode-gallery *,
+      #beauticode-name-dialog, #beauticode-name-dialog *) {
+  background-color: var(--bc-readable-fill) !important;
   background-image: none !important;
 }
-
 html[data-bc-active="true"] [data-overlay-owner]:is(
   .bg-surface, .bg-surface-secondary, .bg-surface-elevated,
-  .bg-surface-elevated-secondary):not([role="tooltip"]) {
-  background-color: rgba(253, 252, 254, 0.94) !important;
+  .bg-surface-elevated-secondary):not([role="tooltip"]):not(
+    [data-bc-ui], [data-bc-ui] *, #beauticode-console, #beauticode-console *,
+    #beauticode-console-pop, #beauticode-console-pop *,
+    #beauticode-gallery, #beauticode-gallery *,
+    #beauticode-name-dialog, #beauticode-name-dialog *) {
+  background-color: var(--bc-readable-fill) !important;
+}
+
+/* Sidebar peeks are cards represented as tooltips. Preserve the native
+   radius and clip the painted direct surface wrapper, not its controls. */
+html[data-bc-active="true"] [role="tooltip"][data-overlay-owner="slate-sidebar"]:not(
+    [data-bc-ui], [data-bc-ui] *, #beauticode-console, #beauticode-console *,
+    #beauticode-console-pop, #beauticode-console-pop *,
+    #beauticode-gallery, #beauticode-gallery *,
+    #beauticode-name-dialog, #beauticode-name-dialog *) {
+  background-color: var(--bc-readable-fill) !important;
+  overflow: hidden !important;
+  box-shadow: 0 12px 32px #0003,
+    0 0 0 1px color-mix(in srgb, currentColor 12%, transparent) !important;
+}
+html[data-bc-active="true"] [role="tooltip"][data-overlay-owner="slate-sidebar"]:not(
+    [data-bc-ui], [data-bc-ui] *, #beauticode-console, #beauticode-console *,
+    #beauticode-console-pop, #beauticode-console-pop *,
+    #beauticode-gallery, #beauticode-gallery *,
+    #beauticode-name-dialog, #beauticode-name-dialog *) >
+  :is(.bg-surface, .bg-surface-secondary, .bg-surface-elevated, .bg-surface-elevated-secondary) {
+  border-radius: inherit !important;
+  background-color: inherit !important;
+}
+
+/* Native content route contract observed on 26.1016 (Sites): workspace slot,
+   full-height shell and centered tab panels. Nested reading cards are absent
+   from these selectors. No generated class names or viewport-size guesses. */
+html[data-bc-active="true"] main
+  .outline-none.flex.h-full.min-h-0.min-w-0.flex-1.flex-col >
+  .bg-surface.flex.h-full.min-h-0.flex-col:has([role="tabpanel"],
+    > .contents > .h-full.min-h-0.flex-1.overflow-y-auto >
+      .flex.min-h-full.w-full.flex-col > .border-transparent h1),
+html[data-bc-active="true"] main
+  .outline-none.flex.h-full.min-h-0.min-w-0.flex-1.flex-col >
+  .bg-surface.flex.h-full.min-h-0.flex-col
+  .mx-auto.bg-surface:has(> [role="tabpanel"]),
+html[data-bc-active="true"] main
+  .outline-none.flex.h-full.min-h-0.min-w-0.flex-1.flex-col >
+  .bg-surface.flex.h-full.min-h-0.flex-col
+  [role="tabpanel"].mx-auto.bg-surface {
+  background-color: transparent !important;
   background-image: none !important;
 }
 
-/* Project and page peeks: the card's inner wrapper paints a square white
-   plate over the rounded shell, so the preview reads as a hard rectangle.
-   Inherit the radius and clip the wrapper; a hairline ring keeps the rounded
-   silhouette visible on light wallpapers. */
-html[data-bc-active="true"]
-  [role="tooltip"][data-overlay-owner="slate-sidebar"] {
-  border-radius: 18px !important;
-  background-color: rgba(250, 249, 253, 0.97) !important;
-  overflow: hidden !important;
-  box-shadow:
-    0 18px 44px rgba(40, 22, 54, 0.22),
-    0 0 0 1px rgba(74, 35, 95, 0.1) !important;
-}
-
-html[data-bc-active="true"]
-  [role="tooltip"][data-overlay-owner="slate-sidebar"] > * {
-  border-radius: inherit !important;
+/* The native header plate is a pseudo-element on the scroll shell, not h1.
+   Anchor to its observed layout hierarchy rather than the generated _shell_ hash. */
+html[data-bc-active="true"] main
+  .outline-none.flex.h-full.min-h-0.min-w-0.flex-1.flex-col .contents >
+  .h-full.min-h-0.flex-1.overflow-y-auto > .flex.min-h-full.w-full.flex-col >
+  .border-transparent:has(> .mx-auto.w-full h1):not([data-bc-ui], [data-bc-ui] *)::before {
+  background-color: transparent !important;
+  background-image: none !important;
 }
