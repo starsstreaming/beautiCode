@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const CONSOLE_REV = 13;
+  const CONSOLE_REV = 14;
   if (window.__beauticodeConsoleRev === CONSOLE_REV && window.__beauticodeConsoleLoaded) {
     try {
       window.__beauticodeConsolePlace?.();
@@ -333,6 +333,10 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     if (!rect.width) return;
     pop.style.left = `${Math.round(rect.left)}px`;
     pop.style.bottom = `${Math.round(window.innerHeight - rect.top + 8)}px`;
+    // Short windows (e.g. 1280x820 with the rail mid-height) would push the
+    // header off-screen; cap to the space above the trigger and scroll instead.
+    pop.style.maxHeight = `${Math.max(120, Math.round(rect.top - 16))}px`;
+    pop.style.overflowY = "auto";
   }
 
   function isContents(node) {
