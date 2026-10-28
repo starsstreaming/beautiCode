@@ -224,7 +224,8 @@ async function evaluate(connection, expression) {
 /** Linux: zenity first, kdialog as the KDE fallback (same order as the WorkBuddy runner). */
 function pickFileLinux() {
   const title = '选择背景图片或视频';
-  const filter = '*.png *.jpg *.jpeg *.webp *.gif *.bmp *.avif *.mp4 *.mov *.webm *.m4v';
+  // Only what core media validation accepts (IMAGE_EXTENSIONS / VIDEO_EXTENSIONS).
+  const filter = '*.png *.jpg *.jpeg *.webp *.avif *.mp4 *.mov *.PNG *.JPG *.JPEG *.WEBP *.AVIF *.MP4 *.MOV';
   return new Promise((resolve, reject) => execFile(
     'zenity', ['--file-selection', '--title', title, '--file-filter', `媒体 | ${filter}`],
     { maxBuffer: 1024 * 1024 },
@@ -519,7 +520,14 @@ async function runSession(endpoint) {
         await evaluate(connection, 'window.__bcDesktopPickRequest=0');
         let picked = '';
         try { picked = await pickFileNative(); } catch {}
-        if (picked) await setFileInput(connection, picked, { mode: 'import', save: false });
+        if (picked) {
+          try { await setFileInput(connection, picked, { mode: 'import', save: false }); }
+          catch (error) {
+            // Surface rejected picks (e.g. unsupported format) instead of failing silently.
+            log.warn(`导入背景失败：${error.message}`);
+            await evaluate(connection, `window.__bcDesktopMessage&&window.__bcDesktopMessage(${JSON.stringify(String(error.message || spec.strings.missingFile))})`);
+          }
+        }
       }
       if (snapshot.apply?.requestId && snapshot.apply.requestId !== lastApply) {
         lastApply = snapshot.apply.requestId;
