@@ -47,7 +47,9 @@ export function createHealthRunner(deps) {
         ...(conflict ? { reason: conflict } : {}),
       };
     }
-    if (resolved.platform !== "win32") return { host, installation: "unsupported-platform", state: "not-checked" };
+    if (resolved.platform !== "win32" && !(resolved.platform === "linux" && host !== "doubao")) {
+      return { host, installation: "unsupported-platform", state: "not-checked" };
+    }
     const runtimeRoot = options.runtimeRoot || deps.defaultRuntimeRoot;
     const script = host === "workbuddy"
       ? path.join(runtimeRoot, "workbuddy", "scripts", "wb-setup.mjs")

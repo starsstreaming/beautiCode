@@ -120,3 +120,27 @@ test('parent cleans its private shortcut alias when the native process is termin
   }), (error) => error.code === 'ETIMEDOUT');
   assert.deepEqual(fs.readdirSync(programsDir), []);
 });
+
+test('Linux quick launch entry is owned, idempotent, conflict-safe and removable', { skip: process.platform !== 'linux' }, async (t) => {
+  const { removeLinuxQuickShortcut } = await import('../src/quick-shortcuts.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'beauticode-quick-desktop-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const launcher = path.join(root, 'data', 'beautiCode', 'runtime', 'cursor', 'launcher.sh');
+  fs.mkdirSync(path.dirname(launcher), { recursive: true });
+  fs.writeFileSync(launcher, '#!/bin/sh\n');
+  const programsDir = path.join(root, 'applications');
+  const first = installHostQuickShortcut('cursor', { platform: 'linux', xdgDataHome: path.join(root, 'data'), programsDir });
+  assert.equal(first.outcome, 'created');
+  const content = fs.readFileSync(first.path, 'utf8');
+  assert.match(content, /^Exec="\/bin\/sh" ".*launcher\.sh" --quick-launch$/m);
+  assert.match(content, /^X-BeautiCode-Managed=true$/m);
+  assert.equal(installHostQuickShortcut('cursor', { platform: 'linux', xdgDataHome: path.join(root, 'data'), programsDir }).outcome, 'present');
+  fs.writeFileSync(first.path, '[Desktop Entry]\nExec=foreign\n');
+  assert.throws(() => installHostQuickShortcut('cursor', { platform: 'linux', xdgDataHome: path.join(root, 'data'), programsDir }), /shortcut-conflict/);
+  assert.equal(removeLinuxQuickShortcut('cursor', { programsDir }), false);
+  assert.equal(fs.existsSync(first.path), true);
+  fs.rmSync(first.path);
+  installHostQuickShortcut('cursor', { platform: 'linux', xdgDataHome: path.join(root, 'data'), programsDir });
+  assert.equal(removeLinuxQuickShortcut('cursor', { programsDir }), true);
+  assert.equal(fs.existsSync(first.path), false);
+});

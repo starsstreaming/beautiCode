@@ -10,8 +10,19 @@ function psLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+function linuxDataHome(options = {}) {
+  const xdg = options.xdgDataHome || process.env.XDG_DATA_HOME;
+  return xdg && path.isAbsolute(xdg) ? xdg : path.join(options.home || os.homedir(), '.local', 'share');
+}
+
 export function stableQuickLauncher(host, options = {}) {
   if (!NAMES[host]) throw new Error('unsupported-quick-launch-host');
+  if ((options.platform || process.platform) === 'linux') {
+    const local = options.localAppData || linuxDataHome(options);
+    return host === 'codex'
+      ? path.join(local, 'beautiCode', 'codex-plugin', 'launcher.sh')
+      : path.join(local, 'beautiCode', 'runtime', host, 'launcher.sh');
+  }
   const local = options.localAppData || process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
   return host === 'codex'
     ? path.join(local, 'beautiCode', 'codex-plugin', 'launcher.ps1')
@@ -20,6 +31,7 @@ export function stableQuickLauncher(host, options = {}) {
 
 /** Create only an owned Start Menu link; a same-named foreign link is a conflict. */
 export function installHostQuickShortcut(host, options = {}) {
+  if ((options.platform || process.platform) === 'linux') return installLinuxQuickShortcut(host, options);
   if (process.platform !== 'win32') throw new Error('windows-only');
   if (!NAMES[host]) throw new Error('unsupported-quick-launch-host');
   const launcher = options.launcher || stableQuickLauncher(host, options);
@@ -95,4 +107,61 @@ export function installHostQuickShortcut(host, options = {}) {
       throw Object.assign(new Error(`${detail}shortcut-temp-cleanup-failed: ${code}`), { code });
     }
   }
+}
+
+const LINUX_ICONS = Object.freeze({ codex: 'chatgpt', workbuddy: 'workbuddy', cursor: 'co.anysphere.cursor', doubao: 'doubao' });
+
+function desktopExecQuote(value) {
+  // Same rules as portable-runtime desktopExecQuote (Desktop Entry spec).
+  return `"${String(value).replace(/["`$\\]/g, (char) => `\\${char}`).replaceAll('%', '%%')}"`;
+}
+
+/** XDG application entry; an existing same-named entry we do not own is a conflict. */
+function installLinuxQuickShortcut(host, options) {
+  if (!NAMES[host] || host === 'doubao') throw new Error('unsupported-quick-launch-host');
+  const launcher = options.launcher || stableQuickLauncher(host, { ...options, platform: 'linux' });
+  if (!path.isAbsolute(launcher) || !fs.existsSync(launcher)) throw new Error('stable-launcher-missing');
+  const applicationsDir = options.programsDir || path.join(linuxDataHome(options), 'applications');
+  const shortcutPath = path.join(applicationsDir, `beautiCode-${host}-background.desktop`);
+  const exec = `${desktopExecQuote('/bin/sh')} ${desktopExecQuote(launcher)} --quick-launch`;
+  const content = [
+    '[Desktop Entry]',
+    'Type=Application',
+    `Name=beautiCode ${NAMES[host]} (背景)`,
+    `Comment=beautiCode quick launch for ${host}`,
+    `Exec=${exec}`,
+    `Icon=${LINUX_ICONS[host]}`,
+    'Terminal=false',
+    'Categories=Utility;',
+    'X-BeautiCode-Managed=true',
+    '',
+  ].join('\n');
+  let existing = null;
+  try { existing = fs.readFileSync(shortcutPath, 'utf8'); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  if (existing != null) {
+    if (!/^X-BeautiCode-Managed=true$/m.test(existing) || !existing.includes(`Exec=${exec}`)) throw new Error('shortcut-conflict');
+    return { outcome: 'present', path: shortcutPath };
+  }
+  fs.mkdirSync(applicationsDir, { recursive: true });
+  const temporaryPath = path.join(applicationsDir, `.beauticode-${randomUUID()}.tmp`);
+  fs.writeFileSync(temporaryPath, content, { mode: 0o644 });
+  try {
+    fs.linkSync(temporaryPath, shortcutPath); // fails instead of overwriting a racing foreign file
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error('shortcut-conflict');
+    throw error;
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
+  return { outcome: 'created', path: shortcutPath };
+}
+
+/** Remove only our own XDG application entry (uninstall). */
+export function removeLinuxQuickShortcut(host, options = {}) {
+  const shortcutPath = path.join(options.programsDir || path.join(linuxDataHome(options), 'applications'), `beautiCode-${host}-background.desktop`);
+  try {
+    if (!/^X-BeautiCode-Managed=true$/m.test(fs.readFileSync(shortcutPath, 'utf8'))) return false;
+  } catch { return false; }
+  fs.rmSync(shortcutPath, { force: true });
+  return true;
 }
