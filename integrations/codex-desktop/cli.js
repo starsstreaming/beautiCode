@@ -163,6 +163,12 @@ const CODEX_PAGE_RESTORE = `(() => {
   try { window.__BEAUTICODE_BG__?.dispose?.(); } catch {}
   try { window.__beauticodeConsoleDispose?.(); } catch {}
   for (const node of document.querySelectorAll('[id^="beauticode-"]')) node.remove();
+  // Drop the load guards too, or a later reinstall in this same page sees
+  // "already loaded" and never re-mounts the 背景 entry.
+  try { if (window.__beauticodeGalleryKeydown) document.removeEventListener("keydown", window.__beauticodeGalleryKeydown); } catch {}
+  for (const key of ["__beauticodeConsoleLoaded", "__beauticodeConsoleRev", "__beauticodeGalleryLoaded", "__beauticodeGalleryKeydown", "__BEAUTICODE_BG__"]) {
+    try { delete window[key]; } catch {}
+  }
   return true;
 })()`;
 
