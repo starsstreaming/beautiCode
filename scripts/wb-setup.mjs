@@ -140,8 +140,12 @@ async function chooseInstallPort() {
     ...(Number.isInteger(requested) ? [requested] : []),
     ...PORT_CANDIDATES,
   ].filter((value, index, all) => Number.isInteger(value) && value > 0 && value <= 65535 && all.indexOf(value) === index);
+  // A WorkBuddy that is already serving CDP wins over a merely free port, so a
+  // stale configured port never shadows the live instance (false "no CDP" warning).
   for (const candidate of ordered) {
     if (await hasWorkBuddyCdp(candidate)) return String(candidate);
+  }
+  for (const candidate of ordered) {
     if (await isLoopbackPortFree(candidate)) return String(candidate);
   }
   throw new Error('没有可用的 WorkBuddy loopback CDP 端口。');
