@@ -18,6 +18,7 @@ const SAFE_FAILURE_CODES = new Set([
   'cdp-target-unavailable',
   'executable-not-found',
   'windows-only',
+  'unsupported-platform',
   'unsupported-host',
 ]);
 
@@ -54,7 +55,8 @@ async function launchDesktop(host) {
 }
 
 export async function runQuickLaunch(host) {
-  if (process.platform !== 'win32') throw new Error('windows-only');
+  if (process.platform !== 'win32' && process.platform !== 'linux') throw new Error('unsupported-platform');
+  if (process.platform === 'linux' && host === 'doubao') throw new Error('unsupported-host');
   if (host === 'codex-plugin') {
     const packed = path.join(runtimeRoot, 'vendor', 'adapter-codex', 'index.js');
     const { ensureCodexCdp } = await load(fs.existsSync(packed)
@@ -75,7 +77,10 @@ export async function runQuickLaunch(host) {
 async function main() {
   const host = String(process.argv[2] || '').toLowerCase();
   const dataHost = host === 'codex-plugin' ? 'codex' : host;
-  const file = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beautiCode', 'hosts', dataHost, 'quick-launch.json');
+  const base = process.env.LOCALAPPDATA || (process.platform === 'linux'
+    ? (process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME) ? process.env.XDG_DATA_HOME : path.join(os.homedir(), '.local', 'share'))
+    : path.join(os.homedir(), 'AppData', 'Local'));
+  const file = path.join(base, 'beautiCode', 'hosts', dataHost, 'quick-launch.json');
   let state;
   try {
     state = { at: new Date().toISOString(), result: await runQuickLaunch(host) };

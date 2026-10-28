@@ -19,12 +19,13 @@
  *   macOS  ：LaunchAgent（RunAtLoad+KeepAlive，登录时 launchctl setenv + 常驻 runner）
  *   Windows：setx 持久化用户 env + 「启动」文件夹放隐藏运行的 VBS
  *   Linux  ：environment.d（systemd 用户会话 env）+ ~/.config/autostart/*.desktop
+ *            （autostart 执行稳定 runtime 的 launcher.sh；守护会在 10 秒窗口内带 env 修复性重启无 CDP 的新进程）
  *
  * 安全：不写 ~/.workbuddy/；卸载可完整还原。
  */
 
 import { spawn, spawnSync, execSync } from 'node:child_process';
-import { isManagedWorkBuddyRunner, readWindowsProcess } from './guardian-process.mjs';
+import { isManagedWorkBuddyRunner, readGuardianProcess } from './guardian-process.mjs';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -32,11 +33,14 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   activateStableRuntime,
+  beautiCodeLocalRoot,
   discardStableRuntime,
   hostRuntimeRoot,
   renderWindowsStartupVbs,
+  renderXdgDesktopEntry,
   resolveNodeExecutable,
   stableRuntimeRoot,
+  startDetachedLauncher,
   startupDirectory,
   syncStableRuntime,
   writeTextAtomic,
@@ -188,7 +192,7 @@ async function prepareStableRuntime() {
   });
   try {
     await resolveNodeExecutable({ stableRoot: runtime.hostRoot });
-    return await activateStableRuntime(runtime, { startupLogPath: WIN_LOG });
+    return await activateStableRuntime(runtime, { startupLogPath: PLAT === 'linux' ? LINUX_LOG : WIN_LOG });
   } catch (error) {
     await discardStableRuntime(runtime);
     throw error;
@@ -208,11 +212,13 @@ const WIN_LOG = path.join(
 );
 const LINUX_ENV = path.join(home, '.config/environment.d/beauticode-wb.conf');
 const LINUX_DESKTOP = path.join(home, '.config/autostart/beauticode-beauticode-wb-runner.desktop');
+const LINUX_LOG = path.join(beautiCodeLocalRoot(process.env, home), 'logs', 'wb-launcher.log');
+// Linux uses the owner record that wb-cdp-runner --watchdog writes itself.
 const PID_FILE = PLAT === 'win32'
   ? path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'beauticode', 'wb-runner.pid')
   : PLAT === 'darwin'
     ? path.join(home, 'Library', 'Logs', 'beauticode-wb-runner.pid')
-    : '/tmp/beauticode-wb-runner.pid';
+    : path.join(DATA_DIR, 'wb-runner.pid');
 
 const macPlist = () => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -308,11 +314,18 @@ function statusWin() {
   log(`  守护日志：${state}`);
 }
 
-function installLinux() {
+function installLinux(runtime) {
   fs.mkdirSync(path.dirname(LINUX_ENV), { recursive: true });
   fs.mkdirSync(path.dirname(LINUX_DESKTOP), { recursive: true });
   fs.writeFileSync(LINUX_ENV, `${ENV_KEY}=${port}\n`);
-  fs.writeFileSync(LINUX_DESKTOP, linuxDesktop());
+  fs.writeFileSync(LINUX_DESKTOP, runtime
+    ? renderXdgDesktopEntry({
+      name: 'beautiCode WorkBuddy runner',
+      comment: '注入 WorkBuddy 自定义背景（CDP）',
+      launcher: runtime.launcher,
+      args: ['--watchdog'],
+    })
+    : linuxDesktop());
   log('  ✓ environment.d + autostart 已写入（下次登录生效；当前会话可手动 export）');
 }
 function uninstallLinux() {
@@ -348,12 +361,12 @@ function findWindowsRunnerPids(nodeOnly = false) {
 }
 
 function managedWindowsRunnerProcess() {
-  if (PLAT !== 'win32') return null;
+  if (PLAT !== 'win32' && PLAT !== 'linux') return null;
   let record;
   try { record = JSON.parse(fs.readFileSync(PID_FILE, 'utf8')); }
   catch { return null; }
   const pid = Number(record?.pid);
-  const current = readWindowsProcess(pid);
+  const current = readGuardianProcess(pid);
   return isManagedWorkBuddyRunner(record, current, {
     stableHostRoot: STABLE_HOST_ROOT, sourceRunner: RUNNER, pidFile: PID_FILE,
   }) ? current : null;
@@ -366,6 +379,16 @@ function stopManagedDaemon() {
       for (const pid of managed) {
         spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
       }
+    } else if (PLAT === 'linux') {
+      // Only an owner record whose PID, image, runner path and start time
+      // still match is signalled; a recycled PID is left alone.
+      const managed = managedWindowsRunnerProcess();
+      if (!managed) return;
+      try { process.kill(managed.pid, 'SIGTERM'); } catch { /* already gone */ }
+      const deadline = Date.now() + 5_000;
+      while (readGuardianProcess(managed.pid) && Date.now() < deadline) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+      }
     } else {
       if (!fs.existsSync(PID_FILE)) return;
       const pid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
@@ -377,8 +400,13 @@ function stopManagedDaemon() {
   }
 }
 
-function startDaemon() {
+function startDaemon(runtime) {
   stopManagedDaemon();
+  if (PLAT === 'linux' && runtime) {
+    const pid = startDetachedLauncher(runtime.launcher, ['--watchdog'], { env: { ...process.env, [ENV_KEY]: port } });
+    log(`  ✓ 守护启动器已调用（pid ${pid}，日志 ${path.join(beautiCodeLocalRoot(process.env, home), 'logs', 'wb-runner.log')}）`);
+    return;
+  }
   const logFile = PLAT === 'darwin' ? MAC_LOG : PLAT === 'win32' ? WIN_LOG : '/tmp/beauticode-wb-runner.log';
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
@@ -404,7 +432,7 @@ if (!fs.existsSync(RUNNER)) {
 }
 
 if (cmd === 'status') {
-  if (PLAT === 'win32' && process.argv.includes('--machine-status')) {
+  if ((PLAT === 'win32' || PLAT === 'linux') && process.argv.includes('--machine-status')) {
     let health = { state: 'probe-failed' };
     try {
       const adapterUrl = pathToFileURL(path.join(REPO, 'packages', 'adapter-workbuddy', 'dist', 'index.js')).href;
@@ -412,7 +440,7 @@ if (cmd === 'status') {
       health = await adapter.inspectWorkBuddyUiHealth();
     } catch { /* report a sanitized failure instead of spawning the long-lived runner */ }
     process.stdout.write(JSON.stringify({
-      installed: fs.existsSync(STARTUP_VBS),
+      installed: fs.existsSync(PLAT === 'linux' ? LINUX_DESKTOP : STARTUP_VBS),
       running: Boolean(managedWindowsRunnerProcess()),
       health,
     }) + '\n');
@@ -447,11 +475,11 @@ if (PACKAGED_RUNTIME) {
 // install — resolve and stage first; startup wiring is only replaced after
 // the stable runtime and verified Node are ready.
 log(`安装 beautiCode × WorkBuddy（${PLAT}，端口 ${port}）：`);
-const stableRuntime = PLAT === 'win32' ? await prepareStableRuntime() : null;
+const stableRuntime = PLAT === 'win32' || PLAT === 'linux' ? await prepareStableRuntime() : null;
 writeConfiguredPort(port);
-if (PLAT === 'darwin') installMac(); else if (PLAT === 'win32') await installWin(stableRuntime); else installLinux();
+if (PLAT === 'darwin') installMac(); else if (PLAT === 'win32') await installWin(stableRuntime); else installLinux(stableRuntime);
 
-startDaemon();
+startDaemon(stableRuntime);
 
 const up = await cdpUp();
 if (up) {

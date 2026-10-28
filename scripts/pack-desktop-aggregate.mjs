@@ -93,6 +93,14 @@ function rewriteCodexWatchHost(text) {
     .replaceAll("@beauticode/adapter-codex", "Codex adapter");
 }
 
+async function rewriteJsTree(dir) {
+  for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) await rewriteJsTree(file);
+    else if (entry.name.endsWith(".js")) await fsp.writeFile(file, rewriteDesktopAdapter(await fsp.readFile(file, "utf8")), "utf8");
+  }
+}
+
 async function copyDesktopRuntime(destRoot) {
   const desktop = path.join(destRoot, "runtime", "desktop");
   await copyText(
@@ -120,8 +128,8 @@ async function copyDesktopRuntime(destRoot) {
   );
   await copyJsTree(path.join(repoRoot, "packages", "core", "dist"), path.join(desktop, "packages", "core", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-desktop-cdp", "dist"), path.join(desktop, "packages", "adapter-desktop-cdp", "dist"));
-  const startupRepair = path.join(desktop, "packages", "adapter-desktop-cdp", "dist", "startup-repair.js");
-  await fsp.writeFile(startupRepair, rewriteDesktopAdapter(await fsp.readFile(startupRepair, "utf8")), "utf8");
+  // launch.js (Linux /proc scan) and startup-repair.js both import core.
+  await rewriteJsTree(path.join(desktop, "packages", "adapter-desktop-cdp", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-cursor", "dist"), path.join(desktop, "packages", "adapter-cursor", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-doubao", "dist"), path.join(desktop, "packages", "adapter-doubao", "dist"));
   for (const name of ["adapter-cursor", "adapter-doubao"]) {
@@ -153,8 +161,7 @@ async function copyWorkbuddyRuntime(destRoot) {
   );
   await copyJsTree(path.join(repoRoot, "packages", "core", "dist"), path.join(workbuddy, "packages", "core", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-workbuddy", "dist"), path.join(workbuddy, "packages", "adapter-workbuddy", "dist"));
-  const workbuddyLaunch = path.join(workbuddy, "packages", "adapter-workbuddy", "dist", "launch.js");
-  await fsp.writeFile(workbuddyLaunch, rewriteDesktopAdapter(await fsp.readFile(workbuddyLaunch, "utf8")), "utf8");
+  await rewriteJsTree(path.join(workbuddy, "packages", "adapter-workbuddy", "dist"));
   await copyTree(
     path.join(repoRoot, "assets", "themes", "internal-beyond"),
     path.join(workbuddy, "assets", "themes", "internal-beyond"),
@@ -167,8 +174,8 @@ export async function stageDesktopAggregate(destRoot = defaultStageDir(), opts =
   await fsp.rm(destRoot, { recursive: true, force: true });
   await fsp.mkdir(destRoot, { recursive: true });
   const manifest = JSON.parse(await fsp.readFile(path.join(sourceRoot, "package.json"), "utf8"));
-  // Source workspaces must install on Linux CI; only the distributable has a Windows-only runtime contract.
-  manifest.os = ["win32"];
+  // Source workspaces must install anywhere; the distributable supports Windows and Linux (x64 desktop clients).
+  manifest.os = ["win32", "linux"];
   await fsp.writeFile(path.join(destRoot, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   for (const name of ["README.md", "LICENSE"]) {
     const source = name === "LICENSE" ? path.join(repoRoot, name) : path.join(sourceRoot, name);

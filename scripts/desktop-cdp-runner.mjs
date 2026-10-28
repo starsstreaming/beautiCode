@@ -111,7 +111,10 @@ const log = {
   debug: (...parts) => { if (args.verbose) process.stderr.write(`[${ts()}] [${args.host}:debug] ${parts.join(' ')}\n`); },
 };
 
-const dataRoot = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'hosts', args.host);
+// Keep in sync with portable-runtime.mjs beautiCodeLocalRoot(): Linux shares core's XDG data root.
+const dataRoot = process.platform === 'linux'
+  ? path.join(process.env.LOCALAPPDATA || (process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME) ? process.env.XDG_DATA_HOME : path.join(os.homedir(), '.local', 'share')), 'beautiCode', 'hosts', args.host)
+  : path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'hosts', args.host);
 const stateFile = path.join(dataRoot, 'state.json');
 fs.mkdirSync(dataRoot, { recursive: true });
 
@@ -218,8 +221,25 @@ async function evaluate(connection, expression) {
   return reply.result?.value;
 }
 
+/** Linux: zenity first, kdialog as the KDE fallback (same order as the WorkBuddy runner). */
+function pickFileLinux() {
+  const title = '选择背景图片或视频';
+  const filter = '*.png *.jpg *.jpeg *.webp *.gif *.bmp *.avif *.mp4 *.mov *.webm *.m4v';
+  return new Promise((resolve, reject) => execFile(
+    'zenity', ['--file-selection', '--title', title, '--file-filter', `媒体 | ${filter}`],
+    { maxBuffer: 1024 * 1024 },
+    (error, stdout) => {
+      if (!error) return resolve(String(stdout).trim());
+      if (error.code !== 'ENOENT') return resolve('');
+      execFile('kdialog', ['--getopenfilename', os.homedir(), filter, '--title', title], { maxBuffer: 1024 * 1024 },
+        (fallbackError, fallbackOut) => fallbackError ? reject(fallbackError) : resolve(String(fallbackOut).trim()));
+    },
+  ));
+}
+
 async function pickFileNative() {
-  if (process.platform !== 'win32') throw new Error('本轮仅支持 Windows 原生文件选择器。');
+  if (process.platform === 'linux') return pickFileLinux();
+  if (process.platform !== 'win32') throw new Error('本轮仅支持 Windows 与 Linux 原生文件选择器。');
   const ps = [
     "$ErrorActionPreference='Stop'",
     "$OutputEncoding=New-Object System.Text.UTF8Encoding($false)",
@@ -313,6 +333,12 @@ async function setFileInput(connection, file, meta) {
 }
 
 function openExternal(url) {
+  if (process.platform === 'linux') {
+    const child = spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+    child.once('error', () => {});
+    child.unref();
+    return;
+  }
   if (process.platform !== 'win32') return;
   const child = spawn('rundll32.exe', ['url.dll,FileProtocolHandler', url], {
     detached: true, stdio: 'ignore', windowsHide: true,
