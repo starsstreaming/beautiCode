@@ -654,7 +654,8 @@ return 'default-applied';
 async function cleanupAll(c) {
   try {
     await evaluate(c, BACKGROUND_BAR_CLEANUP);
-    for (const id of APPLY_IDS) {
+    // The restore layer and panel-settle style are injected outside APPLY_IDS.
+    for (const id of [...APPLY_IDS, 'beauticode-restore-panel', 'beauticode-panel-settle']) {
       await evaluate(c, `(function(){var el=document.getElementById(${JSON.stringify(id)});if(el)el.remove();return 'removed:'+${JSON.stringify(id)};})()`);
     }
     log.info('清理完成');
