@@ -81,7 +81,9 @@ export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
   mount: "cursor",
   // Cursor's measured agent sidebar places Customize second in header actions.
   // The exact position and label are both required; an upstream reorder fails closed.
-  anchorSelector: '[data-action-id="marketplace"][data-sidebar-primary-action], .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(2)',
+  // Cursor 3.2x: header cells are [New Agent, Search, Automations, Customize];
+  // Earlier builds put Customize in the second cell. Each match also allows the injected entry right after it (nth-last-child(-n+2)).
+  anchorSelector: '[data-action-id="marketplace"][data-sidebar-primary-action], .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(2):nth-last-child(-n+2), .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(4):nth-last-child(-n+2)',
   anchorText: "Customize",
   strings: Object.freeze({
     entry: "background",
@@ -128,6 +130,13 @@ export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
       ".monaco-editor .margin",
       ".agent-panel",
       ".terminal-outer-container",
+      // Cursor 3.2x folder workbench (unified sidebar + agent auxiliary bar).
+      ".part.unifiedsidebar",
+      ".agent-sidebar",
+      ".part.auxiliarybar",
+      ".part.editor > .content",
+      ".editor-container",
+      ".composer-bar",
     ]),
     surfaceSelectors: Object.freeze([
       ".ui-sidebar",
