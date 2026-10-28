@@ -89,7 +89,9 @@ if (
     fileURLToPath(import.meta.url).toLowerCase()
 ) {
   try {
-    const root = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    const root = process.env.LOCALAPPDATA || (process.platform === "linux"
+      ? (process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME) ? process.env.XDG_DATA_HOME : path.join(os.homedir(), ".local", "share"))
+      : path.join(os.homedir(), "AppData", "Local"));
     const lease = await acquireCodexGuardianLease(path.join(root, "beautiCode", "hosts", "codex"));
     const watchdog = startCodexHelperWatchdog({
       log: (message) => process.stderr.write(`[codex-watchdog] ${message}\n`),

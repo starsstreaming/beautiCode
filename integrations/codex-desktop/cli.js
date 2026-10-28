@@ -10,7 +10,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { recoverStaleCodexLock, stopInstalledCodexGuardians } from "./lifecycle.mjs";
-import { createCodexRunKeyAdapter, createCodexTaskAdapter, uninstallCodexWiring } from "./task-wiring.mjs";
+import { createCodexAutostartAdapter, createCodexRunKeyAdapter, createCodexTaskAdapter, uninstallCodexWiring } from "./task-wiring.mjs";
 import { probeLocalCodexHealth } from "./health.mjs";
 
 function findPackageRoot(startDir) {
@@ -34,6 +34,13 @@ const here = findPackageRoot(path.dirname(fileURLToPath(import.meta.url)));
 function pluginHome() {
   const local = process.env.LOCALAPPDATA || process.env.BEAUTICODE_DATA_ROOT;
   if (local) return path.join(local, "beautiCode", "codex-plugin");
+  if (process.platform === "linux") {
+    // Same XDG data root as core's defaultDataRoot() and the guardian lease.
+    const xdg = process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME)
+      ? process.env.XDG_DATA_HOME
+      : path.join(os.homedir(), ".local", "share");
+    return path.join(xdg, "beautiCode", "codex-plugin");
+  }
   return path.join(os.homedir(), ".beauticode", "codex-plugin");
 }
 
@@ -142,6 +149,54 @@ function startIndependentWindows(starter) {
   );
 }
 
+/** Stop the previous guardian and wait until it released its lease. */
+async function stopLinuxGuardians(home, timeoutMs = 6_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (stopInstalledCodexGuardians(home, home) > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+// Same teardown the renderer runs on a host handoff: background stage, rail
+// entry and console go away without touching the saved theme on disk.
+const CODEX_PAGE_RESTORE = `(() => {
+  try { window.__BEAUTICODE_BG__?.dispose?.(); } catch {}
+  try { window.__beauticodeConsoleDispose?.(); } catch {}
+  for (const node of document.querySelectorAll('[id^="beauticode-"]')) node.remove();
+  return true;
+})()`;
+
+/** Linux uninstall: restore open Codex windows instead of waiting for a restart. */
+async function restoreLinuxCodexPages(home) {
+  const adapterFile = [path.join(home, "vendor", "adapter-codex", "index.js"), path.join(here, "vendor", "adapter-codex", "index.js"),
+    path.resolve(here, "../../packages/adapter-codex/dist/index.js")].find((file) => fs.existsSync(file));
+  if (!adapterFile) return 0;
+  const adapter = await import(pathToFileURL(adapterFile).href);
+  const ports = [...new Set((await adapter.listCodexProcesses()).map((proc) => proc.port).filter(Number.isInteger))];
+  let restored = 0;
+  for (const port of ports) {
+    let targets = [];
+    try { targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2_000) })).json(); }
+    catch { continue; }
+    for (const target of targets) {
+      if (target.type !== "page" || !String(target.url || "").startsWith("app://")) continue;
+      const debuggerUrl = new URL(target.webSocketDebuggerUrl);
+      if (debuggerUrl.hostname !== "127.0.0.1" || Number(debuggerUrl.port) !== port) continue;
+      await new Promise((resolve) => {
+        const ws = new WebSocket(debuggerUrl.href);
+        const done = () => { clearTimeout(timer); try { ws.close(); } catch {} resolve(); };
+        const timer = setTimeout(done, 3_000);
+        ws.addEventListener("open", () => ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: CODEX_PAGE_RESTORE, returnByValue: true } })));
+        ws.addEventListener("message", (event) => {
+          if (JSON.parse(String(event.data)).id === 1) { restored += 1; done(); }
+        });
+        ws.addEventListener("error", done);
+      });
+    }
+  }
+  return restored;
+}
+
 export function parseCodexCliMode(argv) {
   if (argv.length === 0) return "install";
   if (argv.length !== 1) throw new Error("Unknown Codex option");
@@ -169,6 +224,11 @@ export async function runCli(argv = process.argv.slice(2)) {
         runKey: createCodexRunKeyAdapter(path.join(home, "start-watch.ps1")),
         stopOwned: async () => { stopInstalledCodexGuardians(home, home); },
       });
+    } else if (process.platform === "linux") {
+      createCodexAutostartAdapter(path.join(home, "launcher.sh")).removeOwned();
+      await stopLinuxGuardians(home);
+      const restored = await restoreLinuxCodexPages(home).catch(() => 0);
+      if (restored) console.log(`已还原 ${restored} 个打开的 Codex 页面（保存的主题保留）。`);
     }
     console.log("已取消开机自动注入。打开 Codex 前请自行启动 beautiCode。");
     return;
@@ -199,7 +259,9 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
   const watch = path.join(home, "codex-watchdog.mjs");
   const starter = path.join(home, "start-watch.ps1");
-  await portable.writeTextAtomic(starter, portable.renderCodexStarter({ launcher: runtime.launcher }));
+  if (process.platform === "win32") {
+    await portable.writeTextAtomic(starter, portable.renderCodexStarter({ launcher: runtime.launcher }));
+  }
   const namespaceLock = path.join(home, "..", "hosts", "codex", "injector.lock");
   await recoverStaleCodexLock(namespaceLock, home).catch(() => false);
   if (process.platform === "win32") {
@@ -213,6 +275,17 @@ export async function runCli(argv = process.argv.slice(2)) {
         `本次未能立即启动后台监视器：${error instanceof Error ? error.message : String(error)}。下次登录时会自动启动。`,
       );
     }
+  } else if (process.platform === "linux") {
+    // XDG autostart replaces the scheduled task / Run key; the guardian is
+    // also started now, detached from this terminal.
+    const autostart = createCodexAutostartAdapter(runtime.launcher);
+    autostart.write(portable.renderXdgDesktopEntry({
+      name: "beautiCode Codex background guardian",
+      comment: "Re-applies beautiCode backgrounds to Codex through loopback CDP",
+      launcher: runtime.launcher,
+    }));
+    await stopLinuxGuardians(home);
+    portable.startDetachedLauncher(runtime.launcher);
   } else {
     const node = await portable.resolveNodeExecutable({ stableRoot: runtime.hostRoot });
     startHidden(node.path, watch);

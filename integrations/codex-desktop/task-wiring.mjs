@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export const CODEX_TASK_NAME = "beautiCode Codex Guardian";
@@ -118,4 +120,54 @@ export async function uninstallCodexWiring({ task, runKey, stopOwned }) {
     await stopOwned();
   }
   await runKey.remove();
+}
+
+/**
+ * Linux startup wiring: one XDG autostart entry that runs the stable POSIX
+ * launcher. Ownership is proven by the managed marker plus the exact
+ * launcher path, so a same-named user file is never rewritten or deleted.
+ */
+export const CODEX_AUTOSTART_NAME = "beauticode-codex-guardian";
+
+export function codexAutostartPath(env = process.env, home = os.homedir()) {
+  const config = env.XDG_CONFIG_HOME && path.isAbsolute(env.XDG_CONFIG_HOME)
+    ? env.XDG_CONFIG_HOME
+    : path.join(home, ".config");
+  return path.join(config, "autostart", `${CODEX_AUTOSTART_NAME}.desktop`);
+}
+
+export function isOwnedCodexAutostart(content, launcher) {
+  const text = String(content ?? "");
+  return /^X-BeautiCode-Managed=true$/m.test(text) &&
+    text.split(/\r?\n/).some((line) => line.startsWith("Exec=") && line.includes(`"${launcher}"`));
+}
+
+export function createCodexAutostartAdapter(launcher, { file = codexAutostartPath() } = {}) {
+  if (!path.posix.isAbsolute(launcher)) throw new Error("invalid Codex launcher path");
+  const read = () => {
+    try { return fs.readFileSync(file, "utf8"); }
+    catch (error) { if (error?.code === "ENOENT") return null; throw error; }
+  };
+  const assertAbsentOrOwned = () => {
+    const current = read();
+    if (current !== null && !isOwnedCodexAutostart(current, launcher)) {
+      throw new Error("Codex autostart entry is not owned by beautiCode");
+    }
+    return current;
+  };
+  return {
+    file,
+    read,
+    isOwned: () => { const current = read(); return current !== null && isOwnedCodexAutostart(current, launcher); },
+    write(content) {
+      assertAbsentOrOwned();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const temporary = `${file}.tmp-${process.pid}`;
+      fs.writeFileSync(temporary, content, "utf8");
+      fs.renameSync(temporary, file);
+    },
+    removeOwned() {
+      if (assertAbsentOrOwned() !== null) fs.rmSync(file, { force: true });
+    },
+  };
 }
