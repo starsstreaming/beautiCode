@@ -78,6 +78,11 @@ export interface DesktopCdpHostSpec {
   displayName: string;
   processName: string;
   executableCandidates: readonly string[];
+  /** Linux install layout. Absent means the host has no supported Linux build. */
+  linux?: Readonly<{
+    /** Electron main binaries, e.g. /usr/share/cursor/cursor. */
+    executableCandidates: readonly string[];
+  }>;
   defaultPort: number;
   candidatePorts: readonly number[];
   /** Suppress a second repair when this host replaces its launcher and drops CDP flags. */

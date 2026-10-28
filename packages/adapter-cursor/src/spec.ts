@@ -38,11 +38,28 @@ export function cursorExecutableCandidates(options: CandidateOptions = {}): stri
   return [...new Set(values.filter(Boolean).map((value) => path.win32.normalize(value)))];
 }
 
+/** Official .deb/.rpm installs and common manual/AppImage-extracted layouts. */
+export function cursorLinuxExecutableCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
+  const home = env.HOME || "";
+  const values = [
+    env.BEAUTICODE_CURSOR_EXECUTABLE || "",
+    "/usr/share/cursor/cursor",
+    "/opt/Cursor/cursor",
+    "/opt/cursor/cursor",
+    home ? path.posix.join(home, ".local", "share", "cursor", "cursor") : "",
+    home ? path.posix.join(home, "Applications", "cursor", "cursor") : "",
+  ];
+  return [...new Set(values.filter((value) => path.posix.isAbsolute(value)))];
+}
+
 export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
   kind: "cursor",
   displayName: "Cursor",
   processName: "Cursor.exe",
   executableCandidates: Object.freeze(cursorExecutableCandidates()),
+  linux: Object.freeze({
+    executableCandidates: Object.freeze(cursorLinuxExecutableCandidates()),
+  }),
   defaultPort: 9341,
   candidatePorts: Object.freeze([9351, 9361, 9371]),
   popupTopInset: 44,

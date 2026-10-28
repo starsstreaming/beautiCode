@@ -89,7 +89,7 @@ test("runtime health requires a valid pointer, launcher and active entrypoint", 
     await fs.writeFile(path.join(helper, "codex-watchdog.mjs"), "");
     assert.equal(isCodexRuntimeReady(root), false);
     await fs.mkdir(path.join(runtime, "versions", "v1"), { recursive: true });
-    await fs.writeFile(path.join(runtime, "launcher.ps1"), "");
+    await fs.writeFile(path.join(runtime, process.platform === "linux" ? "launcher.sh" : "launcher.ps1"), "");
     await fs.writeFile(path.join(runtime, "current.json"), JSON.stringify({ schema: "beauticode.runtime/v1", host: "codex-plugin", version: "v1", entrypoint: "codex-watchdog.mjs" }));
     assert.equal(isCodexRuntimeReady(root), false);
     await fs.writeFile(path.join(runtime, "versions", "v1", "codex-watchdog.mjs"), "");

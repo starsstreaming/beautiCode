@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import readline from "node:readline";
 import { promisify } from "node:util";
-import { StartupRepairChain } from "@beauticode/core";
+import { StartupRepairChain, signalLinuxProcess } from "@beauticode/core";
 import { discoverDesktopCdp, parseRemoteDebuggingFlags } from "./cdp.js";
 import { buildWindowsDesktopProcessStartScript, isDesktopMainProcess, launchDesktopWithCdp, listDesktopProcesses, originalDesktopArguments, pickAvailableDesktopPort } from "./launch.js";
 import type { DesktopCdpEndpoint, DesktopCdpHostSpec, DesktopEnsureLog, DesktopProcess } from "./types.js";
@@ -246,10 +246,23 @@ function defaultRepairOperations(
       return false;
     }
   };
+  // Linux: SIGTERM is Electron's graceful quit; SIGKILL is the force path.
+  // Both re-check the creation time so a recycled PID is never signalled.
+  const signalForProcess = async (
+    processInfo: DesktopProcess,
+    action: "close" | "force",
+  ): Promise<boolean> =>
+    processInfo.createdAtMs != null &&
+    signalLinuxProcess(
+      Math.trunc(processInfo.pid),
+      action === "close" ? "SIGTERM" : "SIGKILL",
+      processInfo.createdAtMs,
+    );
+  const stop = process.platform === "linux" ? signalForProcess : runPowerShellForProcess;
   return {
     listProcesses: () => listDesktopProcesses(spec),
-    terminate: (processInfo) => runPowerShellForProcess(processInfo, "close"),
-    forceTerminate: (processInfo) => runPowerShellForProcess(processInfo, "force"),
+    terminate: (processInfo) => stop(processInfo, "close"),
+    forceTerminate: (processInfo) => stop(processInfo, "force"),
     pickPort: () => pickAvailableDesktopPort(spec),
     launch: (executable, port, originalArguments) =>
       launchDesktopWithCdp(executable, port, originalArguments),
@@ -371,6 +384,7 @@ export function startDesktopStartupRepairMonitor(
   spec: DesktopCdpHostSpec,
   log?: DesktopEnsureLog,
 ): DesktopRepairMonitor {
+  if (process.platform === "linux") return startLinuxDesktopStartupRepairMonitor(spec, log);
   if (process.platform !== "win32") return { close() {} };
   let closed = false;
   let child: ChildProcess | null = null;
@@ -466,6 +480,70 @@ export function startDesktopStartupRepairMonitor(
       if (restartTimer) clearTimeout(restartTimer);
       child?.kill();
       child = null;
+    },
+  };
+}
+
+function createStartupRepairPipeline(
+  spec: DesktopCdpHostSpec,
+  log?: DesktopEnsureLog,
+): (rows: DesktopProcess[]) => Promise<void> {
+  const controller = new DesktopStartupRepairController((row) =>
+    repairDesktopProcess(spec, row, log, {
+      onVerification: (endpoint) => {
+        if (endpoint) controller.markVerified();
+      },
+    }),
+    Date.now,
+    DEFAULT_DESKTOP_REPAIR_WINDOW_MS,
+    spec.repairSuppressionMs ?? 0,
+  );
+  const tracker = new DesktopStartupSnapshotTracker(async (row) => {
+    const result = await controller.observe(row);
+    if (result === "repair-suppressed") {
+      log?.info(`${spec.displayName} 本次启动已在已验证的 CDP 修复窗口内，跳过重复修复。`);
+    } else if (result === "repair-failed") {
+      log?.warn(`${spec.displayName} CDP 修复未通过端口和目标页验证；本次进程不再自动重启。`);
+    }
+  }, { minStableSamples: 1 });
+  return async (rows) => {
+    controller.observeSnapshot(rows);
+    await tracker.observeSnapshot(rows);
+  };
+}
+
+/**
+ * Linux has no process-start event without privileges; a 500 ms /proc
+ * snapshot matches the Windows monitor's sampling interval and feeds the same
+ * controller, so the one-repair-per-fresh-process invariant is shared.
+ */
+function startLinuxDesktopStartupRepairMonitor(
+  spec: DesktopCdpHostSpec,
+  log?: DesktopEnsureLog,
+): DesktopRepairMonitor {
+  if (!spec.linux?.executableCandidates.length) return { close() {} };
+  const observe = createStartupRepairPipeline(spec, log);
+  let closed = false;
+  let busy = false;
+  const tick = () => {
+    if (closed || busy) return;
+    busy = true;
+    void listDesktopProcesses(spec)
+      .then((rows) => {
+        // Like the Windows monitor, a repair transaction must not block sampling.
+        void observe(rows).catch((error) => {
+          log?.warn(`${spec.displayName} 启动修复失败：${String(error)}`);
+        });
+      })
+      .catch((error) => log?.warn(`${spec.displayName} 快照扫描失败：${String(error)}`))
+      .finally(() => { busy = false; });
+  };
+  const timer = setInterval(tick, 500);
+  tick();
+  return {
+    close() {
+      closed = true;
+      clearInterval(timer);
     },
   };
 }

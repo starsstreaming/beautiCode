@@ -4,6 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { listLinuxProcesses, selectLinuxMainProcesses } from "@beauticode/core";
 import {
   DEFAULT_WORKBUDDY_CDP_PORT,
   DEFAULT_WORKBUDDY_CDP_PORTS,
@@ -131,6 +132,15 @@ export function workBuddyInstallCandidates(
     return [
       "/Applications/WorkBuddy.app/Contents/MacOS/Electron",
       "/Applications/WorkBuddy.app/Contents/MacOS/WorkBuddy",
+    ];
+  }
+  if (platform === "linux") {
+    // Official Tencent .deb installs to /opt/WorkBuddy.
+    return [
+      "/opt/WorkBuddy/workbuddy",
+      "/opt/workbuddy/workbuddy",
+      "/usr/lib/workbuddy/workbuddy",
+      path.posix.join(home, ".local", "share", "WorkBuddy", "workbuddy"),
     ];
   }
   return [];
@@ -303,8 +313,48 @@ async function scanUnixWorkBuddyProcesses(): Promise<WorkBuddyProcess[]> {
   }
 }
 
+/**
+ * Linux reads /proc so ELECTRON_RUN_AS_NODE workers (`workbuddy <script.js>`,
+ * same binary, no --type) are excluded by parent image instead of counting
+ * as extra main processes.
+ */
+function scanLinuxWorkBuddyProcesses(): WorkBuddyProcess[] {
+  const rows = listLinuxProcesses((row) => path.posix.basename(row.executablePath).toLowerCase() === "workbuddy");
+  return selectLinuxMainProcesses(rows, (row) =>
+    isWorkBuddyMainProcess(row.commandLine, row.name, row.executablePath, "linux"),
+  ).map((row) => {
+    const flags = parseRemoteDebuggingFlags(row.commandLine);
+    // WorkBuddy enables CDP from its environment, not argv. A same-user
+    // /proc/<pid>/environ read tells a CDP launch apart from a blind one, so a
+    // just-started CDP process is never mistaken for a repair candidate.
+    const envPort = linuxProcessEnvPort(row.pid);
+    return {
+      pid: row.pid,
+      name: "WorkBuddy",
+      executablePath: row.executablePath,
+      commandLine: row.commandLine,
+      port: flags.safe && flags.port != null ? flags.port : envPort,
+      createdAtMs: row.createdAtMs,
+    };
+  });
+}
+
+function linuxProcessEnvPort(pid: number): number | null {
+  try {
+    const prefix = `${WORKBUDDY_CDP_ENV_KEY}=`;
+    const entry = fs.readFileSync(`/proc/${pid}/environ`, "utf8")
+      .split("\0")
+      .find((value) => value.startsWith(prefix));
+    const port = Number(entry?.slice(prefix.length));
+    return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function listWorkBuddyProcesses(): Promise<WorkBuddyProcess[]> {
   if (process.platform === "win32") return scanWindowsWorkBuddyProcesses();
+  if (process.platform === "linux") return scanLinuxWorkBuddyProcesses();
   return scanUnixWorkBuddyProcesses();
 }
 

@@ -6,6 +6,12 @@ import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
 import {
+  listLinuxProcesses,
+  readLinuxProcess,
+  selectLinuxMainProcesses,
+  signalLinuxProcess,
+} from "@beauticode/core";
+import {
   DEFAULT_CDP_CANDIDATE_PORTS,
   discoverCdpEndpoints,
   parseRemoteDebuggingFlags,
@@ -140,14 +146,30 @@ export function looksLikeCodexMain(
   if (/\\resources\\/i.test(exePath) || /\\resources\\/i.test(commandLine)) {
     return false;
   }
+  // Linux/macOS bundle the Codex CLI app-server under resources/ as well.
+  if (/\/resources\//i.test(exePath)) return false;
   return true;
 }
+
+/** Official Linux packages ship the Electron/Owl shell as ChatGPT (or Codex). */
+export const LINUX_CODEX_EXECUTABLE_NAMES = Object.freeze(["ChatGPT", "Codex", "chatgpt", "codex"]);
 
 export function codexInstallCandidates(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): string[] {
   const home = env.HOME || env.USERPROFILE || os.homedir();
+  if (platform === "linux") {
+    return [
+      "/usr/lib/chatgpt/ChatGPT",
+      "/opt/ChatGPT/ChatGPT",
+      "/opt/chatgpt/ChatGPT",
+      "/usr/lib/codex/Codex",
+      "/opt/Codex/Codex",
+      path.posix.join(home, ".local", "share", "chatgpt", "ChatGPT"),
+      path.posix.join(home, ".local", "opt", "ChatGPT", "ChatGPT"),
+    ];
+  }
   if (platform !== "win32") return [];
   const local = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
   const pf = env.ProgramFiles || "C:\\Program Files";
@@ -296,8 +318,51 @@ async function scanWindowsCodexProcesses(): Promise<CodexProcess[]> {
   }
 }
 
+/** /proc counterpart of the Win32_Process scan: main ChatGPT/Codex binaries only. */
+export function scanLinuxCodexProcesses(): CodexProcess[] {
+  const isCodexImage = (exe: string) =>
+    LINUX_CODEX_EXECUTABLE_NAMES.includes(path.posix.basename(exe)) &&
+    !/\/resources\//i.test(exe);
+  const rows = listLinuxProcesses((row) => isCodexImage(row.executablePath));
+  return selectLinuxMainProcesses(rows, (row) =>
+    looksLikeCodexMain(row.commandLine, path.posix.basename(row.executablePath), row.executablePath),
+  ).map((row) => ({
+    pid: row.pid,
+    name: path.posix.basename(row.executablePath),
+    executablePath: row.executablePath,
+    commandLine: row.commandLine,
+    port: parseRemoteDebuggingFlags(row.commandLine).port,
+    createdAtMs: row.createdAtMs,
+  }));
+}
+
 export async function listCodexProcesses(): Promise<CodexProcess[]> {
+  if (process.platform === "linux") return scanLinuxCodexProcesses();
   return scanWindowsCodexProcesses();
+}
+
+/**
+ * Stop one exact Linux main process (PID + creation time) and wait for it to
+ * exit: a relaunch while the old instance is alive would just hand its
+ * arguments to the singleton and drop the CDP flags.
+ */
+async function stopLinuxCodexProcess(
+  proc: CodexProcess,
+  graceful: boolean,
+  timeoutMs = 8_000,
+): Promise<boolean> {
+  if (!proc.pid || proc.pid <= 0) return false;
+  if (!signalLinuxProcess(proc.pid, graceful ? "SIGTERM" : "SIGKILL", proc.createdAtMs)) {
+    return false;
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!readLinuxProcess(proc.pid)) return true;
+    await delay(100);
+  }
+  signalLinuxProcess(proc.pid, "SIGKILL", proc.createdAtMs);
+  await delay(250);
+  return !readLinuxProcess(proc.pid);
 }
 
 export async function isLoopbackPortFree(port: number): Promise<boolean> {
@@ -349,6 +414,10 @@ export async function pickAvailableCodexPort(
 export async function stopCodexProcesses(
   procs: readonly CodexProcess[],
 ): Promise<void> {
+  if (process.platform === "linux") {
+    for (const proc of procs) await stopLinuxCodexProcess(proc, true);
+    return;
+  }
   for (const proc of procs) {
     if (!proc.pid || proc.pid <= 0) continue;
     await execFileAsync("taskkill.exe", ["/PID", String(proc.pid), "/T"], {
@@ -498,7 +567,11 @@ async function repairFreshBlindCodexProcess(
     `Codex 新主进程 ${exact.pid} 未带 CDP 参数，立即使用 :${port} 修复性重启。`,
   );
 
-  try {
+  if (process.platform === "linux") {
+    // SIGTERM is Chromium's fast clean exit; wait so the relaunch is not
+    // swallowed by the still-running singleton.
+    if (!(await stopLinuxCodexProcess(exact, true, 5_000))) return;
+  } else try {
     // Exact fresh PID only: no /T and no name-wide kill. At <10s there is no
     // established user task to preserve, and /F avoids the old 8s stop delay.
     await execFileAsync("taskkill.exe", ["/PID", String(exact.pid), "/F"], {
@@ -520,6 +593,7 @@ async function repairFreshBlindCodexProcess(
 export function startCodexStartupRepairMonitor(
   opts: CodexStartupRepairMonitorOptions = {},
 ): CodexStartupRepairMonitor {
+  if (process.platform === "linux") return startLinuxCodexStartupRepairMonitor(opts);
   if (process.platform !== "win32") return { close: () => {} };
 
   let closed = false;
@@ -634,6 +708,32 @@ export function startCodexStartupRepairMonitor(
   };
 }
 
+/**
+ * Linux fast lane: sample /proc every 300 ms (no unprivileged process-start
+ * event exists) and feed the same controller as the Windows monitor.
+ */
+function startLinuxCodexStartupRepairMonitor(
+  opts: CodexStartupRepairMonitorOptions,
+): CodexStartupRepairMonitor {
+  const controllerOptions: CodexStartupRepairControllerOptions = {
+    repair: (proc) => repairFreshBlindCodexProcess(proc, opts),
+  };
+  if (opts.repairWindowMs !== undefined) {
+    controllerOptions.repairWindowMs = opts.repairWindowMs;
+  }
+  const controller = new CodexStartupRepairController(controllerOptions);
+  const timer = setInterval(() => {
+    for (const proc of scanLinuxCodexProcesses()) {
+      void controller.observe(proc).catch((error) => {
+        opts.log?.warn(
+          `Codex 启动快速修复失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }
+  }, 300);
+  return { close: () => clearInterval(timer) };
+}
+
 async function waitForCodexCdp(
   port: number,
   timeoutMs: number,
@@ -728,7 +828,11 @@ async function ensureCodexCdpUnqueued(
       log?.warn(
         `Codex 新主进程 ${proc.pid} 未带 CDP 参数，立即修复性重启…`,
       );
-      try {
+      if (process.platform === "linux") {
+        if (!(await stopLinuxCodexProcess(proc, true, 5_000))) {
+          throw new Error("Codex 新主进程已退出，取消本次自动重启。");
+        }
+      } else try {
         await execFileAsync("taskkill.exe", ["/PID", String(proc.pid), "/F"], {
           windowsHide: true,
           timeout: 2_000,
