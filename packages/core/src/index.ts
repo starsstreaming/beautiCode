@@ -21,3 +21,4 @@ export * from "./apply-transaction.js";
 export * from "./process-liveness.js";
 export * from "./startup-repair-chain.js";
 export * from "./skin-catalog.js";
+export * from "./linux-process.js";
