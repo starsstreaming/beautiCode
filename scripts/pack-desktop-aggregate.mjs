@@ -10,9 +10,14 @@ import { stageDshPlugin } from "./pack-dsh-plugin.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const sourceRoot = path.join(repoRoot, "packages", "beauticode-desktop");
+const linuxRoot = path.join(repoRoot, "packages", "beauticode-linux");
 
 export function defaultStageDir() {
   return path.join(repoRoot, "artifacts", "desktop-aggregate");
+}
+
+export function defaultLinuxStageDir() {
+  return path.join(repoRoot, "artifacts", "linux");
 }
 
 function runBuild() {
@@ -173,15 +178,26 @@ export async function stageDesktopAggregate(destRoot = defaultStageDir(), opts =
   if (opts.build !== false) runBuild();
   await fsp.rm(destRoot, { recursive: true, force: true });
   await fsp.mkdir(destRoot, { recursive: true });
-  const manifest = JSON.parse(await fsp.readFile(path.join(sourceRoot, "package.json"), "utf8"));
-  // Source workspaces must install anywhere; the distributable supports Windows and Linux (x64 desktop clients).
-  manifest.os = ["win32", "linux"];
+  // `beauticode-linux` is a separate distributable: its own manifest, README and
+  // bin, sharing beauticode-desktop's CLI source (src/) and the same runtimes.
+  const linux = opts.variant === "linux";
+  const packageRoot = linux ? linuxRoot : sourceRoot;
+  const manifest = JSON.parse(await fsp.readFile(path.join(packageRoot, "package.json"), "utf8"));
+  // Source workspaces must install anywhere; only the distributable carries the
+  // platform restriction (beauticode-desktop stays Windows-only).
+  if (linux) {
+    manifest.os = ["linux"];
+    manifest.cpu = ["x64"];
+    delete manifest.scripts?.test;
+  } else {
+    manifest.os = ["win32"];
+  }
   await fsp.writeFile(path.join(destRoot, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   for (const name of ["README.md", "LICENSE"]) {
-    const source = name === "LICENSE" ? path.join(repoRoot, name) : path.join(sourceRoot, name);
+    const source = name === "LICENSE" ? path.join(repoRoot, name) : path.join(packageRoot, name);
     if (fs.existsSync(source)) await fsp.copyFile(source, path.join(destRoot, name));
   }
-  await copyTree(path.join(sourceRoot, "bin"), path.join(destRoot, "bin"));
+  await copyTree(path.join(packageRoot, "bin"), path.join(destRoot, "bin"));
   await copyTree(path.join(sourceRoot, "src"), path.join(destRoot, "src"));
   await stageDshPlugin(path.join(destRoot, "runtime", "dsh"), { build: false });
   await stageCodexPlugin(path.join(destRoot, "runtime", "codex"), { build: false });
@@ -200,7 +216,17 @@ export async function stageDesktopAggregate(destRoot = defaultStageDir(), opts =
   return destRoot;
 }
 
+export async function stageLinuxPackage(destRoot = defaultLinuxStageDir(), opts = {}) {
+  return stageDesktopAggregate(destRoot, { ...opts, variant: "linux" });
+}
+
 async function main() {
+  if (process.argv.includes("--linux")) {
+    const dest = await stageLinuxPackage();
+    const { version } = JSON.parse(await fsp.readFile(path.join(dest, "package.json"), "utf8"));
+    process.stdout.write(`Staged beauticode-linux@${version} at ${dest}\n`);
+    return;
+  }
   const dest = await stageDesktopAggregate();
   process.stdout.write(`Staged beauticode-desktop@0.1.0-test.12 at ${dest}\n`);
 }

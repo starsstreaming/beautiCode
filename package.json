@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run build -w @beauticode/core && npm run build -w @beauticode/adapter-codex && npm run build -w @beauticode/adapter-dsh && npm run build -w @beauticode/adapter-workbuddy && npm run build -w @beauticode/adapter-desktop-cdp && npm run build -w @beauticode/adapter-cursor && npm run build -w @beauticode/adapter-doubao",
-    "test": "npm run test -w @beauticode/core && npm run test -w @beauticode/adapter-codex && npm run test -w @beauticode/adapter-dsh && npm run test -w @beauticode/adapter-workbuddy && npm run test -w @beauticode/adapter-desktop-cdp && npm run test -w @beauticode/adapter-cursor && npm run test -w @beauticode/adapter-doubao && npm run test -w beauticode-desktop",
+    "test": "npm run test -w @beauticode/core && npm run test -w @beauticode/adapter-codex && npm run test -w @beauticode/adapter-dsh && npm run test -w @beauticode/adapter-workbuddy && npm run test -w @beauticode/adapter-desktop-cdp && npm run test -w @beauticode/adapter-cursor && npm run test -w @beauticode/adapter-doubao && npm run test -w beauticode-desktop && npm run test -w beauticode-linux",
     "typecheck": "npm run build -w @beauticode/core && npm run typecheck -w @beauticode/adapter-codex && npm run typecheck -w @beauticode/adapter-dsh && npm run typecheck -w @beauticode/adapter-workbuddy && npm run build -w @beauticode/adapter-desktop-cdp && npm run typecheck -w @beauticode/adapter-cursor && npm run typecheck -w @beauticode/adapter-doubao",
     "discover": "node scripts/beauticode.mjs discover",
     "bc": "node scripts/beauticode.mjs",
@@ -26,7 +26,8 @@
     "cursor:runner": "node scripts/desktop-cdp-runner.mjs --host cursor",
     "cursor:setup": "node scripts/desktop-cdp-setup.mjs --host cursor",
     "doubao:runner": "node scripts/desktop-cdp-runner.mjs --host doubao",
-    "doubao:setup": "node scripts/desktop-cdp-setup.mjs --host doubao"
+    "doubao:setup": "node scripts/desktop-cdp-setup.mjs --host doubao",
+    "linux:pack": "node scripts/pack-desktop-aggregate.mjs --linux"
   },
   "engines": {
     "node": ">=22"

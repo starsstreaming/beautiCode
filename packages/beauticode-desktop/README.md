@@ -1,11 +1,12 @@
 # beauticode-desktop
 
-Aggregate package for the beautiCode desktop hosts on Windows and Linux (x64).
-Requires Node.js 22 or newer. Linux support is described in
-[Linux](#linux); everything else in this file describes Windows.
+Windows-only aggregate package for the beautiCode desktop hosts. Requires Node.js 22 or newer.
 
-`npm run desktop:pack` sets the distributable's npm platform restriction to
-`win32` and `linux`.
+The source workspace installs on Linux for CI validation. `npm run desktop:pack`
+adds the Windows-only npm platform restriction to the distributable; running
+Windows installation commands on another platform remains unsupported.
+Linux users install the separate [`beauticode-linux`](../beauticode-linux/README.md)
+package instead.
 
 Codex MSIX safety notice: direct launching an executable inside WindowsApps
 loses its package identity and can prevent Codex from starting. This package
@@ -125,37 +126,3 @@ WorkBuddy-managed sandbox Node paths. A verified sandbox Node is copied into
 that host runtime only as a recorded fallback. Moving or removing the npm
 package after install therefore does not invalidate the runner. Uninstall
 removes only beautiCode's startup wiring and preserves host state and media.
-
-## Linux
-
-Supported clients: Codex (the ChatGPT desktop app, e.g. `/usr/lib/chatgpt`),
-Cursor (`.deb`/`.rpm` in `/usr/share/cursor`, `/opt/Cursor`, or
-`BEAUTICODE_CURSOR_EXECUTABLE`), WorkBuddy (`/opt/WorkBuddy`) and DSH when it
-is already installed. Doubao has no Linux client and is skipped.
-
-```sh
-npm install -g beauticode-desktop --foreground-scripts
-beauticode-desktop all install      # or: beauticode-desktop codex install
-beauticode-desktop all status
-beauticode-desktop codex uninstall  # per host; removes only beautiCode-owned files
-```
-
-What `install` writes for the current user (no root, no system files):
-
-- a stable runtime under `~/.local/share/beautiCode` (`$XDG_DATA_HOME`) with a
-  POSIX `launcher.sh` per host (Codex: `codex-plugin/`, others:
-  `runtime/<host>/`), plus logs and per-host state;
-- an XDG autostart entry in `~/.config/autostart` (`$XDG_CONFIG_HOME`) marked
-  `X-BeautiCode-Managed=true` that starts the guardian at login, and starts it
-  now;
-- a `beautiCode <Host> (背景)` application entry in
-  `~/.local/share/applications` that launches the client with the CDP port;
-- WorkBuddy also keeps its port in `~/.config/beauticode` and
-  `~/.config/environment.d/beauticode-wb.conf`.
-
-Opening a client from its own icon without CDP is restarted once by the
-guardian if it is younger than 10 seconds, the same as on Windows. There is
-no tray on Linux. `uninstall` stops the guardian, restores the client page,
-and removes the autostart entry and the `(背景)` application entry; an entry
-with the same name that beautiCode does not own is left untouched.
-

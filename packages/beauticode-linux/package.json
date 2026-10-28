@@ -1,0 +1,31 @@
+{
+  "name": "beauticode-linux",
+  "version": "0.1.0",
+  "private": false,
+  "description": "beautiCode local image/video backgrounds for Codex, Cursor and WorkBuddy on Linux (x64). Unofficial.",
+  "type": "module",
+  "bin": {
+    "beauticode-linux": "./bin/beauticode-linux.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "runtime",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node ./bin/postinstall.mjs",
+    "test": "node ../../scripts/test-runner.mjs --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/starsstreaming/beautiCode.git",
+    "directory": "packages/beauticode-linux"
+  },
+  "keywords": ["beautiCode", "codex", "cursor", "workbuddy", "background", "linux"],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

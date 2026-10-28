@@ -130,17 +130,20 @@ export function parseCommand(argv) {
   return { kind: "host", host, command };
 }
 
-export function helpText() {
-  return [
-    "用法：beauticode-desktop <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall|health>",
-    "      beauticode-desktop all <install|status|health>",
+export function helpText(cliName = "beauticode-desktop", platform = process.platform) {
+  const lines = [
+    `用法：${cliName} <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall|health>`,
+    `      ${cliName} all <install|status|health>`,
     "",
     "宿主：dsh、codex、workbuddy、cursor、doubao",
     "命令：install 安装后台接线；status 检查守护；health 检查宿主、CDP 与背景入口；uninstall 卸载后台接线",
     "提示：各宿主的 install/uninstall 只调用包内运行时；不会依赖源码 workspace。",
     "all install 安装守护并创建四个背景版开始菜单快捷方式；安装时不启动客户端。原图标仍由守护兜底。",
-    "Linux：支持 codex、workbuddy、cursor（以及已安装的 dsh）；守护写入 ~/.config/autostart，背景版启动项写入 ~/.local/share/applications；doubao 无 Linux 客户端，自动跳过。",
-  ].join("\n");
+  ];
+  if (platform === "linux") {
+    lines.push("Linux：支持 codex、workbuddy、cursor（以及已安装的 dsh）；守护写入 ~/.config/autostart，背景版启动项写入 ~/.local/share/applications；doubao 无 Linux 客户端，自动跳过。");
+  }
+  return lines.join("\n");
 }
 
 function defaultOptions(options = {}) {
