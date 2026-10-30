@@ -53,7 +53,7 @@ async function readOptional(file) {
   catch (error) { if (error?.code === "ENOENT") return null; throw error; }
 }
 
-export async function withDesktopWiringRollback({ pointerPath, startupVbs, executableRecord, run }) {
+export async function withDesktopWiringRollback({ pointerPath, startupVbs, executableRecord, restoreStartup, run }) {
   const beforePointer = await readOptional(pointerPath);
   const beforeStartup = await readOptional(startupVbs);
   const beforeExecutable = executableRecord ? await readOptional(executableRecord) : null;
@@ -61,7 +61,8 @@ export async function withDesktopWiringRollback({ pointerPath, startupVbs, execu
   catch (error) {
     if (beforePointer === null) await fsp.rm(pointerPath, { force: true });
     else await writeTextAtomic(pointerPath, beforePointer);
-    if (beforeStartup === null) await fsp.rm(startupVbs, { force: true });
+    if (restoreStartup) await restoreStartup(beforeStartup);
+    else if (beforeStartup === null) await fsp.rm(startupVbs, { force: true });
     else await writeTextAtomic(startupVbs, beforeStartup);
     if (executableRecord) {
       if (beforeExecutable === null) await fsp.rm(executableRecord, { force: true });

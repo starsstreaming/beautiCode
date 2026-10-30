@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { createXdgAutostartAdapter } from './xdg-autostart.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { writeVerifiedExecutableRecord } from '../packages/beauticode-desktop/src/windows-host-install.mjs';
 import {
@@ -61,10 +62,15 @@ const startupVbs = IS_LINUX
 const legacyStartupVbs = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), `beauticode-${args.host}-runner.vbs`);
 const runnerArgs = ['--host', args.host, '--watchdog', '--pid-file', pidFile];
 const runnerContext = { host: args.host, stableHostRoot, sourceRunner: RUNNER, pidFile };
+const linuxAutostart = IS_LINUX
+  ? createXdgAutostartAdapter(path.join(stableHostRoot, 'launcher.sh'), { file: startupVbs, args: runnerArgs })
+  : null;
 
 const DESKTOP_RUNTIME_PREFIXES = [
   'scripts/desktop-cdp-runner.mjs',
   'scripts/quick-launch.mjs',
+  'scripts/xdg-autostart.mjs',
+  'scripts/portable-runtime.mjs',
   'packages/core/dist/',
   'packages/adapter-desktop-cdp/dist/',
   `packages/adapter-${args.host}/dist/`,
@@ -248,15 +254,18 @@ if (args.command === 'status') {
 }
 
 if (args.command === 'uninstall') {
+  linuxAutostart?.assertAbsentOrOwned();
   stopRunner();
   cleanPage();
-  try { fs.unlinkSync(startupVbs); } catch {}
+  if (linuxAutostart) linuxAutostart.removeOwned();
+  else { try { fs.unlinkSync(startupVbs); } catch {} }
   if (!IS_LINUX) { try { fs.unlinkSync(legacyStartupVbs); } catch {} }
   process.stdout.write(`${args.host} 背景守护已卸载；独立主题状态保留在 ${dataDir}\n`);
   process.exit(0);
 }
 
 if (args.command === 'install') {
+linuxAutostart?.assertAbsentOrOwned();
 fs.mkdirSync(dataDir, { recursive: true });
 if (fs.existsSync(path.join(REPO, 'package-lock.json'))) {
   const compiler = path.join(REPO, 'node_modules', 'typescript', 'bin', 'tsc');
@@ -282,19 +291,22 @@ try {
     pointerPath: stableRuntime.pointerPath,
     startupVbs,
     executableRecord: path.join(dataDir, 'executable.json'),
+    restoreStartup: linuxAutostart ? (previous) => linuxAutostart.restore(previous) : undefined,
     run: async () => {
       stopRunner();
       await activateStableRuntime(stableRuntime, { startupLogPath: logFile });
       if (!IS_LINUX) await writeVerifiedExecutableRecord(args.host, dataDir);
       fs.mkdirSync(path.dirname(startupVbs), { recursive: true });
-      await writeTextAtomic(startupVbs, IS_LINUX
-        ? renderXdgDesktopEntry({
+      if (linuxAutostart) {
+        linuxAutostart.write(renderXdgDesktopEntry({
           name: `beautiCode ${args.host} background guardian`,
           comment: `Re-applies beautiCode backgrounds to ${args.host} through loopback CDP`,
           launcher: stableRuntime.launcher,
           args: runnerArgs,
-        })
-        : renderWindowsStartupVbs({ launcher: stableRuntime.launcher, args: runnerArgs }));
+        }));
+      } else {
+        await writeTextAtomic(startupVbs, renderWindowsStartupVbs({ launcher: stableRuntime.launcher, args: runnerArgs }));
+      }
       try {
         return await startDesktopGuardian({
           context: runnerContext,

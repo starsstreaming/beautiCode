@@ -3,6 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+// The source checkout and the installed self-contained runtime have different roots.
+const autostartUrl = new URL("./xdg-autostart.mjs", import.meta.url);
+const { createXdgAutostartAdapter, isOwnedXdgAutostart } = await import(
+  fs.existsSync(autostartUrl) ? autostartUrl.href : new URL("../../scripts/xdg-autostart.mjs", import.meta.url).href
+);
+
 export const CODEX_TASK_NAME = "beautiCode Codex Guardian";
 const RUN_PATH = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const RUN_VALUE = "BeautiCodeCodex";
@@ -137,37 +143,9 @@ export function codexAutostartPath(env = process.env, home = os.homedir()) {
 }
 
 export function isOwnedCodexAutostart(content, launcher) {
-  const text = String(content ?? "");
-  return /^X-BeautiCode-Managed=true$/m.test(text) &&
-    text.split(/\r?\n/).some((line) => line.startsWith("Exec=") && line.includes(`"${launcher}"`));
+  return isOwnedXdgAutostart(content, launcher);
 }
 
 export function createCodexAutostartAdapter(launcher, { file = codexAutostartPath() } = {}) {
-  if (!path.posix.isAbsolute(launcher)) throw new Error("invalid Codex launcher path");
-  const read = () => {
-    try { return fs.readFileSync(file, "utf8"); }
-    catch (error) { if (error?.code === "ENOENT") return null; throw error; }
-  };
-  const assertAbsentOrOwned = () => {
-    const current = read();
-    if (current !== null && !isOwnedCodexAutostart(current, launcher)) {
-      throw new Error("Codex autostart entry is not owned by beautiCode");
-    }
-    return current;
-  };
-  return {
-    file,
-    read,
-    isOwned: () => { const current = read(); return current !== null && isOwnedCodexAutostart(current, launcher); },
-    write(content) {
-      assertAbsentOrOwned();
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      const temporary = `${file}.tmp-${process.pid}`;
-      fs.writeFileSync(temporary, content, "utf8");
-      fs.renameSync(temporary, file);
-    },
-    removeOwned() {
-      if (assertAbsentOrOwned() !== null) fs.rmSync(file, { force: true });
-    },
-  };
+  return createXdgAutostartAdapter(launcher, { file });
 }

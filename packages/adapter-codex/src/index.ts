@@ -80,23 +80,31 @@ export {
 
 export {
   DEFAULT_CODEX_CDP_PORT,
-  DEFAULT_CODEX_REPAIR_WINDOW_MS,
-  codexInstallCandidates,
-  findCodexExecutable,
-  listCodexProcesses,
   isLoopbackPortFree,
   pickAvailableCodexPort,
-  ensureCodexCdp,
+} from "./launch.js";
+export {
+  DEFAULT_CODEX_REPAIR_WINDOW_MS,
   classifyCodexStartupProcess,
   CodexStartupRepairController,
-  buildWindowsCodexProcessStartScript,
-  startCodexStartupRepairMonitor,
-  type CodexProcess,
   type CodexStartupProcessDecision,
   type CodexStartupRepairControllerOptions,
   type CodexStartupRepairResult,
+} from "./startup-policy.js";
+export {
+  buildWindowsCodexProcessStartScript,
+  startCodexStartupRepairMonitor,
   type CodexStartupRepairMonitorOptions,
   type CodexStartupRepairMonitor,
+} from "./startup-repair.js";
+export {
+  codexInstallCandidates,
+  findCodexExecutable,
+  listCodexProcesses,
+  type CodexProcess,
+} from "./processes.js";
+export {
+  ensureCodexCdp,
   type EnsureCodexCdpOptions,
   type EnsuredCodexCdp,
 } from "./launch.js";

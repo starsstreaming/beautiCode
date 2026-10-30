@@ -127,6 +127,7 @@ async function copyDesktopRuntime(destRoot) {
     path.join(desktop, "scripts", "desktop-runner-identity.mjs"),
   );
   await copyText(path.join(repoRoot, "scripts", "guardian-process.mjs"), path.join(desktop, "scripts", "guardian-process.mjs"));
+  await copyText(path.join(repoRoot, "scripts", "xdg-autostart.mjs"), path.join(desktop, "scripts", "xdg-autostart.mjs"));
   await copyText(
     path.join(repoRoot, "scripts", "portable-runtime.mjs"),
     path.join(desktop, "scripts", "portable-runtime.mjs"),

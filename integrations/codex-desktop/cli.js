@@ -70,7 +70,7 @@ async function loadPortableRuntime() {
 
 function codexRuntimeFilter(relative, entry) {
   const normalized = relative.replaceAll("\\", "/");
-  const prefixes = ["watch-host.mjs", "codex-watchdog.mjs", "lifecycle.mjs", "task-wiring.mjs", "health.mjs", "quick-launch.mjs", "package.json", "vendor/"];
+  const prefixes = ["watch-host.mjs", "codex-watchdog.mjs", "lifecycle.mjs", "task-wiring.mjs", "health.mjs", "quick-launch.mjs", "portable-runtime.mjs", "xdg-autostart.mjs", "package.json", "vendor/"];
   return entry.isDirectory()
     ? prefixes.some((prefix) => prefix.startsWith(normalized) || normalized.startsWith(prefix))
     : prefixes.some((prefix) => prefix.endsWith("/") ? normalized.startsWith(prefix) : normalized === prefix);
@@ -240,9 +240,9 @@ export async function runCli(argv = process.argv.slice(2)) {
     return;
   }
   await fsp.mkdir(home, { recursive: true });
-  for (const name of ["watch-host.mjs", "codex-watchdog.mjs", "lifecycle.mjs", "task-wiring.mjs", "health.mjs", "quick-launch.mjs", "package.json"]) {
-    const source = name === "quick-launch.mjs" && !fs.existsSync(path.join(here, name))
-      ? path.resolve(here, "../../scripts/quick-launch.mjs")
+  for (const name of ["watch-host.mjs", "codex-watchdog.mjs", "lifecycle.mjs", "task-wiring.mjs", "health.mjs", "quick-launch.mjs", "portable-runtime.mjs", "xdg-autostart.mjs", "package.json"]) {
+    const source = ["quick-launch.mjs", "portable-runtime.mjs", "xdg-autostart.mjs"].includes(name) && !fs.existsSync(path.join(here, name))
+      ? path.resolve(here, "../../scripts", name)
       : path.join(here, name);
     await copyFileAtomic(source, path.join(home, name));
   }

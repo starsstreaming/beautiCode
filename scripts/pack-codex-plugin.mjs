@@ -72,10 +72,9 @@ export async function stageCodexPlugin(destRoot = defaultStageDir(), opts = {}) 
     await fsp.mkdir(path.dirname(dest), { recursive: true });
     await fsp.copyFile(source, dest);
   }
-  await fsp.copyFile(
-    path.join(repoRoot, "scripts", "portable-runtime.mjs"),
-    path.join(destRoot, "portable-runtime.mjs"),
-  );
+  for (const name of ["portable-runtime.mjs", "xdg-autostart.mjs"]) {
+    await fsp.copyFile(path.join(repoRoot, "scripts", name), path.join(destRoot, name));
+  }
   const vendorAdapter = path.join(destRoot, "vendor", "adapter-codex");
   await copyTree(path.join(repoRoot, "packages", "core", "dist"), path.join(destRoot, "vendor", "core"));
   await copyTree(path.join(repoRoot, "packages", "adapter-codex", "dist"), vendorAdapter);
