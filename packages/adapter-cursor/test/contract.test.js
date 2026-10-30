@@ -19,7 +19,7 @@ test('Cursor uses its measured workbench target and direct Customize successor',
   assert.equal(CURSOR_CDP_SPEC.defaultPort, 9341);
   assert.equal(CURSOR_CDP_SPEC.popupTopInset, 44);
   assert.equal(CURSOR_CDP_SPEC.anchorText, 'Customize');
-  assert.equal(CURSOR_CDP_SPEC.anchorSelector, '[data-action-id="marketplace"][data-sidebar-primary-action], .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(2)');
+  assert.equal(CURSOR_CDP_SPEC.anchorSelector, '[data-action-id="marketplace"][data-sidebar-primary-action], .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(2):nth-last-child(-n+2), .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(4):nth-last-child(-n+2)');
   assert.equal(CURSOR_CDP_SPEC.strings.entry, 'background');
   assert.deepEqual(CURSOR_CDP_SPEC.theme.highContrastClassTokens, ['cursor-high-contrast', 'hc-black']);
   assert.deepEqual(CURSOR_CDP_SPEC.theme.darkClassTokens, ['cursor-dark', 'vs-dark']);

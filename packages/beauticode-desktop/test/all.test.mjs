@@ -100,7 +100,15 @@ test("all install detects an npx-managed DSH home without a global command", () 
 
 test("all install refuses unsupported platforms before invoking any setup", () => {
   const options = fakeOptions([], () => { throw new Error("must not spawn"); });
-  assert.throws(() => runAllInstall({ ...options, platform: "linux" }), /仅支持 Windows/);
+  assert.throws(() => runAllInstall({ ...options, platform: "darwin" }), /仅支持 Windows 和 Linux/);
+});
+
+test("Linux detection uses Linux install paths and skips Doubao", () => {
+  const options = { ...fakeOptions(["/usr/share/cursor/cursor", "/usr/lib/chatgpt/ChatGPT"], () => { throw new Error("must not spawn"); }), platform: "linux", home: "/home/test", env: { PATH: "/usr/bin" } };
+  assert.equal(detectHostAvailability("cursor", options).available, true);
+  assert.equal(detectHostAvailability("codex", options).available, true);
+  assert.equal(detectHostAvailability("workbuddy", options).reason, "host-not-found");
+  assert.equal(detectHostAvailability("doubao", { ...options, exists: () => true }).reason, "unsupported-platform");
 });
 
 test("registered Cursor in a non-default directory is detected only after executable verification", () => {

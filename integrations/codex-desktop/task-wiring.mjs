@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+
+// The source checkout and the installed self-contained runtime have different roots.
+const autostartUrl = new URL("./xdg-autostart.mjs", import.meta.url);
+const { createXdgAutostartAdapter, isOwnedXdgAutostart } = await import(
+  fs.existsSync(autostartUrl) ? autostartUrl.href : new URL("../../scripts/xdg-autostart.mjs", import.meta.url).href
+);
 
 export const CODEX_TASK_NAME = "beautiCode Codex Guardian";
 const RUN_PATH = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -118,4 +126,26 @@ export async function uninstallCodexWiring({ task, runKey, stopOwned }) {
     await stopOwned();
   }
   await runKey.remove();
+}
+
+/**
+ * Linux startup wiring: one XDG autostart entry that runs the stable POSIX
+ * launcher. Ownership is proven by the managed marker plus the exact
+ * launcher path, so a same-named user file is never rewritten or deleted.
+ */
+export const CODEX_AUTOSTART_NAME = "beauticode-codex-guardian";
+
+export function codexAutostartPath(env = process.env, home = os.homedir()) {
+  const config = env.XDG_CONFIG_HOME && path.isAbsolute(env.XDG_CONFIG_HOME)
+    ? env.XDG_CONFIG_HOME
+    : path.join(home, ".config");
+  return path.join(config, "autostart", `${CODEX_AUTOSTART_NAME}.desktop`);
+}
+
+export function isOwnedCodexAutostart(content, launcher) {
+  return isOwnedXdgAutostart(content, launcher);
+}
+
+export function createCodexAutostartAdapter(launcher, { file = codexAutostartPath() } = {}) {
+  return createXdgAutostartAdapter(launcher, { file });
 }

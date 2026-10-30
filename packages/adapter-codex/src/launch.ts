@@ -1,303 +1,24 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
-import fs from "node:fs";
+import { execFile, spawn } from "node:child_process";
 import net from "node:net";
-import os from "node:os";
-import path from "node:path";
-import readline from "node:readline";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import { DEFAULT_CDP_CANDIDATE_PORTS, discoverCdpEndpoints, type DiscoveredCdpEndpoint } from "./host-discover.js";
 import {
-  DEFAULT_CDP_CANDIDATE_PORTS,
-  discoverCdpEndpoints,
-  parseRemoteDebuggingFlags,
-  type DiscoveredCdpEndpoint,
-} from "./host-discover.js";
+  findCodexExecutable,
+  findPackagedCodexExecutable,
+  listCodexProcesses,
+  parseExecutableFromProcess,
+  stopLinuxCodexProcess,
+  type CodexProcess,
+} from "./processes.js";
+import { classifyCodexStartupProcess } from "./startup-policy.js";
 
 const execFileAsync = promisify(execFile);
-
 export const DEFAULT_CODEX_CDP_PORT = 9335;
-export const DEFAULT_CODEX_REPAIR_WINDOW_MS = 10_000;
-
-export interface CodexProcess {
-  pid: number;
-  name: string;
-  executablePath: string;
-  commandLine: string;
-  port: number | null;
-  /** Main-process creation time. Null means it is unsafe to auto-restart. */
-  createdAtMs: number | null;
-}
-
-export type CodexStartupProcessDecision =
-  | "repair-now"
-  | "wait-for-cdp"
-  | "ignore-stale";
-
-/**
- * Decide from immutable process evidence only. A missing CDP flag can never
- * become available later in the same Chromium main process, so a fresh blind
- * process is repaired immediately instead of waiting for an endpoint timeout.
- */
-export function classifyCodexStartupProcess(
-  proc: CodexProcess,
-  nowMs = Date.now(),
-  repairWindowMs = DEFAULT_CODEX_REPAIR_WINDOW_MS,
-): CodexStartupProcessDecision {
-  if (proc.port != null) return "wait-for-cdp";
-  if (proc.createdAtMs == null || !Number.isFinite(proc.createdAtMs)) {
-    return "ignore-stale";
-  }
-  const ageMs = nowMs - proc.createdAtMs;
-  return ageMs >= 0 && ageMs < repairWindowMs
-    ? "repair-now"
-    : "ignore-stale";
-}
-
-export interface CodexStartupRepairControllerOptions {
-  now?: () => number;
-  repairWindowMs?: number;
-  repair: (proc: CodexProcess) => Promise<void>;
-}
-
-export type CodexStartupRepairResult =
-  | "repaired"
-  | "already-handled"
-  | "wait-for-cdp"
-  | "ignore-stale";
-
-/** Serialize and deduplicate process-start events by PID + creation time. */
-export class CodexStartupRepairController {
-  private readonly seen = new Set<string>();
-  private chain: Promise<unknown> = Promise.resolve();
-  private readonly now: () => number;
-  private readonly repairWindowMs: number;
-  private readonly repair: (proc: CodexProcess) => Promise<void>;
-
-  constructor(opts: CodexStartupRepairControllerOptions) {
-    this.now = opts.now ?? Date.now;
-    this.repairWindowMs =
-      opts.repairWindowMs ?? DEFAULT_CODEX_REPAIR_WINDOW_MS;
-    this.repair = opts.repair;
-  }
-
-  observe(proc: CodexProcess): Promise<CodexStartupRepairResult> {
-    const decision = classifyCodexStartupProcess(
-      proc,
-      this.now(),
-      this.repairWindowMs,
-    );
-    if (decision !== "repair-now") return Promise.resolve(decision);
-
-    const generation = `${proc.pid}:${proc.createdAtMs}`;
-    if (this.seen.has(generation)) return Promise.resolve("already-handled");
-    this.seen.add(generation);
-
-    const run = async (): Promise<CodexStartupRepairResult> => {
-      await this.repair(proc);
-      return "repaired";
-    };
-    const next = this.chain.then(run, run);
-    this.chain = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
-  }
-}
 
 export interface EnsureCodexLog {
   info: (...m: string[]) => void;
   warn: (...m: string[]) => void;
-}
-
-export interface EnsureCodexCdpOptions {
-  preferredPort?: number;
-  /** Bounded fallback ports; override in deterministic tests. */
-  candidatePorts?: readonly number[];
-  /** Include same-user process flags in discovery. Defaults to true on Windows. */
-  scanProcesses?: boolean;
-  launch?: boolean;
-  restartIfBlind?: boolean;
-  timeoutMs?: number;
-  log?: EnsureCodexLog;
-}
-
-export interface EnsuredCodexCdp extends DiscoveredCdpEndpoint {
-  launched: boolean;
-  restarted: boolean;
-}
-
-export function looksLikeCodexMain(
-  commandLine: string,
-  name: string,
-  exePath = "",
-): boolean {
-  const hay = `${name} ${exePath} ${commandLine}`;
-  if (!/\b(ChatGPT|Codex)\.exe\b/i.test(hay) && !/\b(ChatGPT|Codex)\b/i.test(hay)) {
-    return false;
-  }
-  if (/\s--type=/.test(commandLine)) return false;
-  if (/\bapp-server\b/i.test(commandLine)) return false;
-  if (/\\resources\\/i.test(exePath) || /\\resources\\/i.test(commandLine)) {
-    return false;
-  }
-  return true;
-}
-
-export function codexInstallCandidates(
-  env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
-): string[] {
-  const home = env.HOME || env.USERPROFILE || os.homedir();
-  if (platform !== "win32") return [];
-  const local = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
-  const pf = env.ProgramFiles || "C:\\Program Files";
-  const pf86 = env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-  const relatives = [
-    ["Programs", "ChatGPT", "ChatGPT.exe"],
-    ["Programs", "chatgpt", "ChatGPT.exe"],
-    ["Programs", "Codex", "Codex.exe"],
-    ["Programs", "codex", "Codex.exe"],
-    ["OpenAI", "ChatGPT", "ChatGPT.exe"],
-    ["OpenAI", "Codex", "Codex.exe"],
-  ];
-  const out: string[] = [];
-  for (const root of [local, pf, pf86]) {
-    for (const rel of relatives) {
-      out.push(path.join(root, ...rel));
-    }
-  }
-  return out;
-}
-
-export function findCodexExecutable(
-  env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
-): string | null {
-  for (const candidate of codexInstallCandidates(env, platform)) {
-    try {
-      if (fs.existsSync(candidate)) return candidate;
-    } catch {
-      /* ignore */
-    }
-  }
-  return null;
-}
-
-export function parseAppxCodexInstallLocations(stdout: string): string[] {
-  return [...new Set(
-    String(stdout ?? "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => path.win32.isAbsolute(line)),
-  )];
-}
-
-export async function findPackagedCodexExecutable(
-  platform: NodeJS.Platform = process.platform,
-): Promise<string | null> {
-  if (platform !== "win32") return null;
-  try {
-    const { stdout } = await execFileAsync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "Get-AppxPackage -Name OpenAI.Codex | Sort-Object Version -Descending | ForEach-Object { $_.InstallLocation }",
-      ],
-      { windowsHide: true, timeout: 12_000, maxBuffer: 1024 * 1024 },
-    );
-    for (const installLocation of parseAppxCodexInstallLocations(stdout)) {
-      const executable = path.win32.join(installLocation, "app", "ChatGPT.exe");
-      if (fs.existsSync(executable)) return executable;
-    }
-  } catch {
-    /* package absent or AppX query unavailable */
-  }
-  return null;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function scanWindowsCodexProcesses(): Promise<CodexProcess[]> {
-  if (process.platform !== "win32") return [];
-  const script = [
-    "$ErrorActionPreference='SilentlyContinue';",
-    "Get-CimInstance Win32_Process | ForEach-Object {",
-    "$cmd=[string]$_.CommandLine;",
-    "$name=[string]$_.Name;",
-    "$path=[string]$_.ExecutablePath;",
-    "$created=0;",
-    "try{$created=([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}catch{};",
-    "if($name -notmatch '^(ChatGPT|Codex)\\.exe$'){return};",
-    "if($cmd -match '\\s--type='){return};",
-    "if($path -match '\\\\resources\\\\'){return};",
-    "$o=@{pid=$_.ProcessId;name=$name;exe=$path;cmd=$cmd;created=$created};",
-    "($o | ConvertTo-Json -Compress -Depth 3)",
-    "}",
-  ].join(" ");
-  try {
-    const { stdout } = await execFileAsync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        script,
-      ],
-      {
-        windowsHide: true,
-        timeout: 12_000,
-        maxBuffer: 4 * 1024 * 1024,
-      },
-    );
-    const found: CodexProcess[] = [];
-    for (const line of String(stdout ?? "").split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("{")) continue;
-      let row: {
-        pid?: unknown;
-        name?: unknown;
-        exe?: unknown;
-        cmd?: unknown;
-        created?: unknown;
-      };
-      try {
-        row = JSON.parse(trimmed) as typeof row;
-      } catch {
-        continue;
-      }
-      const commandLine = typeof row.cmd === "string" ? row.cmd : "";
-      const name = typeof row.name === "string" ? row.name : "ChatGPT.exe";
-      const executablePath = typeof row.exe === "string" ? row.exe : "";
-      if (!looksLikeCodexMain(commandLine, name, executablePath)) continue;
-      const flags = parseRemoteDebuggingFlags(commandLine);
-      found.push({
-        pid: Number(row.pid) || 0,
-        name,
-        executablePath,
-        commandLine,
-        port: flags.port,
-        createdAtMs:
-          Number.isFinite(Number(row.created)) && Number(row.created) > 0
-            ? Number(row.created)
-            : null,
-      });
-    }
-    return found;
-  } catch {
-    return [];
-  }
-}
-
-export async function listCodexProcesses(): Promise<CodexProcess[]> {
-  return scanWindowsCodexProcesses();
 }
 
 export async function isLoopbackPortFree(port: number): Promise<boolean> {
@@ -349,6 +70,10 @@ export async function pickAvailableCodexPort(
 export async function stopCodexProcesses(
   procs: readonly CodexProcess[],
 ): Promise<void> {
+  if (process.platform === "linux") {
+    for (const proc of procs) await stopLinuxCodexProcess(proc, true);
+    return;
+  }
   for (const proc of procs) {
     if (!proc.pid || proc.pid <= 0) continue;
     await execFileAsync("taskkill.exe", ["/PID", String(proc.pid), "/T"], {
@@ -389,7 +114,7 @@ export function buildCodexLaunchCommand(
   };
 }
 
-async function launchCodexWithCdp(
+export async function launchCodexWithCdp(
   port: number,
   executable: string,
 ): Promise<void> {
@@ -406,232 +131,21 @@ async function launchCodexWithCdp(
   child.unref();
 }
 
-export interface CodexStartupRepairMonitorOptions {
+export interface EnsureCodexCdpOptions {
   preferredPort?: number;
+  /** Bounded fallback ports; override in deterministic tests. */
   candidatePorts?: readonly number[];
-  repairWindowMs?: number;
+  /** Include same-user process flags in discovery. Defaults to true on Windows. */
+  scanProcesses?: boolean;
+  launch?: boolean;
+  restartIfBlind?: boolean;
+  timeoutMs?: number;
   log?: EnsureCodexLog;
 }
 
-export interface CodexStartupRepairMonitor {
-  close: () => void;
-}
-
-/**
- * PowerShell emits one compact JSON record for each new Codex main process.
- * Win32_ProcessStartTrace requires privileges that are unavailable on some
- * desktop installs, so PID discovery uses cheap Get-Process snapshots and only
- * performs a targeted CIM command-line read once per new PID.
- */
-export function buildWindowsCodexProcessStartScript(parentPid: number): string {
-  const safeParentPid = Math.max(0, Math.trunc(parentPid));
-  return [
-    "$ErrorActionPreference='SilentlyContinue';",
-    "$seen=@{};",
-    "while($true){",
-    `if(-not (Get-Process -Id ${safeParentPid} -ErrorAction SilentlyContinue)){break};`,
-    "$current=@{};",
-    "$matches=Get-Process -Name ChatGPT,Codex -ErrorAction SilentlyContinue;",
-    "foreach($match in @($matches)){",
-    "$pidValue=[int]$match.Id;",
-    "$current[$pidValue]=$true;",
-    "if($seen.ContainsKey($pidValue)){continue};",
-    "$p=Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $pidValue);",
-    "if($null -eq $p){continue};",
-    "$name=[string]$p.Name;",
-    "$cmd=[string]$p.CommandLine;",
-    "$path=[string]$p.ExecutablePath;",
-    "if(-not $cmd){continue};",
-    "if($cmd -match '\\s--type='){continue};",
-    "if($cmd -match '\\bapp-server\\b'){continue};",
-    "$created=0;",
-    "try{$created=([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds()}catch{};",
-    "if($created -le 0){$created=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()};",
-    "$seen[$pidValue]=$true;",
-    "$o=@{pid=$pidValue;name=$name;exe=$path;cmd=$cmd;created=$created};",
-    "($o | ConvertTo-Json -Compress -Depth 3);",
-    "}",
-    "foreach($known in @($seen.Keys)){if(-not $current.ContainsKey($known)){$seen.Remove($known)}};",
-    "Start-Sleep -Milliseconds 200;",
-    "}",
-  ].join(" ");
-}
-
-async function repairFreshBlindCodexProcess(
-  observed: CodexProcess,
-  opts: CodexStartupRepairMonitorOptions,
-): Promise<void> {
-  const repairWindowMs =
-    opts.repairWindowMs ?? DEFAULT_CODEX_REPAIR_WINDOW_MS;
-  const live = await listCodexProcesses();
-  const exact = live.find((proc) => proc.pid === observed.pid);
-  if (!exact) return;
-  if (
-    classifyCodexStartupProcess(exact, Date.now(), repairWindowMs) !==
-    "repair-now"
-  ) {
-    return;
-  }
-
-  // Never recycle a newly spawned secondary instance while an older primary
-  // is already serving the user. That path needs an explicit/manual repair.
-  if (live.some((proc) => proc.pid !== exact.pid)) {
-    opts.log?.warn(
-      `检测到 Codex 新进程 ${exact.pid}，但已有主进程；跳过自动重启以保护正在运行的任务。`,
-    );
-    return;
-  }
-
-  const executable =
-    parseExecutableFromProcess(exact) ||
-    (await findPackagedCodexExecutable()) ||
-    findCodexExecutable();
-  if (!executable) {
-    opts.log?.warn("检测到新的 Codex 进程，但无法确认可执行文件；跳过自动重启。");
-    return;
-  }
-
-  const preferred = opts.preferredPort ?? DEFAULT_CODEX_CDP_PORT;
-  const candidates = opts.candidatePorts ?? DEFAULT_CDP_CANDIDATE_PORTS;
-  const port = await pickAvailableCodexPort(preferred, candidates);
-  opts.log?.warn(
-    `Codex 新主进程 ${exact.pid} 未带 CDP 参数，立即使用 :${port} 修复性重启。`,
-  );
-
-  try {
-    // Exact fresh PID only: no /T and no name-wide kill. At <10s there is no
-    // established user task to preserve, and /F avoids the old 8s stop delay.
-    await execFileAsync("taskkill.exe", ["/PID", String(exact.pid), "/F"], {
-      windowsHide: true,
-      timeout: 2_000,
-    });
-  } catch {
-    return;
-  }
-  await delay(120);
-  await launchCodexWithCdp(port, executable);
-  opts.log?.info(`已立即带 --remote-debugging-port=${port} 重启 Codex`);
-}
-
-/**
- * Event-driven fast lane for the original Windows icon. It does not wait for
- * CDP when the newly created main process has no debugging flag at all.
- */
-export function startCodexStartupRepairMonitor(
-  opts: CodexStartupRepairMonitorOptions = {},
-): CodexStartupRepairMonitor {
-  if (process.platform !== "win32") return { close: () => {} };
-
-  let closed = false;
-  let child: ChildProcess | null = null;
-  let restartTimer: ReturnType<typeof setTimeout> | null = null;
-  const controllerOptions: CodexStartupRepairControllerOptions = {
-    repair: (proc) => repairFreshBlindCodexProcess(proc, opts),
-  };
-  if (opts.repairWindowMs !== undefined) {
-    controllerOptions.repairWindowMs = opts.repairWindowMs;
-  }
-  const controller = new CodexStartupRepairController(controllerOptions);
-
-  const observe = (proc: CodexProcess) => {
-    void controller.observe(proc).catch((error) => {
-      opts.log?.warn(
-        `Codex 启动快速修复失败：${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
-  };
-
-  const reconcile = () => {
-    void listCodexProcesses().then(
-      (processes) => processes.forEach(observe),
-      () => undefined,
-    );
-  };
-
-  const startChild = () => {
-    if (closed) return;
-    const script = buildWindowsCodexProcessStartScript(process.pid);
-    const monitor = spawn(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        script,
-      ],
-      { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    child = monitor;
-    let stderr = "";
-    monitor.stderr?.on("data", (chunk) => {
-      if (stderr.length < 2_000) stderr += String(chunk);
-    });
-    const lines = readline.createInterface({ input: monitor.stdout! });
-    lines.on("line", (line) => {
-      let row: {
-        pid?: unknown;
-        name?: unknown;
-        exe?: unknown;
-        cmd?: unknown;
-        created?: unknown;
-      };
-      try {
-        row = JSON.parse(line) as typeof row;
-      } catch {
-        return;
-      }
-      const commandLine = typeof row.cmd === "string" ? row.cmd : "";
-      const name = typeof row.name === "string" ? row.name : "ChatGPT.exe";
-      const executablePath = typeof row.exe === "string" ? row.exe : "";
-      if (!looksLikeCodexMain(commandLine, name, executablePath)) return;
-      const flags = parseRemoteDebuggingFlags(commandLine);
-      observe({
-        pid: Number(row.pid) || 0,
-        name,
-        executablePath,
-        commandLine,
-        port: flags.port,
-        createdAtMs:
-          Number.isFinite(Number(row.created)) && Number(row.created) > 0
-            ? Number(row.created)
-            : null,
-      });
-    });
-    let finished = false;
-    const finish = (code: number | null, spawnError?: Error) => {
-      if (finished) return;
-      finished = true;
-      lines.close();
-      if (child === monitor) child = null;
-      if (!closed) {
-        const detail = (spawnError?.message || stderr)
-          .trim()
-          .replace(/\s+/g, " ")
-          .slice(0, 500);
-        opts.log?.warn(
-          `Codex 进程启动监听器退出（${code ?? "unknown"}）${detail ? `：${detail}` : ""}，1 秒后恢复。`,
-        );
-        restartTimer = setTimeout(startChild, 1_000);
-      }
-    };
-    monitor.once("error", (error) => finish(null, error));
-    monitor.once("exit", (code) => finish(code));
-    reconcile();
-  };
-
-  startChild();
-
-  return {
-    close: () => {
-      closed = true;
-      if (restartTimer) clearTimeout(restartTimer);
-      restartTimer = null;
-      child?.kill();
-      child = null;
-    },
-  };
+export interface EnsuredCodexCdp extends DiscoveredCdpEndpoint {
+  launched: boolean;
+  restarted: boolean;
 }
 
 async function waitForCodexCdp(
@@ -657,16 +171,6 @@ async function waitForAnyCodexCdp(
     if (hit) return hit;
     await delay(400);
   }
-  return null;
-}
-
-function parseExecutableFromProcess(proc: CodexProcess | undefined): string | null {
-  if (!proc) return null;
-  if (proc.executablePath && fs.existsSync(proc.executablePath)) {
-    return proc.executablePath;
-  }
-  const quoted = proc.commandLine.match(/^"([^"]+\.exe)"/i);
-  if (quoted?.[1] && fs.existsSync(quoted[1])) return quoted[1];
   return null;
 }
 
@@ -728,7 +232,11 @@ async function ensureCodexCdpUnqueued(
       log?.warn(
         `Codex 新主进程 ${proc.pid} 未带 CDP 参数，立即修复性重启…`,
       );
-      try {
+      if (process.platform === "linux") {
+        if (!(await stopLinuxCodexProcess(proc, true, 5_000))) {
+          throw new Error("Codex 新主进程已退出，取消本次自动重启。");
+        }
+      } else try {
         await execFileAsync("taskkill.exe", ["/PID", String(proc.pid), "/F"], {
           windowsHide: true,
           timeout: 2_000,

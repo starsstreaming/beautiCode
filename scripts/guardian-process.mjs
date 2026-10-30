@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 const normalized = (value) => path.win32.normalize(String(value || "")).toLowerCase();
@@ -22,6 +23,31 @@ export function readWindowsProcess(pid) {
     const value = JSON.parse(String(result.stdout || "").trim());
     return value && typeof value === "object" ? value : null;
   } catch { return null; }
+}
+
+/** Linux /proc read with the same shape as readWindowsProcess(). */
+export function readLinuxProcess(pid) {
+  if (!Number.isInteger(pid) || pid < 1) return null;
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+    const btime = Number(/^btime\s+(\d+)$/m.exec(fs.readFileSync("/proc/stat", "utf8"))?.[1]);
+    const argv = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+    let image = "";
+    try { image = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ""); } catch { /* unreadable */ }
+    return {
+      pid,
+      name: stat.slice(stat.indexOf("(") + 1, stat.lastIndexOf(")")),
+      image,
+      commandLine: argv.map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg)).join(" "),
+      // USER_HZ is 100 on every mainstream Linux architecture.
+      createdAtMs: Number.isFinite(btime) ? Math.round(btime * 1000 + Number(fields[19]) * 10) : 0,
+    };
+  } catch { return null; }
+}
+
+export function readGuardianProcess(pid) {
+  return process.platform === "linux" ? readLinuxProcess(pid) : readWindowsProcess(pid);
 }
 
 export function isManagedWorkBuddyRunner(record, current, context) {

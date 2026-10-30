@@ -56,7 +56,7 @@ test("runtime sync survives package directory removal and leaves a pointer", asy
     assert.equal(await fs.readFile(path.join(result.activeRoot, "runner.mjs"), "utf8"), "export const source = true;\n");
     assert.equal((await fs.readFile(path.join(result.activeRoot, "vendor", "adapter.js"), "utf8")).includes("adapter"), true);
     assert.equal((await fs.stat(result.pointerPath)).isFile(), true);
-    assert.equal((await fs.stat(path.join(hostRuntimeRoot(stable, "cursor"), "launcher.ps1"))).isFile(), true);
+    assert.equal((await fs.stat(path.join(hostRuntimeRoot(stable, "cursor"), process.platform === "linux" ? "launcher.sh" : "launcher.ps1"))).isFile(), true);
   } finally {
     await fs.rm(profile, { recursive: true, force: true });
   }

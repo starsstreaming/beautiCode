@@ -106,8 +106,13 @@ let PORT = args.port || parseInt(process.env.WORKBUDDY_REMOTE_DEBUGGING_PORT || 
 const DEFAULT_WALLPAPER = args.wallpaper
   || path.join(REPO, 'assets', 'themes', 'internal-beyond', 'bg-canvas-4k.webp');
 
+const LINUX_DATA_HOME = process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME)
+  ? process.env.XDG_DATA_HOME : path.join(os.homedir(), '.local', 'share');
 const log = createWorkBuddyLogger({
-  file: path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'logs', 'wb-runner.log'),
+  // Linux keeps logs beside core's XDG data root (~/.local/share/beautiCode).
+  file: process.platform === 'linux' && !process.env.LOCALAPPDATA
+    ? path.join(LINUX_DATA_HOME, 'beautiCode', 'logs', 'wb-runner.log')
+    : path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'logs', 'wb-runner.log'),
   debug: args.verbose,
 });
 log.info('runner-started');
@@ -195,9 +200,13 @@ const GALLERY_PORT_BASE = 9337;
 const GALLERY_TOKEN = crypto.randomBytes(16).toString('hex');
 const SKIN_ID = core.SKIN_ID_PATTERN;
 const CENTER_URL = core.SKIN_CENTER_ORIGIN;
+// Must match wb-setup.mjs DATA_DIR (port file, owner record, panel state).
 const DATA_DIR = process.platform === 'win32'
   ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'beauticode')
-  : path.join(os.homedir(), 'Library', 'Application Support', 'beauticode');
+  : process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'beauticode')
+    : path.join(process.env.XDG_CONFIG_HOME && path.isAbsolute(process.env.XDG_CONFIG_HOME)
+      ? process.env.XDG_CONFIG_HOME : path.join(os.homedir(), '.config'), 'beauticode');
 const ENV_KEY = 'WORKBUDDY_REMOTE_DEBUGGING_PORT';
 const PORT_FILE = path.join(DATA_DIR, 'workbuddy-port.json');
 const RUNNER_PID_FILE = path.join(DATA_DIR, 'wb-runner.pid');
@@ -645,7 +654,8 @@ return 'default-applied';
 async function cleanupAll(c) {
   try {
     await evaluate(c, BACKGROUND_BAR_CLEANUP);
-    for (const id of APPLY_IDS) {
+    // The restore layer and panel-settle style are injected outside APPLY_IDS.
+    for (const id of [...APPLY_IDS, 'beauticode-restore-panel', 'beauticode-panel-settle']) {
       await evaluate(c, `(function(){var el=document.getElementById(${JSON.stringify(id)});if(el)el.remove();return 'removed:'+${JSON.stringify(id)};})()`);
     }
     log.info('清理完成');

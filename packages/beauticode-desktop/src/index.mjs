@@ -5,11 +5,20 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import { queryWindowsInstallRecords, resolveRegisteredExecutable } from "./windows-host-install.mjs";
 import { createHealthRunner } from "./health.mjs";
-import { installHostQuickShortcut } from "./quick-shortcuts.mjs";
+import { installHostQuickShortcut, removeLinuxQuickShortcut } from "./quick-shortcuts.mjs";
 
 export { resolveRegisteredExecutable, writeVerifiedExecutableRecord } from "./windows-host-install.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+/** Platforms with a supported install path. Linux skips Doubao (no Linux client). */
+const SUPPORTED_PLATFORMS = Object.freeze(["win32", "linux"]);
+const LINUX_UNSUPPORTED_HOSTS = Object.freeze(["doubao"]);
+
+function xdgDir(env, key, home, fallback) {
+  const value = env[key];
+  return value && path.isAbsolute(value) ? value : path.join(home, ...fallback);
+}
 
 function canonicalStartupMarker(host, env, home) {
   const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
@@ -121,16 +130,20 @@ export function parseCommand(argv) {
   return { kind: "host", host, command };
 }
 
-export function helpText() {
-  return [
-    "用法：beauticode-desktop <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall|health>",
-    "      beauticode-desktop all <install|status|health>",
+export function helpText(cliName = "beauticode-desktop", platform = process.platform) {
+  const lines = [
+    `用法：${cliName} <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall|health>`,
+    `      ${cliName} all <install|status|health>`,
     "",
     "宿主：dsh、codex、workbuddy、cursor、doubao",
     "命令：install 安装后台接线；status 检查守护；health 检查宿主、CDP 与背景入口；uninstall 卸载后台接线",
     "提示：各宿主的 install/uninstall 只调用包内运行时；不会依赖源码 workspace。",
     "all install 安装守护并创建四个背景版开始菜单快捷方式；安装时不启动客户端。原图标仍由守护兜底。",
-  ].join("\n");
+  ];
+  if (platform === "linux") {
+    lines.push("Linux：支持 codex、workbuddy、cursor（以及已安装的 dsh）；守护写入 ~/.config/autostart，背景版启动项写入 ~/.local/share/applications；doubao 无 Linux 客户端，自动跳过。");
+  }
+  return lines.join("\n");
 }
 
 function defaultOptions(options = {}) {
@@ -163,7 +176,9 @@ function installationMarkers(host, options) {
     ];
   }
   if (host === "codex") {
-    const root = env.BEAUTICODE_DATA_ROOT || localAppData;
+    const root = env.BEAUTICODE_DATA_ROOT || (platform === "linux"
+      ? env.LOCALAPPDATA || xdgDir(env, "XDG_DATA_HOME", home, [".local", "share"])
+      : localAppData);
     return [path.join(root, "beautiCode", "codex-plugin", "codex-watchdog.mjs")];
   }
   if (host === "workbuddy") {
@@ -172,6 +187,9 @@ function installationMarkers(host, options) {
     return [path.join(home, ".config", "autostart", "beauticode-beauticode-wb-runner.desktop")];
   }
   if (platform === "win32") return [canonicalStartupMarker(host, env, home)];
+  if (platform === "linux") {
+    return [path.join(xdgDir(env, "XDG_CONFIG_HOME", home, [".config"]), "autostart", `beauticode-${host}-runner.desktop`)];
+  }
   return [path.join(appData, `beauticode-${host}-runner.vbs`)];
 }
 
@@ -229,8 +247,31 @@ function windowsExecutableCandidates(host, env, home) {
   return [];
 }
 
+/** Mirrors the adapters' Linux executable candidates (deb/rpm/opt and per-user installs). */
+function linuxExecutableCandidates(host, env, home) {
+  const data = xdgDir(env, "XDG_DATA_HOME", home, [".local", "share"]);
+  if (host === "codex") return [
+    "/usr/lib/chatgpt/ChatGPT", "/opt/ChatGPT/ChatGPT", "/opt/chatgpt/ChatGPT",
+    "/usr/lib/codex/Codex", "/opt/Codex/Codex",
+    path.join(data, "chatgpt", "ChatGPT"), path.join(home, ".local", "opt", "ChatGPT", "ChatGPT"),
+  ];
+  if (host === "workbuddy") return [
+    "/opt/WorkBuddy/workbuddy", "/opt/workbuddy/workbuddy", "/usr/lib/workbuddy/workbuddy",
+    path.join(data, "WorkBuddy", "workbuddy"),
+  ];
+  if (host === "cursor") return [
+    ...(env.BEAUTICODE_CURSOR_EXECUTABLE ? [env.BEAUTICODE_CURSOR_EXECUTABLE] : []),
+    "/usr/share/cursor/cursor", "/opt/Cursor/cursor", "/opt/cursor/cursor",
+    path.join(data, "cursor", "cursor"), path.join(home, "Applications", "cursor", "cursor"),
+  ];
+  return [];
+}
+
 function commandOnPath(command, options) {
   const pathValue = options.env.PATH || options.env.Path || "";
+  if (options.platform === "linux") {
+    return pathValue.split(":").filter(Boolean).some((directory) => options.exists(path.join(directory, command)));
+  }
   return pathValue.split(";").filter(Boolean).some((directory) =>
     [".cmd", ".exe", ".bat"].some((extension) =>
       options.exists(path.join(directory, `${command}${extension}`)),
@@ -258,11 +299,19 @@ function packagedCodexPresent(options) {
 export function detectHostAvailability(host, options = {}) {
   if (!HOSTS.includes(host)) throw new Error(`未知宿主：${host}`);
   const resolved = defaultOptions(options);
-  if (resolved.platform !== "win32") return { host, available: false, reason: "unsupported-platform" };
+  if (!SUPPORTED_PLATFORMS.includes(resolved.platform) ||
+    (resolved.platform === "linux" && LINUX_UNSUPPORTED_HOSTS.includes(host))) {
+    return { host, available: false, reason: "unsupported-platform" };
+  }
   if (host === "dsh") {
     const dshHome = resolved.env.DSH_HOME || path.join(resolved.home, ".dsh");
     const plugin = path.join(dshHome, "plugins", "beauticode-dsh", "index.mjs");
     if (resolved.exists(plugin) || resolved.exists(dshHome) || commandOnPath("dsh", resolved)) {
+      return { host, available: true, reason: "detected" };
+    }
+  } else if (resolved.platform === "linux") {
+    if (getHostStatus(host, resolved).installed ||
+      linuxExecutableCandidates(host, resolved.env, resolved.home).some(resolved.exists)) {
       return { host, available: true, reason: "detected" };
     }
   } else {
@@ -280,7 +329,7 @@ export function detectHostAvailability(host, options = {}) {
 
 export function runAllInstall(options = {}) {
   const resolved = defaultOptions(options);
-  if (resolved.platform !== "win32") throw new Error("all install 仅支持 Windows。");
+  if (!SUPPORTED_PLATFORMS.includes(resolved.platform)) throw new Error("all install 仅支持 Windows 和 Linux。");
   const results = [];
   for (const host of HOSTS) {
     try {
@@ -305,10 +354,12 @@ export function runAllInstall(options = {}) {
         results.push({ host, outcome: "failed", reason: verification.reason || "guardian-not-ready" });
         continue;
       }
-      const shortcut = host === "dsh" ? null : resolved.installShortcut(host, {
-        localAppData: resolved.env.LOCALAPPDATA,
-        appData: resolved.env.APPDATA,
-      });
+      const shortcut = host === "dsh" ? null : resolved.installShortcut(host, resolved.platform === "linux"
+        ? { platform: "linux", home: resolved.home, localAppData: resolved.env.LOCALAPPDATA, xdgDataHome: resolved.env.XDG_DATA_HOME }
+        : {
+          localAppData: resolved.env.LOCALAPPDATA,
+          appData: resolved.env.APPDATA,
+        });
       results.push({ host, outcome: "installed", readiness: verification.state || "guardian-ready", shortcut: shortcut?.path ?? null, action: shortcut ? "open-background-shortcut" : "wait-for-launch" });
     } catch (error) {
       results.push({ host, outcome: "failed", reason: error instanceof Error ? error.message : String(error) });
@@ -394,7 +445,7 @@ export function getAllStatus(options = {}) {
         ...(conflict ? { reason: conflict } : {}),
       };
     }
-    if (!status.installed || !status.runtimeReady || resolved.platform !== "win32") {
+    if (!status.installed || !status.runtimeReady || !SUPPORTED_PLATFORMS.includes(resolved.platform)) {
       return { ...status, guardian: "not-checked" };
     }
     const verification = resolved.verifyHostInstall(host, resolved);
@@ -453,6 +504,10 @@ export function runHostCommand(host, command, options = {}) {
   });
   if (result.status !== 0) {
     throw new Error(`${host} ${command} failed with exit code ${result.status ?? "unknown"}`);
+  }
+  if (command === "uninstall" && host !== "dsh" && (options.platform || process.platform) === "linux") {
+    // Linux clean uninstall also drops our own "(背景)" application entry.
+    (options.removeShortcut || removeLinuxQuickShortcut)(host, { home: options.home, xdgDataHome: options.env?.XDG_DATA_HOME });
   }
   return { host, command, ok: true };
 }

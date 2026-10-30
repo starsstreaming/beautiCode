@@ -42,9 +42,43 @@ function buildWindowsPickerScript(kind: "image" | "video"): string {
   ].join("; ");
 }
 
+/** zenity first, then kdialog. Exit 1 with no output is a user cancel for both. */
+async function pickLinuxMedia(kind: "image" | "video"): Promise<PickedMedia> {
+  const patterns = kind === "video" ? "*.mp4 *.mov" : "*.jpg *.jpeg *.png *.webp *.avif";
+  const title = "选择 beautiCode 背景文件";
+  const candidates: Array<[string, string[]]> = [
+    ["zenity", ["--file-selection", `--title=${title}`, `--file-filter=${kind === "video" ? "Video" : "Image"} | ${patterns}`]],
+    ["kdialog", ["--title", title, "--getopenfilename", ".", patterns]],
+  ];
+  for (const [command, args] of candidates) {
+    const result = await new Promise<{ missing: boolean; code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => child.kill("SIGKILL"), PICKER_TIMEOUT_MS);
+      child.stdout?.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+      child.stderr?.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        resolve({ missing: (error as NodeJS.ErrnoException).code === "ENOENT", code: null, stdout, stderr: String(error) });
+      });
+      child.once("close", (code) => { clearTimeout(timer); resolve({ missing: false, code, stdout, stderr }); });
+    });
+    if (result.missing) continue;
+    const selected = result.stdout.trim();
+    if (result.code === 0 && selected) {
+      return { ok: true, kind, path: path.resolve(selected), name: path.basename(selected) };
+    }
+    if (result.code === 1 && !selected) return { ok: true, cancelled: true };
+    throw pickerUnavailable(result.stderr.trim() || `文件选择器退出异常（${result.code}）。`);
+  }
+  throw pickerUnavailable("没有找到 zenity 或 kdialog，无法打开文件选择器。请安装 zenity（例如 sudo apt install zenity）。");
+}
+
 export async function pickLocalMedia(
   kind: "image" | "video",
 ): Promise<PickedMedia> {
+  if (process.platform === "linux") return pickLinuxMedia(kind);
   if (process.platform !== "win32") {
     throw pickerUnavailable("当前系统不支持 Windows 原生文件选择器。");
   }

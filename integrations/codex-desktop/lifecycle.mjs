@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { readdirSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
@@ -56,7 +57,18 @@ function pidAlive(pid) {
   }
 }
 
+function linuxCommandLine(pid) {
+  try {
+    return readFileSync(`/proc/${Math.trunc(pid)}/cmdline`, "utf8")
+      .split("\0").filter(Boolean)
+      .map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg)).join(" ");
+  } catch {
+    return "";
+  }
+}
+
 export function processCommandLine(pid) {
+  if (process.platform === "linux") return linuxCommandLine(pid);
   if (process.platform !== "win32") return "";
   try {
     const script =
@@ -145,15 +157,28 @@ export function shouldRestartCodexHelper({ stopping = false } = {}) {
 }
 
 /** Stop only verified installed beautiCode guardian processes, never Codex. */
+/** Same-user node processes from /proc, shaped like the Win32_Process rows. */
+function linuxNodeProcessRows() {
+  let entries = [];
+  try { entries = readdirSync("/proc"); } catch { return []; }
+  return entries.filter((entry) => /^\d+$/.test(entry)).flatMap((entry) => {
+    const command = linuxCommandLine(Number(entry));
+    const first = command.split(" ", 1)[0] || "";
+    return /(?:^|\/)node$|(?:^|\/)sh$/.test(first) ? [{ ProcessId: Number(entry), CommandLine: command }] : [];
+  });
+}
+
 export function stopInstalledCodexGuardians(helperHome, stableHostRoot) {
-  if (process.platform !== "win32") return 0;
+  if (process.platform !== "win32" && process.platform !== "linux") return 0;
   const allowed = [
     path.join(helperHome, "start-watch.ps1"),
     path.join(helperHome, "codex-watchdog.mjs"),
     path.join(helperHome, "watch-host.mjs"),
     path.join(stableHostRoot, "launcher.ps1"),
+    path.join(stableHostRoot, "launcher.sh"),
   ].map((value) => path.resolve(value).replaceAll("\\", "/").toLowerCase());
   const versionPrefix = path.join(stableHostRoot, "versions").replaceAll("\\", "/").toLowerCase() + "/";
+  if (process.platform === "linux") return stopMatchingRows(linuxNodeProcessRows(), allowed, versionPrefix);
   const script = "$p=Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('node.exe','powershell.exe','pwsh.exe') }; $p | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress";
   let rows;
   try {
@@ -162,6 +187,10 @@ export function stopInstalledCodexGuardians(helperHome, stableHostRoot) {
     }).trim();
     rows = raw ? JSON.parse(raw) : [];
   } catch { return 0; }
+  return stopMatchingRows(rows, allowed, versionPrefix);
+}
+
+function stopMatchingRows(rows, allowed, versionPrefix) {
   let stopped = 0;
   for (const row of Array.isArray(rows) ? rows : [rows]) {
     const pid = Number(row?.ProcessId);

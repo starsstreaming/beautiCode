@@ -85,6 +85,17 @@ beauticode-desktop all install
 
 `all install` 会检测本机已安装的客户端，逐一套上后台接线，并为已检测到的客户端创建带背景的开始菜单快捷方式；它不会替你启动客户端。首次启用 CDP 的客户端请用新快捷方式启动一次。
 
+### Linux（x64，独立包 `beauticode-linux`）
+
+```sh
+sudo apt install zenity          # 文件选择器（KDE 可用 kdialog）
+npm install -g beauticode-linux --foreground-scripts
+beauticode-linux all install
+beauticode-linux all status
+```
+
+支持 Codex（ChatGPT 桌面版）、Cursor、WorkBuddy；需要 Node.js 22+。守护写入 `~/.config/autostart`，「(背景)」启动项写入 `~/.local/share/applications`，不需要 root。Linux 没有托盘，雨窗等内置动态氛围主题暂不可用；详见 [packages/beauticode-linux/README.md](packages/beauticode-linux/README.md)。
+
 ### 只给 DeepSeek Harness 用
 
 ```sh

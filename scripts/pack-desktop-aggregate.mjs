@@ -10,9 +10,14 @@ import { stageDshPlugin } from "./pack-dsh-plugin.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const sourceRoot = path.join(repoRoot, "packages", "beauticode-desktop");
+const linuxRoot = path.join(repoRoot, "packages", "beauticode-linux");
 
 export function defaultStageDir() {
   return path.join(repoRoot, "artifacts", "desktop-aggregate");
+}
+
+export function defaultLinuxStageDir() {
+  return path.join(repoRoot, "artifacts", "linux");
 }
 
 function runBuild() {
@@ -93,6 +98,14 @@ function rewriteCodexWatchHost(text) {
     .replaceAll("@beauticode/adapter-codex", "Codex adapter");
 }
 
+async function rewriteJsTree(dir) {
+  for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) await rewriteJsTree(file);
+    else if (entry.name.endsWith(".js")) await fsp.writeFile(file, rewriteDesktopAdapter(await fsp.readFile(file, "utf8")), "utf8");
+  }
+}
+
 async function copyDesktopRuntime(destRoot) {
   const desktop = path.join(destRoot, "runtime", "desktop");
   await copyText(
@@ -114,14 +127,15 @@ async function copyDesktopRuntime(destRoot) {
     path.join(desktop, "scripts", "desktop-runner-identity.mjs"),
   );
   await copyText(path.join(repoRoot, "scripts", "guardian-process.mjs"), path.join(desktop, "scripts", "guardian-process.mjs"));
+  await copyText(path.join(repoRoot, "scripts", "xdg-autostart.mjs"), path.join(desktop, "scripts", "xdg-autostart.mjs"));
   await copyText(
     path.join(repoRoot, "scripts", "portable-runtime.mjs"),
     path.join(desktop, "scripts", "portable-runtime.mjs"),
   );
   await copyJsTree(path.join(repoRoot, "packages", "core", "dist"), path.join(desktop, "packages", "core", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-desktop-cdp", "dist"), path.join(desktop, "packages", "adapter-desktop-cdp", "dist"));
-  const startupRepair = path.join(desktop, "packages", "adapter-desktop-cdp", "dist", "startup-repair.js");
-  await fsp.writeFile(startupRepair, rewriteDesktopAdapter(await fsp.readFile(startupRepair, "utf8")), "utf8");
+  // launch.js (Linux /proc scan) and startup-repair.js both import core.
+  await rewriteJsTree(path.join(desktop, "packages", "adapter-desktop-cdp", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-cursor", "dist"), path.join(desktop, "packages", "adapter-cursor", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-doubao", "dist"), path.join(desktop, "packages", "adapter-doubao", "dist"));
   for (const name of ["adapter-cursor", "adapter-doubao"]) {
@@ -153,8 +167,7 @@ async function copyWorkbuddyRuntime(destRoot) {
   );
   await copyJsTree(path.join(repoRoot, "packages", "core", "dist"), path.join(workbuddy, "packages", "core", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-workbuddy", "dist"), path.join(workbuddy, "packages", "adapter-workbuddy", "dist"));
-  const workbuddyLaunch = path.join(workbuddy, "packages", "adapter-workbuddy", "dist", "launch.js");
-  await fsp.writeFile(workbuddyLaunch, rewriteDesktopAdapter(await fsp.readFile(workbuddyLaunch, "utf8")), "utf8");
+  await rewriteJsTree(path.join(workbuddy, "packages", "adapter-workbuddy", "dist"));
   await copyTree(
     path.join(repoRoot, "assets", "themes", "internal-beyond"),
     path.join(workbuddy, "assets", "themes", "internal-beyond"),
@@ -166,15 +179,26 @@ export async function stageDesktopAggregate(destRoot = defaultStageDir(), opts =
   if (opts.build !== false) runBuild();
   await fsp.rm(destRoot, { recursive: true, force: true });
   await fsp.mkdir(destRoot, { recursive: true });
-  const manifest = JSON.parse(await fsp.readFile(path.join(sourceRoot, "package.json"), "utf8"));
-  // Source workspaces must install on Linux CI; only the distributable has a Windows-only runtime contract.
-  manifest.os = ["win32"];
+  // `beauticode-linux` is a separate distributable: its own manifest, README and
+  // bin, sharing beauticode-desktop's CLI source (src/) and the same runtimes.
+  const linux = opts.variant === "linux";
+  const packageRoot = linux ? linuxRoot : sourceRoot;
+  const manifest = JSON.parse(await fsp.readFile(path.join(packageRoot, "package.json"), "utf8"));
+  // Source workspaces must install anywhere; only the distributable carries the
+  // platform restriction (beauticode-desktop stays Windows-only).
+  if (linux) {
+    manifest.os = ["linux"];
+    manifest.cpu = ["x64"];
+    delete manifest.scripts?.test;
+  } else {
+    manifest.os = ["win32"];
+  }
   await fsp.writeFile(path.join(destRoot, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   for (const name of ["README.md", "LICENSE"]) {
-    const source = name === "LICENSE" ? path.join(repoRoot, name) : path.join(sourceRoot, name);
+    const source = name === "LICENSE" ? path.join(repoRoot, name) : path.join(packageRoot, name);
     if (fs.existsSync(source)) await fsp.copyFile(source, path.join(destRoot, name));
   }
-  await copyTree(path.join(sourceRoot, "bin"), path.join(destRoot, "bin"));
+  await copyTree(path.join(packageRoot, "bin"), path.join(destRoot, "bin"));
   await copyTree(path.join(sourceRoot, "src"), path.join(destRoot, "src"));
   await stageDshPlugin(path.join(destRoot, "runtime", "dsh"), { build: false });
   await stageCodexPlugin(path.join(destRoot, "runtime", "codex"), { build: false });
@@ -193,7 +217,17 @@ export async function stageDesktopAggregate(destRoot = defaultStageDir(), opts =
   return destRoot;
 }
 
+export async function stageLinuxPackage(destRoot = defaultLinuxStageDir(), opts = {}) {
+  return stageDesktopAggregate(destRoot, { ...opts, variant: "linux" });
+}
+
 async function main() {
+  if (process.argv.includes("--linux")) {
+    const dest = await stageLinuxPackage();
+    const { version } = JSON.parse(await fsp.readFile(path.join(dest, "package.json"), "utf8"));
+    process.stdout.write(`Staged beauticode-linux@${version} at ${dest}\n`);
+    return;
+  }
   const dest = await stageDesktopAggregate();
   process.stdout.write(`Staged beauticode-desktop@0.1.0-test.12 at ${dest}\n`);
 }

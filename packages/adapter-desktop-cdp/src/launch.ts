@@ -3,6 +3,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
+import { listLinuxProcesses, selectLinuxMainProcesses } from "@beauticode/core";
 import { parseRemoteDebuggingFlags, probeDesktopCdp } from "./cdp.js";
 import type { DesktopCdpHostSpec, DesktopProcess } from "./types.js";
 
@@ -23,6 +24,7 @@ export function isDesktopMainProcess(
   executablePath: string,
   platform = process.platform,
 ): boolean {
+  if (platform === "linux") return isLinuxDesktopMainProcess(spec, commandLine, executablePath);
   if (platform !== "win32") return false;
   if (name.toLowerCase() !== spec.processName.toLowerCase()) return false;
   if (/(?:^|\s)--type(?:=|\s)/.test(commandLine)) return false;
@@ -30,6 +32,45 @@ export function isDesktopMainProcess(
   return spec.executableCandidates.some(
     (candidate) => normalizedWinPath(candidate) === actual,
   );
+}
+
+function canonicalLinuxPath(value: string): string {
+  try {
+    return fs.realpathSync(value);
+  } catch {
+    return path.posix.normalize(value);
+  }
+}
+
+/** Linux identity is the resolved Electron binary, never a process name. */
+export function isLinuxDesktopMainProcess(
+  spec: DesktopCdpHostSpec,
+  commandLine: string,
+  executablePath: string,
+): boolean {
+  const candidates = spec.linux?.executableCandidates ?? [];
+  if (!candidates.length || !executablePath) return false;
+  if (/(?:^|\s)--type(?:=|\s)/.test(commandLine)) return false;
+  const actual = canonicalLinuxPath(executablePath);
+  return candidates.some((candidate) => canonicalLinuxPath(candidate) === actual);
+}
+
+/** Linux snapshot from /proc; helper and ELECTRON_RUN_AS_NODE children are excluded by parent image. */
+export function listLinuxDesktopProcesses(spec: DesktopCdpHostSpec): DesktopProcess[] {
+  const rows = listLinuxProcesses();
+  return selectLinuxMainProcesses(rows, (row) =>
+    isLinuxDesktopMainProcess(spec, row.commandLine, row.executablePath),
+  ).map((row) => {
+    const flags = parseRemoteDebuggingFlags(row.commandLine);
+    return {
+      pid: row.pid,
+      name: row.name,
+      executablePath: row.executablePath,
+      commandLine: row.commandLine,
+      port: flags.safe ? flags.port : null,
+      createdAtMs: row.createdAtMs,
+    };
+  });
 }
 
 export interface DesktopProcessSnapshotRow {
@@ -68,6 +109,7 @@ export function selectDesktopMainProcesses(
 export async function listDesktopProcesses(
   spec: DesktopCdpHostSpec,
 ): Promise<DesktopProcess[]> {
+  if (process.platform === "linux") return listLinuxDesktopProcesses(spec);
   if (process.platform !== "win32") return [];
   const escapedName = spec.processName.replace(/'/g, "''");
   const script = [
@@ -111,8 +153,16 @@ export async function listDesktopProcesses(
   }
 }
 
+export function desktopExecutableCandidates(
+  spec: DesktopCdpHostSpec,
+  platform = process.platform,
+): readonly string[] {
+  if (platform === "linux") return spec.linux?.executableCandidates ?? [];
+  return spec.executableCandidates;
+}
+
 export function findDesktopExecutable(spec: DesktopCdpHostSpec): string | null {
-  for (const candidate of spec.executableCandidates) {
+  for (const candidate of desktopExecutableCandidates(spec)) {
     try {
       if (fs.existsSync(candidate)) return candidate;
     } catch {
@@ -215,7 +265,11 @@ export async function launchDesktopWithCdp(
     );
     return;
   }
-  const child = spawn(command.file, command.args, {
+  // POSIX spawn has no shell: each preserved flag must be its own argv entry.
+  const args = command.args.flatMap((arg) =>
+    arg.match(/--[A-Za-z0-9][A-Za-z0-9_.-]*(?:=(?:"[^"]*"|'[^']*'|[^\s;&|<>]+))?/g) ?? [arg],
+  );
+  const child = spawn(command.file, args, {
     detached: true,
     stdio: "ignore",
     windowsHide: false,

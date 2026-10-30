@@ -33,12 +33,18 @@ import http from "node:http";
 import net from "node:net";
 import {
   buildCodexLaunchCommand,
+} from "../dist/launch.js";
+import {
   buildWindowsCodexProcessStartScript,
+} from "../dist/startup-repair.js";
+import {
   CodexStartupRepairController,
   classifyCodexStartupProcess,
+} from "../dist/startup-policy.js";
+import {
   looksLikeCodexMain,
   parseAppxCodexInstallLocations,
-} from "../dist/launch.js";
+} from "../dist/processes.js";
 
 test("CodexHostApplier verify fails on generation mismatch", async () => {
   const mock = await startMockCdp();

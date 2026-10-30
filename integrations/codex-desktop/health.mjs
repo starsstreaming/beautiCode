@@ -3,11 +3,15 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createCodexRunKeyAdapter, createCodexTaskAdapter } from "./task-wiring.mjs";
+import { codexAutostartPath, createCodexRunKeyAdapter, createCodexTaskAdapter, isOwnedCodexAutostart } from "./task-wiring.mjs";
 import { parseCodexLockOwner, processCommandLine } from "./lifecycle.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const base = () => path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "beautiCode");
+const localBase = () => process.env.LOCALAPPDATA || (process.platform === "linux"
+  ? (process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME) ? process.env.XDG_DATA_HOME : path.join(os.homedir(), ".local", "share"))
+  : path.join(os.homedir(), "AppData", "Local"));
+const base = () => path.join(localBase(), "beautiCode");
+const launcherName = () => (process.platform === "linux" ? "launcher.sh" : "launcher.ps1");
 
 export function classifyEntry(node) {
   if (!node?.exists) return "not-mounted";
@@ -85,7 +89,7 @@ export function isCodexRuntimeReady(baseRoot) {
   const home = path.join(baseRoot, "codex-plugin");
   const runtimeHome = home;
   if (!fs.existsSync(path.join(home, "codex-watchdog.mjs")) ||
-      !fs.existsSync(path.join(runtimeHome, "launcher.ps1"))) return false;
+      !fs.existsSync(path.join(runtimeHome, launcherName()))) return false;
   try {
     const pointer = JSON.parse(fs.readFileSync(path.join(runtimeHome, "current.json"), "utf8"));
     if (pointer.schema !== "beauticode.runtime/v1" || pointer.host !== "codex-plugin" ||
@@ -97,6 +101,13 @@ export function isCodexRuntimeReady(baseRoot) {
 async function installed() {
   const home = path.join(base(), "codex-plugin");
   const runtimeReady = isCodexRuntimeReady(base());
+  if (process.platform === "linux") {
+    // The XDG autostart entry plays the scheduled task's role on Linux.
+    let taskOwned = false;
+    try { taskOwned = isOwnedCodexAutostart(await fsp.readFile(codexAutostartPath(), "utf8"), path.join(home, "launcher.sh")); }
+    catch { /* missing autostart is not ownership */ }
+    return { runtimeReady, taskOwned, runKeyOwned: false };
+  }
   if (process.platform !== "win32") return { runtimeReady: false, taskOwned: false, runKeyOwned: false };
   const starter = path.join(home, "start-watch.ps1");
   const task = createCodexTaskAdapter(starter);
@@ -135,7 +146,7 @@ const ENTRY_EXPRESSION = `(() => {
 })()`;
 
 export async function probeLocalCodexHealth() {
-  if (process.platform !== "win32") return {
+  if (process.platform !== "win32" && process.platform !== "linux") return {
     installation: "missing", taskOwned: false, runKeyOwned: false, guardian: "unknown", host: "unknown",
     cdp: "unknown", entry: "not-checked", primaryPages: 0, action: "none", reason: "unsupported-platform",
   };

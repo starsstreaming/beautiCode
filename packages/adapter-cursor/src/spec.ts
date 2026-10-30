@@ -38,11 +38,28 @@ export function cursorExecutableCandidates(options: CandidateOptions = {}): stri
   return [...new Set(values.filter(Boolean).map((value) => path.win32.normalize(value)))];
 }
 
+/** Official .deb/.rpm installs and common manual/AppImage-extracted layouts. */
+export function cursorLinuxExecutableCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
+  const home = env.HOME || "";
+  const values = [
+    env.BEAUTICODE_CURSOR_EXECUTABLE || "",
+    "/usr/share/cursor/cursor",
+    "/opt/Cursor/cursor",
+    "/opt/cursor/cursor",
+    home ? path.posix.join(home, ".local", "share", "cursor", "cursor") : "",
+    home ? path.posix.join(home, "Applications", "cursor", "cursor") : "",
+  ];
+  return [...new Set(values.filter((value) => path.posix.isAbsolute(value)))];
+}
+
 export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
   kind: "cursor",
   displayName: "Cursor",
   processName: "Cursor.exe",
   executableCandidates: Object.freeze(cursorExecutableCandidates()),
+  linux: Object.freeze({
+    executableCandidates: Object.freeze(cursorLinuxExecutableCandidates()),
+  }),
   defaultPort: 9341,
   candidatePorts: Object.freeze([9351, 9361, 9371]),
   popupTopInset: 44,
@@ -64,7 +81,9 @@ export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
   mount: "cursor",
   // Cursor's measured agent sidebar places Customize second in header actions.
   // The exact position and label are both required; an upstream reorder fails closed.
-  anchorSelector: '[data-action-id="marketplace"][data-sidebar-primary-action], .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(2)',
+  // Cursor 3.2x: header cells are [New Agent, Search, Automations, Customize];
+  // Earlier builds put Customize in the second cell. Each match also allows the injected entry right after it (nth-last-child(-n+2)).
+  anchorSelector: '[data-action-id="marketplace"][data-sidebar-primary-action], .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(2):nth-last-child(-n+2), .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(4):nth-last-child(-n+2)',
   anchorText: "Customize",
   strings: Object.freeze({
     entry: "background",
@@ -111,6 +130,13 @@ export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
       ".monaco-editor .margin",
       ".agent-panel",
       ".terminal-outer-container",
+      // Cursor 3.2x folder workbench (unified sidebar + agent auxiliary bar).
+      ".part.unifiedsidebar",
+      ".agent-sidebar",
+      ".part.auxiliarybar",
+      ".part.editor > .content",
+      ".editor-container",
+      ".composer-bar",
     ]),
     surfaceSelectors: Object.freeze([
       ".ui-sidebar",

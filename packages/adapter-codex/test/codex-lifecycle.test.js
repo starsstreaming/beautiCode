@@ -11,7 +11,9 @@ import {
   recoverStaleCodexGuardianLock,
 } from "../../../integrations/codex-desktop/lifecycle.mjs";
 import { acquireCodexGuardianLease, startCodexHelperWatchdog } from "../../../integrations/codex-desktop/codex-watchdog.mjs";
-import { classifyCodexStartupProcess } from "../dist/launch.js";
+import {
+  classifyCodexStartupProcess,
+} from "../dist/startup-policy.js";
 
 const HELPER_HOME = path.resolve(os.tmpdir(), "beautiCode", "codex-plugin");
 

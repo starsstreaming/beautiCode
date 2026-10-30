@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { createXdgAutostartAdapter } from './xdg-autostart.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { writeVerifiedExecutableRecord } from '../packages/beauticode-desktop/src/windows-host-install.mjs';
 import {
@@ -14,14 +15,18 @@ import {
 } from './desktop-runner-identity.mjs';
 import {
   activateStableRuntime,
+  beautiCodeLocalRoot,
   discardStableRuntime,
   hostRuntimeRoot,
   renderWindowsStartupVbs,
+  renderXdgDesktopEntry,
   resolveNodeExecutable,
   stableRuntimeRoot,
+  startDetachedLauncher,
   startupDirectory,
   syncStableRuntime,
   writeTextAtomic,
+  xdgAutostartPath,
 } from './portable-runtime.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -41,21 +46,31 @@ function parseArgs(argv) {
   return out;
 }
 
-if (process.platform !== 'win32') throw new Error('Cursor/豆包背景守护当前仅支持 Windows。');
+const IS_LINUX = process.platform === 'linux';
+if (process.platform !== 'win32' && !IS_LINUX) throw new Error('Cursor/豆包背景守护当前仅支持 Windows 与 Linux。');
 const args = parseArgs(process.argv.slice(2));
-const dataDir = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'hosts', args.host);
+if (IS_LINUX && args.host !== 'cursor') throw new Error('豆包没有官方 Linux 桌面版；Linux 仅支持 Cursor。');
+const dataDir = path.join(beautiCodeLocalRoot(process.env, os.homedir()), 'hosts', args.host);
 const pidFile = path.join(dataDir, 'runner.pid');
 const logFile = path.join(dataDir, 'runner.log');
 const stableRoot = stableRuntimeRoot(process.env, os.homedir());
 const stableHostRoot = hostRuntimeRoot(stableRoot, args.host);
-const startupVbs = path.join(startupDirectory(process.env, os.homedir()), `beauticode-${args.host}-runner.vbs`);
+// Windows: hidden VBS in the Startup folder. Linux: XDG autostart entry.
+const startupVbs = IS_LINUX
+  ? xdgAutostartPath(`beauticode-${args.host}-runner`, process.env, os.homedir())
+  : path.join(startupDirectory(process.env, os.homedir()), `beauticode-${args.host}-runner.vbs`);
 const legacyStartupVbs = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), `beauticode-${args.host}-runner.vbs`);
 const runnerArgs = ['--host', args.host, '--watchdog', '--pid-file', pidFile];
 const runnerContext = { host: args.host, stableHostRoot, sourceRunner: RUNNER, pidFile };
+const linuxAutostart = IS_LINUX
+  ? createXdgAutostartAdapter(path.join(stableHostRoot, 'launcher.sh'), { file: startupVbs, args: runnerArgs })
+  : null;
 
 const DESKTOP_RUNTIME_PREFIXES = [
   'scripts/desktop-cdp-runner.mjs',
   'scripts/quick-launch.mjs',
+  'scripts/xdg-autostart.mjs',
+  'scripts/portable-runtime.mjs',
   'packages/core/dist/',
   'packages/adapter-desktop-cdp/dist/',
   `packages/adapter-${args.host}/dist/`,
@@ -100,8 +115,25 @@ function readPidRecord() {
   }
 }
 
-function readWindowsProcess(pid) {
+let linuxCore = null;
+async function loadLinuxCore() {
+  if (IS_LINUX && !linuxCore) {
+    linuxCore = await import(pathToFileURL(path.join(REPO, 'packages', 'core', 'dist', 'index.js')).href);
+  }
+}
+await loadLinuxCore();
+
+function readLinuxRunnerProcess(pid) {
+  const info = linuxCore.readLinuxProcess(pid);
+  return info ? {
+    pid: info.pid, name: info.name, image: info.executablePath,
+    commandLine: info.commandLine, createdAtMs: info.createdAtMs,
+  } : null;
+}
+
+function readRunnerProcess(pid) {
   if (!Number.isInteger(pid) || pid < 1) return null;
+  if (IS_LINUX) return readLinuxRunnerProcess(pid);
   const script = [
     "$ErrorActionPreference='SilentlyContinue';",
     `$p=Get-CimInstance Win32_Process -Filter \"ProcessId=${pid}\";`,
@@ -125,19 +157,21 @@ function readWindowsProcess(pid) {
 function managedRunnerProcess() {
   const record = readPidRecord();
   if (!record) return null;
-  const current = readWindowsProcess(record.pid);
+  const current = readRunnerProcess(record.pid);
   return isManagedDesktopRunner(record, current, runnerContext) ? current : null;
 }
 
 function stopRunner() {
   const record = readPidRecord();
-  const current = record ? readWindowsProcess(record.pid) : null;
+  const current = record ? readRunnerProcess(record.pid) : null;
   if (isManagedDesktopRunner(record, current, runnerContext)) {
-    const result = spawnSync('taskkill.exe', ['/PID', String(record.pid), '/T', '/F'], { windowsHide: true, timeout: 8_000 });
+    const result = IS_LINUX
+      ? stopLinuxRunner(record.pid)
+      : spawnSync('taskkill.exe', ['/PID', String(record.pid), '/T', '/F'], { windowsHide: true, timeout: 8_000 });
     // Do not discard the only ownership record when taskkill failed.  The
     // next install/status must still be able to identify and stop this exact
     // runner instead of starting a second watchdog beside it.
-    const after = readWindowsProcess(record.pid);
+    const after = readRunnerProcess(record.pid);
     if (result.error || result.status !== 0 || isManagedDesktopRunner(record, after, runnerContext)) {
       const detail = result.error?.message || (result.status == null ? 'taskkill timed out' : `exit ${result.status}`);
       throw new Error(`无法停止现有 beautiCode ${args.host} 守护（${detail}）。`);
@@ -146,7 +180,23 @@ function stopRunner() {
   try { fs.unlinkSync(pidFile); } catch {}
 }
 
+/** SIGTERM lets the watchdog stop its child; SIGKILL only after 5 s. */
+function stopLinuxRunner(pid) {
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  try { process.kill(pid, 'SIGTERM'); } catch (error) { return { status: error?.code === 'ESRCH' ? 0 : 1, error }; }
+  const deadline = Date.now() + 5_000;
+  while (alive() && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  if (alive()) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+  return { status: 0 };
+}
+
 function cleanPage() {
+  if (IS_LINUX) {
+    const launcher = path.join(stableHostRoot, 'launcher.sh');
+    if (!fs.existsSync(launcher)) return;
+    spawnSync('/bin/sh', [launcher, '--host', args.host, '--clean', '--no-repair'], { timeout: 10_000, stdio: 'ignore' });
+    return;
+  }
   const launcher = path.join(stableHostRoot, 'launcher.ps1');
   if (!fs.existsSync(launcher)) return;
   spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher, '--host', args.host, '--clean', '--no-repair'], {
@@ -204,15 +254,18 @@ if (args.command === 'status') {
 }
 
 if (args.command === 'uninstall') {
+  linuxAutostart?.assertAbsentOrOwned();
   stopRunner();
   cleanPage();
-  try { fs.unlinkSync(startupVbs); } catch {}
-  try { fs.unlinkSync(legacyStartupVbs); } catch {}
+  if (linuxAutostart) linuxAutostart.removeOwned();
+  else { try { fs.unlinkSync(startupVbs); } catch {} }
+  if (!IS_LINUX) { try { fs.unlinkSync(legacyStartupVbs); } catch {} }
   process.stdout.write(`${args.host} 背景守护已卸载；独立主题状态保留在 ${dataDir}\n`);
   process.exit(0);
 }
 
 if (args.command === 'install') {
+linuxAutostart?.assertAbsentOrOwned();
 fs.mkdirSync(dataDir, { recursive: true });
 if (fs.existsSync(path.join(REPO, 'package-lock.json'))) {
   const compiler = path.join(REPO, 'node_modules', 'typescript', 'bin', 'tsc');
@@ -225,6 +278,10 @@ if (fs.existsSync(path.join(REPO, 'package-lock.json'))) {
 const stableRuntime = await prepareStableRuntime();
 const previousRunning = managedRunnerProcess();
 const startFromStartup = () => {
+  if (IS_LINUX) {
+    if (!startDetachedLauncher(stableRuntime.launcher, runnerArgs)) throw new Error('startup-launch-failed');
+    return;
+  }
   const result = spawnSync('wscript.exe', ['//B', startupVbs], { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
   if (result.error || result.status !== 0) throw new Error('startup-launch-failed');
 };
@@ -234,18 +291,28 @@ try {
     pointerPath: stableRuntime.pointerPath,
     startupVbs,
     executableRecord: path.join(dataDir, 'executable.json'),
+    restoreStartup: linuxAutostart ? (previous) => linuxAutostart.restore(previous) : undefined,
     run: async () => {
       stopRunner();
       await activateStableRuntime(stableRuntime, { startupLogPath: logFile });
-      await writeVerifiedExecutableRecord(args.host, dataDir);
+      if (!IS_LINUX) await writeVerifiedExecutableRecord(args.host, dataDir);
       fs.mkdirSync(path.dirname(startupVbs), { recursive: true });
-      await writeTextAtomic(startupVbs, renderWindowsStartupVbs({ launcher: stableRuntime.launcher, args: runnerArgs }));
+      if (linuxAutostart) {
+        linuxAutostart.write(renderXdgDesktopEntry({
+          name: `beautiCode ${args.host} background guardian`,
+          comment: `Re-applies beautiCode backgrounds to ${args.host} through loopback CDP`,
+          launcher: stableRuntime.launcher,
+          args: runnerArgs,
+        }));
+      } else {
+        await writeTextAtomic(startupVbs, renderWindowsStartupVbs({ launcher: stableRuntime.launcher, args: runnerArgs }));
+      }
       try {
         return await startDesktopGuardian({
           context: runnerContext,
           start: startFromStartup,
           readRecord: readPidRecord,
-          readProcess: readWindowsProcess,
+          readProcess: readRunnerProcess,
         });
       } catch (error) {
         if (managedRunnerProcess()) stopRunner();
@@ -260,6 +327,6 @@ try {
   }
   throw error;
 }
-if (path.resolve(legacyStartupVbs) !== path.resolve(startupVbs)) fs.rmSync(legacyStartupVbs, { force: true });
+if (!IS_LINUX && path.resolve(legacyStartupVbs) !== path.resolve(startupVbs)) fs.rmSync(legacyStartupVbs, { force: true });
 process.stdout.write(`${args.host} 背景守护已安装并启动（PID ${guardian.pid}）。\n`);
 }
