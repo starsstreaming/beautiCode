@@ -38,15 +38,28 @@
 #beauticode-console-page .bc-link{cursor:pointer;height:auto;padding:0;border:0;border-radius:6px;background:0 0;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;text-decoration:underline;text-underline-offset:3px}
 #beauticode-console-page .bc-link:hover{color:var(--dsw-alias-label-primary)}
 #beauticode-console-page .bc-slider{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:18px;background:var(--dsw-alias-bg-module-platform)}
-#beauticode-console-page .bc-blur-slider,#beauticode-console-page .bc-dim-slider,#beauticode-console-page .bc-readability-slider{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
-#beauticode-console-page .bc-blur-slider::-webkit-slider-runnable-track,#beauticode-console-page .bc-dim-slider::-webkit-slider-runnable-track,#beauticode-console-page .bc-readability-slider::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
-#beauticode-console-page .bc-blur-slider::-webkit-slider-thumb,#beauticode-console-page .bc-dim-slider::-webkit-slider-thumb,#beauticode-console-page .bc-readability-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
-#beauticode-console-page .bc-blur-value,#beauticode-console-page .bc-dim-value,#beauticode-console-page .bc-readability-value{min-width:2.6em;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;text-align:right}
+/* Every slider shares one geometry. The rows differ only in the key they
+   write, so a per-row selector list would drift the moment a row is added -
+   the reset arrows below already shipped that defect once. */
+#beauticode-console-page .bc-range{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
+#beauticode-console-page .bc-range::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
+#beauticode-console-page .bc-range::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
+#beauticode-console-page .bc-range-value{min-width:2.6em;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;text-align:right}
+/* The 高级设置 heading takes the 已保存的背景 title recipe: 13px/600 on the
+   primary label, with the same 7px baseline gap. */
+#beauticode-console-page .bc-group-head{display:flex;align-items:baseline;gap:7px;padding:16px 0 0}
+#beauticode-console-page .bc-group-title{color:var(--dsw-alias-label-primary);margin:0;font-size:13px;font-weight:600;line-height:20px}
+/* A row-level note that only matters while its control is unavailable (the
+   experimental page blur needs the page channel on). */
+#beauticode-console-page .bc-row-hint{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-label-tertiary));font-size:12px;font-weight:400;line-height:18px}
+/* A pill whose switch is unavailable for the current configuration. */
+#beauticode-console-page .bc-pill:disabled{opacity:.38;cursor:default}
 /* All reset arrows share one appearance. bc-dim-reset used to be missing from
    this sheet entirely, so the shadow row rendered a raw UA button next to the
    styled blur row; keep the selectors together so they cannot drift again. */
-#beauticode-console-page .bc-readability-reset,#beauticode-console-page .bc-dim-reset,#beauticode-console-page .bc-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
-#beauticode-console-page .bc-readability-reset:hover,#beauticode-console-page .bc-dim-reset:hover,#beauticode-console-page .bc-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+#beauticode-console-page .bc-readability-reset,#beauticode-console-page .bc-page-material-reset,#beauticode-console-page .bc-dim-reset,#beauticode-console-page .bc-blur-reset,#beauticode-console-page .bc-alpha-step-reset,#beauticode-console-page .bc-blur-step-reset,#beauticode-console-page .bc-max-blur-reset,#beauticode-console-page .bc-direction-reset,#beauticode-console-page .bc-page-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
+#beauticode-console-page .bc-readability-reset:hover,#beauticode-console-page .bc-page-material-reset:hover,#beauticode-console-page .bc-dim-reset:hover,#beauticode-console-page .bc-blur-reset:hover,#beauticode-console-page .bc-alpha-step-reset:hover,#beauticode-console-page .bc-blur-step-reset:hover,#beauticode-console-page .bc-max-blur-reset:hover,#beauticode-console-page .bc-direction-reset:hover,#beauticode-console-page .bc-page-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+#beauticode-console-page .bc-page-blur-reset:disabled{opacity:.38;cursor:default}
 /* Title and tabs. The tab row is the one Settings -> 插件 puts above its two
    pages: a hairline rule with the tabs on it, the active one in label-primary
    with a 2px underline. */
@@ -116,106 +129,149 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     "</svg>" +
     "<span>背景</span>";
 
+  // The arrow every reset control in this page renders. One constant keeps the
+  // nine rows from carrying nine copies of the same path data.
+  const RESET_ICON =
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+    '<path d="M13.2 10.4A5.6 5.6 0 1 1 12.9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
+    '<path d="M13.9 1.7 13.2 5.2l-3.5-.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    "</svg>";
+
   const page = document.createElement("div");
   page.id = "beauticode-console-page";
   page.hidden = true;
   page.innerHTML =
-    '<h2 class="bc-page-title">背景</h2>' +
-    '<p class="bc-page-intro">给 DSH 换一张背景图或视频。</p>' +
-    '<p class="bc-msg" role="status" aria-live="polite" hidden></p>' +
-    '<div class="bc-group">' +
-    '<div class="bc-row" data-row="fullscreen"><div class="bc-row-text">' +
-    '<span class="bc-row-title">全屏显示</span>' +
-    '<span class="bc-row-desc">隐藏浏览器标签页和地址栏，Esc 退出</span>' +
-    "</div>" +
-    '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="fullscreen" aria-pressed="false">进入全屏</button></div></div>' +
-    '<div class="bc-row"><div class="bc-row-text">' +
-    '<span class="bc-row-title">功能面板不透明</span>' +
-    '<span class="bc-row-desc">遮住设置、弹层、消息编辑栏和提问窗口后方的内容，0% 关闭</span>' +
-    "</div>" +
-    '<div class="bc-control">' +
-    '<span class="bc-slider">' +
-    '<input type="range" class="bc-readability-slider" min="0" max="100" step="1" value="100" aria-label="功能面板不透明"/>' +
-    '<span class="bc-readability-value">100%</span>' +
-    "</span>" +
-    '<button type="button" class="bc-readability-reset" data-act="readability-reset" aria-label="恢复默认" title="恢复默认">' +
-    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
-    '<path d="M13.2 10.4A5.6 5.6 0 1 1 12.9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
-    '<path d="M13.9 1.7 13.2 5.2l-3.5-.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-    "</svg>" +
-    "</button>" +
-    "</div></div>" +
-    '<div class="bc-row"><div class="bc-row-text">' +
-    '<span class="bc-row-title">背景阴影</span>' +
-    '<span class="bc-row-desc">压暗背景，让内容更清楚</span>' +
-    "</div>" +
-    '<div class="bc-control">' +
-    '<span class="bc-slider">' +
-    '<input type="range" class="bc-dim-slider" min="0" max="100" step="1" value="49" aria-label="背景阴影"/>' +
-    '<span class="bc-dim-value">49%</span>' +
-    "</span>" +
-    '<button type="button" class="bc-dim-reset" data-act="dim-reset" aria-label="恢复默认" title="恢复默认">' +
-    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
-    '<path d="M13.2 10.4A5.6 5.6 0 1 1 12.9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
-    '<path d="M13.9 1.7 13.2 5.2l-3.5-.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-    "</svg>" +
-    "</button>" +
-    "</div></div>" +
-    '<div class="bc-row"><div class="bc-row-text">' +
-    '<span class="bc-row-title">背景磨砂</span>' +
-    '<span class="bc-row-desc">把背景画面磨砂化，界面不受影响</span>' +
-    "</div>" +
-    '<div class="bc-control">' +
-    '<span class="bc-slider">' +
-    '<input type="range" class="bc-blur-slider" min="0" max="100" step="1" value="0" aria-label="背景磨砂"/>' +
-    '<span class="bc-blur-value">0%</span>' +
-    "</span>" +
-    '<button type="button" class="bc-blur-reset" data-act="blur-reset" aria-label="恢复默认" title="恢复默认">' +
-    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
-    '<path d="M13.2 10.4A5.6 5.6 0 1 1 12.9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
-    '<path d="M13.9 1.7 13.2 5.2l-3.5-.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-    "</svg>" +
-    "</button>" +
-    "</div></div>" +
-    '<div class="bc-row"><div class="bc-row-text">' +
-    '<span class="bc-row-title">声音</span>' +
-    '<span class="bc-row-desc">播放视频背景的声音</span>' +
-    "</div>" +
-    '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="sound" aria-pressed="false">已关</button></div></div>' +
-    "</div>" +
-    '<div class="bc-group">' +
-    '<div class="bc-row"><div class="bc-row-text">' +
-    '<span class="bc-row-title">导入背景</span>' +
-    '<span class="bc-row-desc" data-desc="media">支持常见图片格式和 MP4 / MOV 视频</span>' +
-    "</div>" +
-    '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="media">选择文件</button></div></div>' +
-    "</div>" +
-    '<div class="bc-group bc-themes" hidden>' +
-    '<div class="bc-theme-head">' +
-    '<h3 class="bc-theme-title">已保存的背景</h3>' +
-    '<span class="bc-theme-count"></span>' +
-    "</div>" +
-    '<div class="bc-tabs" role="tablist" aria-label="背景分类">' +
-    '<button type="button" role="tab" class="bc-tab" data-category="image" data-active="true" aria-selected="true">图片</button>' +
-    '<button type="button" role="tab" class="bc-tab" data-category="video" aria-selected="false">视频</button>' +
-    "</div>" +
-    '<div class="bc-theme-panel">' +
-    '<div class="bc-theme-list"></div>' +
-    '<p class="bc-empty" hidden></p>' +
-    "</div>" +
-    "</div>" +
-    '<div class="bc-group">' +
-    '<div class="bc-row"><div class="bc-row-text">' +
-    '<span class="bc-row-title">打开皮肤中心</span>' +
-    '<span class="bc-row-desc">浏览并一键应用在线皮肤</span>' +
-    "</div>" +
-    '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="gallery">打开</button></div></div>' +
-    '<div class="bc-row"><div class="bc-row-text">' +
-    '<span class="bc-row-title">清除背景</span>' +
-    '<span class="bc-row-desc">恢复 DSH 默认外观</span>' +
-    "</div>" +
-    '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="clear">清除</button></div></div>' +
-    "</div>";
+    `<h2 class="bc-page-title">背景</h2>
+<p class="bc-page-intro">给 DSH 换一张背景图或视频。</p>
+<p class="bc-msg" role="status" aria-live="polite" hidden></p>
+<div class="bc-group">
+<div class="bc-row" data-row="fullscreen"><div class="bc-row-text">
+<span class="bc-row-title">全屏显示</span>
+<span class="bc-row-desc">隐藏浏览器标签页和地址栏，Esc 退出</span>
+</div><div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="fullscreen" aria-pressed="false">进入全屏</button></div></div>
+<div class="bc-row" data-row="page-material"><div class="bc-row-text">
+<span class="bc-row-title">页面材质</span>
+<span class="bc-row-desc">给插件页、技能页等页面铺一层材质，0% 关闭</span>
+</div><div class="bc-control">
+<span class="bc-slider">
+<input type="range" class="bc-range bc-page-material-slider" min="0" max="100" step="1" value="30" aria-label="页面材质"/>
+<span class="bc-range-value bc-page-material-value">30%</span>
+</span>
+<button type="button" class="bc-page-material-reset" data-act="page-material-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+<div class="bc-row" data-row="readability"><div class="bc-row-text">
+<span class="bc-row-title">功能面板不透明</span>
+<span class="bc-row-desc">遮住设置、弹层、消息编辑栏和提问窗口后方的内容，0% 关闭</span>
+</div><div class="bc-control">
+<span class="bc-slider">
+<input type="range" class="bc-range bc-readability-slider" min="0" max="100" step="1" value="100" aria-label="功能面板不透明"/>
+<span class="bc-range-value bc-readability-value">100%</span>
+</span>
+<button type="button" class="bc-readability-reset" data-act="readability-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+<div class="bc-row"><div class="bc-row-text">
+<span class="bc-row-title">背景阴影</span>
+<span class="bc-row-desc">压暗背景，让内容更清楚</span>
+</div><div class="bc-control">
+<span class="bc-slider">
+<input type="range" class="bc-range bc-dim-slider" min="0" max="100" step="1" value="49" aria-label="背景阴影"/>
+<span class="bc-range-value bc-dim-value">49%</span>
+</span>
+<button type="button" class="bc-dim-reset" data-act="dim-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+<div class="bc-row"><div class="bc-row-text">
+<span class="bc-row-title">背景磨砂</span>
+<span class="bc-row-desc">把背景画面磨砂化，界面不受影响</span>
+</div><div class="bc-control">
+<span class="bc-slider">
+<input type="range" class="bc-range bc-blur-slider" min="0" max="100" step="1" value="0" aria-label="背景磨砂"/>
+<span class="bc-range-value bc-blur-value">0%</span>
+</span>
+<button type="button" class="bc-blur-reset" data-act="blur-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+<div class="bc-row"><div class="bc-row-text">
+<span class="bc-row-title">声音</span>
+<span class="bc-row-desc">播放视频背景的声音</span>
+</div><div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="sound" aria-pressed="false">已关</button></div></div>
+</div>
+<div class="bc-group" data-group="advanced">
+<div class="bc-group-head"><h3 class="bc-group-title">高级设置</h3></div>
+<div class="bc-row" data-row="alpha-step"><div class="bc-row-text">
+<span class="bc-row-title">材质档位间隔（透明度）</span>
+<span class="bc-row-desc">嵌套面板每深一层，不透明度相差多少</span>
+</div><div class="bc-control">
+<span class="bc-slider">
+<input type="range" class="bc-range bc-alpha-step-slider" min="0" max="30" step="1" value="8" aria-label="材质档位间隔（透明度）"/>
+<span class="bc-range-value bc-alpha-step-value">8%</span>
+</span>
+<button type="button" class="bc-alpha-step-reset" data-act="alpha-step-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+<div class="bc-row" data-row="blur-step"><div class="bc-row-text">
+<span class="bc-row-title">材质档位间隔（模糊）</span>
+<span class="bc-row-desc">每多一层浮层，模糊增加多少</span>
+</div><div class="bc-control">
+<span class="bc-slider">
+<input type="range" class="bc-range bc-blur-step-slider" min="0" max="8" step="1" value="2" aria-label="材质档位间隔（模糊）"/>
+<span class="bc-range-value bc-blur-step-value">2px</span>
+</span>
+<button type="button" class="bc-blur-step-reset" data-act="blur-step-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+<div class="bc-row" data-row="max-blur"><div class="bc-row-text">
+<span class="bc-row-title">最大模糊</span>
+<span class="bc-row-desc">页面和面板叠加后的模糊上限</span>
+</div><div class="bc-control">
+<span class="bc-slider">
+<input type="range" class="bc-range bc-max-blur-slider" min="0" max="16" step="1" value="8" aria-label="最大模糊"/>
+<span class="bc-range-value bc-max-blur-value">8px</span>
+</span>
+<button type="button" class="bc-max-blur-reset" data-act="max-blur-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+<div class="bc-row" data-row="direction"><div class="bc-row-text">
+<span class="bc-row-title">自动档位方向</span>
+<span class="bc-row-desc">嵌套层越深一档，是越实还是越透</span>
+</div><div class="bc-control">
+<button type="button" class="bc-pill" data-act="direction" aria-pressed="true">越上层越实</button>
+<button type="button" class="bc-direction-reset" data-act="direction-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+<div class="bc-row" data-row="page-blur"><div class="bc-row-text">
+<span class="bc-row-title">页面模糊（实验）</span>
+<span class="bc-row-desc">默认关闭；开启后会启用页面背板，可能影响页面内 fixed/absolute/高层浮层；仅建议现场试验</span>
+<span class="bc-row-hint" hidden>需要页面材质 &gt;0</span>
+</div><div class="bc-control">
+<button type="button" class="bc-pill bc-page-blur-toggle" data-act="page-blur" aria-pressed="false">已关</button>
+<button type="button" class="bc-page-blur-reset" data-act="page-blur-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
+</div></div>
+</div>
+<div class="bc-group">
+<div class="bc-row"><div class="bc-row-text">
+<span class="bc-row-title">导入背景</span>
+<span class="bc-row-desc" data-desc="media">支持常见图片格式和 MP4 / MOV 视频</span>
+</div><div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="media">选择文件</button></div></div>
+</div>
+<div class="bc-group bc-themes" hidden>
+<div class="bc-theme-head">
+<h3 class="bc-theme-title">已保存的背景</h3>
+<span class="bc-theme-count"></span>
+</div>
+<div class="bc-tabs" role="tablist" aria-label="背景分类">
+<button type="button" role="tab" class="bc-tab" data-category="image" data-active="true" aria-selected="true">图片</button>
+<button type="button" role="tab" class="bc-tab" data-category="video" aria-selected="false">视频</button>
+</div>
+<div class="bc-theme-panel">
+<div class="bc-theme-list"></div>
+<p class="bc-empty" hidden></p>
+</div>
+</div>
+<div class="bc-group">
+<div class="bc-row"><div class="bc-row-text">
+<span class="bc-row-title">打开皮肤中心</span>
+<span class="bc-row-desc">浏览并一键应用在线皮肤</span>
+</div><div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="gallery">打开</button></div></div>
+<div class="bc-row"><div class="bc-row-text">
+<span class="bc-row-title">清除背景</span>
+<span class="bc-row-desc">恢复 DSH 默认外观</span>
+</div><div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="clear">清除</button></div></div>
+</div>`;
 
   const fileInput = document.createElement("input");
   fileInput.id = "beauticode-console-file";
@@ -234,6 +290,23 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   const blurSlider = page.querySelector(".bc-blur-slider");
   const blurValue = page.querySelector(".bc-blur-value");
   const blurReset = page.querySelector('[data-act="blur-reset"]');
+  const pageMaterialSlider = page.querySelector(".bc-page-material-slider");
+  const pageMaterialValue = page.querySelector(".bc-page-material-value");
+  const pageMaterialReset = page.querySelector('[data-act="page-material-reset"]');
+  const alphaStepSlider = page.querySelector(".bc-alpha-step-slider");
+  const alphaStepValue = page.querySelector(".bc-alpha-step-value");
+  const alphaStepReset = page.querySelector('[data-act="alpha-step-reset"]');
+  const blurStepSlider = page.querySelector(".bc-blur-step-slider");
+  const blurStepValue = page.querySelector(".bc-blur-step-value");
+  const blurStepReset = page.querySelector('[data-act="blur-step-reset"]');
+  const maxBlurSlider = page.querySelector(".bc-max-blur-slider");
+  const maxBlurValue = page.querySelector(".bc-max-blur-value");
+  const maxBlurReset = page.querySelector('[data-act="max-blur-reset"]');
+  const directionBtn = page.querySelector('[data-act="direction"]');
+  const directionReset = page.querySelector('[data-act="direction-reset"]');
+  const pageBlurBtn = page.querySelector('[data-act="page-blur"]');
+  const pageBlurReset = page.querySelector('[data-act="page-blur-reset"]');
+  const pageBlurHint = page.querySelector(".bc-row-hint");
   const fullscreenRow = page.querySelector('[data-row="fullscreen"]');
   const fullscreenBtn = page.querySelector('[data-act="fullscreen"]');
   const themesBox = page.querySelector(".bc-themes");
@@ -245,6 +318,41 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   const mediaBtn = page.querySelector('[data-act="media"]');
   const AUTO_DIM_PERCENT = 49;
   const AUTO_READABILITY_PERCENT = 100;
+  // Layered material preferences, frozen in docs/adr/0011-dsh-layered-material.md
+  // §3.3. The keys are shared with readability.js: when it is loaded (it always
+  // is in the host) the console writes through its API so the ramp, the stored
+  // value and the repaint stay one transaction; otherwise the console writes
+  // the same keys and the html-level variables itself, which is the ADR's
+  // fallback contract. See materialApi().
+  const MATERIAL_DEFAULTS = { page: 30, alphaStep: 8, blurStep: 2, maxBlur: 8 };
+  const MATERIAL_LIMITS = {
+    page: [0, 100],
+    alphaStep: [0, 30],
+    blurStep: [0, 8],
+    maxBlur: [0, 16],
+  };
+  const MATERIAL_KEYS = {
+    page: "beauticode-page-material",
+    alphaStep: "beauticode-material-alpha-step",
+    blurStep: "beauticode-material-blur-step",
+    maxBlur: "beauticode-material-max-blur",
+    direction: "beauticode-material-direction",
+  };
+  // The panel channel keeps the key and the helper readability.js already owns.
+  const PANEL_KEY = "beauticode-readable-surfaces";
+  // Experimental page blur (ADR 0011 follow-up): default off, never recommended.
+  // It is a boolean, not a step, so it keeps its own key outside MATERIAL_KEYS.
+  const PAGE_BLUR_KEY = "beauticode-page-blur";
+  const MATERIAL_KEY_LIST = [...Object.values(MATERIAL_KEYS), PANEL_KEY, PAGE_BLUR_KEY];
+  const AUTO_MATERIAL_DIRECTION = "up";
+  const material = {
+    page: MATERIAL_DEFAULTS.page,
+    alphaStep: MATERIAL_DEFAULTS.alphaStep,
+    blurStep: MATERIAL_DEFAULTS.blurStep,
+    maxBlur: MATERIAL_DEFAULTS.maxBlur,
+    direction: AUTO_MATERIAL_DIRECTION,
+    pageBlur: false,
+  };
   let busy = false;
   let muted = true;
   let currentThemeId = "";
@@ -281,6 +389,267 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     }
     const label = `${percent}%`;
     if (readabilityValue.textContent !== label) readabilityValue.textContent = label;
+  }
+
+  // Shared by the four material rows: write the value the slider applies, then
+  // the label, so no row can keep a private copy of its number.
+  function renderRange(slider, labelEl, value, suffix) {
+    const text = `${value}${suffix}`;
+    if (slider.value !== String(value)) slider.value = String(value);
+    if (labelEl.textContent !== text) labelEl.textContent = text;
+  }
+
+  function renderMaterial() {
+    renderRange(pageMaterialSlider, pageMaterialValue, material.page, "%");
+    renderRange(alphaStepSlider, alphaStepValue, material.alphaStep, "%");
+    renderRange(blurStepSlider, blurStepValue, material.blurStep, "px");
+    renderRange(maxBlurSlider, maxBlurValue, material.maxBlur, "px");
+    const up = material.direction === AUTO_MATERIAL_DIRECTION;
+    const label = up ? "越上层越实" : "越上层越透";
+    if (directionBtn.textContent !== label) directionBtn.textContent = label;
+    directionBtn.setAttribute("aria-pressed", up ? "true" : "false");
+    renderPageBlur();
+  }
+
+  // The page blur switch is an experiment on top of the page channel: with no
+  // page plate there is nothing for the backplate to sit on, so the row greys
+  // out and says why instead of silently storing an option with no effect.
+  function renderPageBlur() {
+    const available = material.page > 0;
+    const label = material.pageBlur ? "已开" : "已关";
+    if (pageBlurBtn.textContent !== label) pageBlurBtn.textContent = label;
+    pageBlurBtn.setAttribute("aria-pressed", material.pageBlur ? "true" : "false");
+    pageBlurBtn.disabled = !available;
+    pageBlurReset.disabled = !available;
+    if (pageBlurHint.hidden !== available) pageBlurHint.hidden = available;
+  }
+
+  // Storage may be denied (private mode, quota) and may hold anything at all.
+  // Every read failure and every invalid value falls back to the ADR default;
+  // valid numbers are rounded and clamped into the row's own range.
+  function readStoredNumber(key, fallback, min, max) {
+    let raw = null;
+    try {
+      raw = globalThis.localStorage?.getItem(key);
+    } catch {
+      return fallback;
+    }
+    if (raw == null) return fallback;
+    const text = String(raw).trim();
+    if (!text) return fallback;
+    const n = Number(text);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(n)));
+  }
+
+  function readStoredDirection(key) {
+    try {
+      return globalThis.localStorage?.getItem(key) === "down" ? "down" : AUTO_MATERIAL_DIRECTION;
+    } catch {
+      return AUTO_MATERIAL_DIRECTION;
+    }
+  }
+
+  // Only the literal "true" enables a boolean preference; a missing key, a
+  // denied read and anything else all mean "off" (ADR follow-up freeze).
+  function readStoredBoolean(key) {
+    try {
+      return globalThis.localStorage?.getItem(key) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  // readability.js owns the material: its state, the storage writes and the
+  // repaint are one transaction behind this API, so a slider move has to go
+  // through it or the in-memory ramp would go stale and overwrite the variables
+  // on its next scan. Older plugin builds (and the test harness) expose only
+  // get/set for the panel channel; then the console writes the keys and the
+  // html-level variables itself, exactly as the ADR specifies.
+  function materialApi() {
+    const api = globalThis.BeauticodeReadableSurfaces;
+    if (!api || typeof api !== "object") return null;
+    const complete =
+      typeof api.getPage === "function" &&
+      typeof api.setPage === "function" &&
+      typeof api.getMaterial === "function" &&
+      typeof api.setMaterial === "function";
+    if (!complete) return null;
+    // Probe one read: a bridge that cannot answer is worse than no bridge, and
+    // the standalone path below still honors every preference.
+    try {
+      return Number.isFinite(Number(api.getPage())) ? api : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // The experimental page blur has its own two-method bridge: it exists in the
+  // layered-material build but not in older plugin versions, and it must keep
+  // working even when only one of the two channels is available.
+  function pageBlurApi() {
+    const api = globalThis.BeauticodeReadableSurfaces;
+    if (!api || typeof api !== "object") return null;
+    const complete =
+      typeof api.getPageBlur === "function" && typeof api.setPageBlur === "function";
+    if (!complete) return null;
+    // Probe one read, for the same reason materialApi() does: a bridge that
+    // cannot answer is worse than no bridge, because it would silently skip
+    // publishing the html flag the experiment's CSS needs.
+    try {
+      return typeof api.getPageBlur() === "boolean" ? api : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function readPageBlur() {
+    const api = pageBlurApi();
+    if (api) {
+      try {
+        const published = api.getPageBlur();
+        if (typeof published === "boolean") return published;
+      } catch {
+        // A half-loaded bridge must not take the settings page down with it.
+      }
+    }
+    return readStoredBoolean(PAGE_BLUR_KEY);
+  }
+
+  function readMaterial() {
+    let api = materialApi();
+    let published = null;
+    let livePage = NaN;
+    if (api) {
+      try {
+        published = api.getMaterial() ?? null;
+        livePage = Number(api.getPage());
+      } catch {
+        // A half-loaded bridge must not take the settings page down with it.
+        api = null;
+        published = null;
+      }
+    }
+    for (const name of ["page", "alphaStep", "blurStep", "maxBlur"]) {
+      const [min, max] = MATERIAL_LIMITS[name];
+      const live = Number(name === "page" ? livePage : published?.[name]);
+      material[name] = Number.isFinite(live)
+        ? Math.min(max, Math.max(min, Math.round(live)))
+        : readStoredNumber(MATERIAL_KEYS[name], MATERIAL_DEFAULTS[name], min, max);
+    }
+    material.direction =
+      published?.direction === "down" || published?.direction === "up"
+        ? published.direction
+        : readStoredDirection(MATERIAL_KEYS.direction);
+    material.pageBlur = readPageBlur();
+  }
+
+  function writeStored(key, value) {
+    try {
+      globalThis.localStorage?.setItem(key, String(value));
+    } catch {
+      // A denied write still applies to this window; the next successful write
+      // persists whatever the row holds by then.
+    }
+  }
+
+  function dispatchWindowEvent(name) {
+    try {
+      globalThis.dispatchEvent?.(new CustomEvent(name));
+    } catch {
+      // An engine without CustomEvent just misses the notification; the
+      // variables below are already authoritative.
+    }
+  }
+
+  // The ADR's html-level contract. readability.js keys every material rule off
+  // these, so writing them here is what makes a slider move take effect when
+  // the live material API is not available.
+  function applyMaterial() {
+    const root = document.documentElement;
+    if (!root) return;
+    if (material.page > 0) {
+      root.dataset.bcPageMaterial = "true";
+      root.style?.setProperty?.("--bc-page-material-strength", String(material.page));
+    } else {
+      delete root.dataset.bcPageMaterial;
+      root.style?.removeProperty?.("--bc-page-material-strength");
+    }
+    root.style?.setProperty?.("--bc-material-alpha-step", String(material.alphaStep));
+    root.style?.setProperty?.("--bc-material-blur-step", String(material.blurStep));
+    root.style?.setProperty?.("--bc-material-max-blur", String(material.maxBlur));
+    root.style?.setProperty?.("--bc-material-direction", material.direction);
+    // The experiment gates the page backplate CSS: it needs both this html flag
+    // and the page root's own blur marker, and page 0% keeps the stored option
+    // while removing the flag (the row stays disabled and says why).
+    if (material.pageBlur && material.page > 0) root.dataset.bcPageBlur = "true";
+    else delete root.dataset.bcPageBlur;
+    dispatchWindowEvent("beauticode-material-change");
+  }
+
+  function writeMaterialValue(name, value) {
+    const api = materialApi();
+    if (api) {
+      try {
+        if (name === "page") api.setPage(value);
+        else api.setMaterial({ [name]: value });
+        return;
+      } catch {
+        // A broken bridge falls through to the standalone write below.
+      }
+    }
+    writeStored(MATERIAL_KEYS[name], value);
+    applyMaterial();
+  }
+
+  function writeMaterialDirection(value) {
+    const api = materialApi();
+    if (api) {
+      try {
+        api.setMaterial({ direction: value });
+        return;
+      } catch {
+        // A broken bridge falls through to the standalone write below.
+      }
+    }
+    writeStored(MATERIAL_KEYS.direction, value);
+    applyMaterial();
+  }
+
+  function writeMaterialPageBlur(enabled) {
+    const api = pageBlurApi();
+    if (api) {
+      try {
+        api.setPageBlur(enabled);
+        return;
+      } catch {
+        // A broken bridge falls through to the standalone write below.
+      }
+    }
+    writeStored(PAGE_BLUR_KEY, enabled ? "true" : "false");
+    applyMaterial();
+  }
+
+  function setMaterialValue(name, value) {
+    const limits = MATERIAL_LIMITS[name];
+    const n = Number(value);
+    if (!limits || !Number.isFinite(n)) return;
+    const [min, max] = limits;
+    material[name] = Math.min(max, Math.max(min, Math.round(n)));
+    writeMaterialValue(name, material[name]);
+    renderMaterial();
+  }
+
+  function setMaterialDirection(value) {
+    material.direction = value === "down" ? "down" : AUTO_MATERIAL_DIRECTION;
+    writeMaterialDirection(material.direction);
+    renderMaterial();
+  }
+
+  function setMaterialPageBlur(enabled) {
+    material.pageBlur = Boolean(enabled);
+    writeMaterialPageBlur(material.pageBlur);
+    renderMaterial();
   }
 
   function isOurs(node) {
@@ -356,8 +725,9 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     dialogEl.setAttribute("data-bc-page", "on");
     navButton.setAttribute("aria-current", "true");
     renderReadability();
+    renderMaterial();
     renderDim();
-  renderBlur();
+    renderBlur();
     void refresh();
     const options = page.parentElement;
     if (options) options.scrollTop = 0;
@@ -839,6 +1209,82 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   });
   globalThis.addEventListener?.("beauticode-readability-change", renderReadability);
   renderReadability();
+  pageMaterialSlider.addEventListener("input", (event) => {
+    event.stopPropagation();
+    setMaterialValue("page", pageMaterialSlider.value);
+  });
+  pageMaterialReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMaterialValue("page", MATERIAL_DEFAULTS.page);
+  });
+  alphaStepSlider.addEventListener("input", (event) => {
+    event.stopPropagation();
+    setMaterialValue("alphaStep", alphaStepSlider.value);
+  });
+  alphaStepReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMaterialValue("alphaStep", MATERIAL_DEFAULTS.alphaStep);
+  });
+  blurStepSlider.addEventListener("input", (event) => {
+    event.stopPropagation();
+    setMaterialValue("blurStep", blurStepSlider.value);
+  });
+  blurStepReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMaterialValue("blurStep", MATERIAL_DEFAULTS.blurStep);
+  });
+  maxBlurSlider.addEventListener("input", (event) => {
+    event.stopPropagation();
+    setMaterialValue("maxBlur", maxBlurSlider.value);
+  });
+  maxBlurReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMaterialValue("maxBlur", MATERIAL_DEFAULTS.maxBlur);
+  });
+  directionBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMaterialDirection(material.direction === "up" ? "down" : "up");
+  });
+  directionReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMaterialDirection(AUTO_MATERIAL_DIRECTION);
+  });
+  pageBlurBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    // Disabled while the page channel is 0%; the click is then a no-op rather
+    // than a stored option with nothing to apply it to.
+    if (pageBlurBtn.disabled) return;
+    setMaterialPageBlur(!material.pageBlur);
+  });
+  pageBlurReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (pageBlurReset.disabled) return;
+    setMaterialPageBlur(false);
+  });
+  // Same-origin windows share the preferences through storage: a change made in
+  // one window must reach the other window's labels, variables and material.
+  globalThis.addEventListener?.("storage", (event) => {
+    const key = event?.key ?? null;
+    // null means another window called storage.clear(): re-read everything.
+    if (key != null && !MATERIAL_KEY_LIST.includes(key)) return;
+    if (key == null || key !== PANEL_KEY) {
+      // readability.js' own storage listener runs first and re-applies; only the
+      // standalone path has to publish the variables here. A build that knows
+      // the material API but not the experimental page blur still needs the
+      // html flag written locally, so that combination applies too.
+      readMaterial();
+      if (!materialApi() || !pageBlurApi()) applyMaterial();
+      renderMaterial();
+    }
+    // The panel strength reaches the console through the shared global; only the
+    // label needs refreshing.
+    if (key == null || key === PANEL_KEY) renderReadability();
+  });
+  // Load the stored preferences before the dialog is ever opened: the material
+  // applies to the whole app, not only to this page.
+  readMaterial();
+  if (!materialApi() || !pageBlurApi()) applyMaterial();
+  renderMaterial();
   dimSlider.addEventListener("input", () => {
     const n = Number(dimSlider.value);
     if (!Number.isFinite(n)) return;

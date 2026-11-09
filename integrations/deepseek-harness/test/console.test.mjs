@@ -36,6 +36,21 @@ class FakeNode {
     this._innerHTML = "";
     this.textContent = "";
     this.listeners = new Map();
+    // The console writes the ADR's html-level material variables through
+    // style.setProperty()/removeProperty(); keep a real property bag so a test
+    // can assert what the page actually received.
+    const styleValues = new Map();
+    this.style = {
+      setProperty(name, value) {
+        styleValues.set(String(name), String(value));
+      },
+      removeProperty(name) {
+        styleValues.delete(String(name));
+      },
+      getPropertyValue(name) {
+        return styleValues.get(String(name)) ?? "";
+      },
+    };
     this.classList = {
       toggle: (name, force) => {
         const names = new Set(this.className.split(/\s+/).filter(Boolean));
@@ -371,6 +386,744 @@ test("the readability control is a strength slider and reflects its value", asyn
   tick();
 });
 
+/**
+ * ADR 0011 §3.2/§3.3 freeze the two channels and the four advanced steps. The
+ * values must be live before the settings dialog ever opens — the material
+ * covers the whole app — and the rows must show what is applied, not what the
+ * markup happened to ship.
+ */
+test("the material rows start at the ADR defaults and apply them on load", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  await loadConsole(document);
+
+  const root = rootEl(document);
+  assert.equal(root.dataset.bcPageMaterial, "true", "the page channel is on by default");
+  assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "30");
+  assert.equal(root.style.getPropertyValue("--bc-material-alpha-step"), "8");
+  assert.equal(root.style.getPropertyValue("--bc-material-blur-step"), "2");
+  assert.equal(root.style.getPropertyValue("--bc-material-max-blur"), "8");
+  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "up");
+
+  navCell(document).click();
+  const page = pageEl(document);
+  const pageMaterial = page.querySelector(".bc-page-material-slider");
+  assert.equal(pageMaterial.getAttribute("min"), "0");
+  assert.equal(pageMaterial.getAttribute("max"), "100");
+  assert.equal(pageMaterial.value, "30");
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "30%");
+  assert.match(page.innerHTML, /插件页、技能页/, "the row says which pages it covers");
+  assert.equal(
+    page.querySelector(".bc-readability-slider").value,
+    "100",
+    "the panel row keeps its own 100% default",
+  );
+
+  for (const [sliderSelector, min, max, value, labelSelector, label] of [
+    [".bc-alpha-step-slider", "0", "30", "8", ".bc-alpha-step-value", "8%"],
+    [".bc-blur-step-slider", "0", "8", "2", ".bc-blur-step-value", "2px"],
+    [".bc-max-blur-slider", "0", "16", "8", ".bc-max-blur-value", "8px"],
+  ]) {
+    const control = page.querySelector(sliderSelector);
+    assert.equal(control.getAttribute("min"), min, `${sliderSelector} min`);
+    assert.equal(control.getAttribute("max"), max, `${sliderSelector} max`);
+    assert.equal(control.value, value, `${sliderSelector} default`);
+    assert.equal(page.querySelector(labelSelector).textContent, label, `${labelSelector} label`);
+  }
+
+  const direction = page.querySelector('[data-act="direction"]');
+  assert.equal(direction.textContent, "越上层越实");
+  assert.equal(direction.getAttribute("aria-pressed"), "true");
+  assert.match(page.innerHTML, /<h3 class="bc-group-title">高级设置<\/h3>/);
+});
+
+/**
+ * The slider is the single source of truth: moving it writes its own key, the
+ * html-level variable the material rules read, and the label in the same turn.
+ * The two channels never write each other's key.
+ */
+test("each material slider writes its key, its variable and its label", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const runtime = await loadConsole(document);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+
+  dragSlider(page.querySelector(".bc-page-material-slider"), 45);
+  assert.equal(runtime.storage.getItem("beauticode-page-material"), "45");
+  assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "45");
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "45%");
+  assert.equal(
+    runtime.storage.getItem("beauticode-readable-surfaces"),
+    null,
+    "the page row never touches the panel preference",
+  );
+  assert.ok(
+    runtime.windowEvents().includes("beauticode-material-change"),
+    "readability.js is told to repaint the material roots",
+  );
+
+  dragSlider(page.querySelector(".bc-alpha-step-slider"), 20);
+  assert.equal(runtime.storage.getItem("beauticode-material-alpha-step"), "20");
+  assert.equal(root.style.getPropertyValue("--bc-material-alpha-step"), "20");
+  assert.equal(page.querySelector(".bc-alpha-step-value").textContent, "20%");
+
+  dragSlider(page.querySelector(".bc-blur-step-slider"), 6);
+  assert.equal(runtime.storage.getItem("beauticode-material-blur-step"), "6");
+  assert.equal(root.style.getPropertyValue("--bc-material-blur-step"), "6");
+  assert.equal(page.querySelector(".bc-blur-step-value").textContent, "6px");
+
+  dragSlider(page.querySelector(".bc-max-blur-slider"), 14);
+  assert.equal(runtime.storage.getItem("beauticode-material-max-blur"), "14");
+  assert.equal(root.style.getPropertyValue("--bc-material-max-blur"), "14");
+  assert.equal(page.querySelector(".bc-max-blur-value").textContent, "14px");
+});
+
+test("material values are clamped to the range each row offers", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const runtime = await loadConsole(document);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  dragSlider(page.querySelector(".bc-page-material-slider"), 140);
+  assert.equal(runtime.storage.getItem("beauticode-page-material"), "100");
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "100%");
+  dragSlider(page.querySelector(".bc-alpha-step-slider"), 40);
+  assert.equal(runtime.storage.getItem("beauticode-material-alpha-step"), "30");
+  dragSlider(page.querySelector(".bc-blur-step-slider"), 20);
+  assert.equal(runtime.storage.getItem("beauticode-material-blur-step"), "8");
+  dragSlider(page.querySelector(".bc-max-blur-slider"), 99);
+  assert.equal(runtime.storage.getItem("beauticode-material-max-blur"), "16");
+  assert.equal(root.style.getPropertyValue("--bc-material-max-blur"), "16");
+});
+
+/**
+ * 恢复默认 writes the ADR default; it never clears the key into an "unset"
+ * state the row could not display (the shadow row shipped that defect once).
+ */
+test("the material reset arrows write the ADR defaults", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem("beauticode-page-material", "70");
+  storage.setItem("beauticode-material-alpha-step", "20");
+  storage.setItem("beauticode-material-blur-step", "5");
+  storage.setItem("beauticode-material-max-blur", "12");
+  storage.setItem("beauticode-material-direction", "down");
+  await loadConsole(document, { storage });
+  navCell(document).click();
+
+  const page = pageEl(document);
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "70%", "stored values win over defaults");
+  assert.equal(page.querySelector(".bc-alpha-step-value").textContent, "20%");
+  assert.equal(page.querySelector(".bc-blur-step-value").textContent, "5px");
+  assert.equal(page.querySelector(".bc-max-blur-value").textContent, "12px");
+  assert.equal(page.querySelector('[data-act="direction"]').textContent, "越上层越透");
+
+  page.querySelector('[data-act="page-material-reset"]').click();
+  assert.equal(storage.getItem("beauticode-page-material"), "30");
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "30%");
+  page.querySelector('[data-act="alpha-step-reset"]').click();
+  assert.equal(storage.getItem("beauticode-material-alpha-step"), "8");
+  assert.equal(page.querySelector(".bc-alpha-step-value").textContent, "8%");
+  page.querySelector('[data-act="blur-step-reset"]').click();
+  assert.equal(storage.getItem("beauticode-material-blur-step"), "2");
+  assert.equal(page.querySelector(".bc-blur-step-value").textContent, "2px");
+  page.querySelector('[data-act="max-blur-reset"]').click();
+  assert.equal(storage.getItem("beauticode-material-max-blur"), "8");
+  assert.equal(page.querySelector(".bc-max-blur-value").textContent, "8px");
+  page.querySelector('[data-act="direction-reset"]').click();
+  assert.equal(storage.getItem("beauticode-material-direction"), "up");
+  assert.equal(page.querySelector('[data-act="direction"]').textContent, "越上层越实");
+  assert.equal(page.querySelector('[data-act="direction"]').getAttribute("aria-pressed"), "true");
+  assert.equal(rootEl(document).style.getPropertyValue("--bc-material-direction"), "up");
+});
+
+test("the direction toggle flips the nested ramp and stores it", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const runtime = await loadConsole(document);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  const direction = page.querySelector('[data-act="direction"]');
+  direction.click();
+  assert.equal(runtime.storage.getItem("beauticode-material-direction"), "down");
+  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "down");
+  assert.equal(direction.textContent, "越上层越透");
+  assert.equal(direction.getAttribute("aria-pressed"), "false");
+  direction.click();
+  assert.equal(runtime.storage.getItem("beauticode-material-direction"), "up");
+  assert.equal(direction.textContent, "越上层越实");
+  assert.equal(direction.getAttribute("aria-pressed"), "true");
+});
+
+/**
+ * The page blur (and its backplate) is an opt-in experiment with known side
+ * effects, so it ships off: the default must stay the alpha-only page material
+ * from the ADR follow-up, and the row has to say what turning it on can do.
+ */
+test("the experimental page blur starts off and explains its cost", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const runtime = await loadConsole(document);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  assert.match(page.innerHTML, /页面模糊（实验）/);
+  assert.match(page.innerHTML, /默认关闭；开启后会启用页面背板，可能影响页面内 fixed\/absolute\/高层浮层/);
+  assert.match(page.innerHTML, /仅建议现场试验/);
+
+  const toggle = page.querySelector('[data-act="page-blur"]');
+  assert.equal(toggle.textContent, "已关");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(toggle.disabled, false, "the page channel is on by default");
+  assert.equal(page.querySelector('[data-act="page-blur-reset"]').disabled, false);
+  assert.equal(page.querySelector(".bc-row-hint").hidden, true);
+  assert.equal(root.dataset.bcPageBlur, undefined, "the backplate stays off");
+  assert.equal(
+    runtime.storage.getItem("beauticode-page-blur"),
+    null,
+    "the default is not written until the user touches the row",
+  );
+});
+
+/**
+ * The switch stores only "true"/"false" and publishes the html flag the
+ * backplate CSS requires; it never disturbs the page/panel channel keys.
+ */
+test("the experimental page blur stores its switch and marks the html root", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const runtime = await loadConsole(document);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  const toggle = page.querySelector('[data-act="page-blur"]');
+
+  toggle.click();
+  assert.equal(runtime.storage.getItem("beauticode-page-blur"), "true");
+  assert.equal(root.dataset.bcPageBlur, "true");
+  assert.equal(toggle.textContent, "已开");
+  assert.equal(toggle.getAttribute("aria-pressed"), "true");
+  assert.ok(
+    runtime.windowEvents().includes("beauticode-material-change"),
+    "readability.js is told to rebuild the page backplate",
+  );
+  assert.equal(runtime.storage.getItem("beauticode-page-material"), null, "the page channel is untouched");
+  assert.equal(runtime.storage.getItem("beauticode-material-alpha-step"), null);
+
+  toggle.click();
+  assert.equal(runtime.storage.getItem("beauticode-page-blur"), "false");
+  assert.equal(root.dataset.bcPageBlur, undefined);
+  assert.equal(toggle.textContent, "已关");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+});
+
+test("the page blur reset arrow writes the off default", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem("beauticode-page-blur", "true");
+  await loadConsole(document, { storage });
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已开", "the stored option wins");
+  assert.equal(root.dataset.bcPageBlur, "true");
+
+  page.querySelector('[data-act="page-blur-reset"]').click();
+  assert.equal(storage.getItem("beauticode-page-blur"), "false");
+  assert.equal(root.dataset.bcPageBlur, undefined);
+  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已关");
+  assert.equal(page.querySelector('[data-act="page-blur"]').getAttribute("aria-pressed"), "false");
+});
+
+/**
+ * Without a page plate the experiment has nothing to blur, so the row greys
+ * out and explains itself instead of storing an option with no effect. The
+ * stored choice survives: turning the page material back on restores it.
+ */
+test("page 0% disables the experimental page blur and says why", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const runtime = await loadConsole(document);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  const toggle = page.querySelector('[data-act="page-blur"]');
+  const reset = page.querySelector('[data-act="page-blur-reset"]');
+  toggle.click();
+  assert.equal(root.dataset.bcPageBlur, "true");
+
+  dragSlider(page.querySelector(".bc-page-material-slider"), 0);
+  assert.equal(toggle.disabled, true, "the switch is unavailable without a page plate");
+  assert.equal(reset.disabled, true);
+  assert.equal(page.querySelector(".bc-row-hint").hidden, false);
+  assert.match(page.innerHTML, /需要页面材质/);
+  assert.equal(root.dataset.bcPageBlur, undefined, "no page flag while the page channel is off");
+  assert.equal(
+    runtime.storage.getItem("beauticode-page-blur"),
+    "true",
+    "the option is remembered, not silently dropped",
+  );
+  toggle.click();
+  assert.equal(runtime.storage.getItem("beauticode-page-blur"), "true", "a disabled switch is a no-op");
+  assert.equal(toggle.textContent, "已开", "the row still shows the stored option");
+
+  dragSlider(page.querySelector(".bc-page-material-slider"), 30);
+  assert.equal(toggle.disabled, false);
+  assert.equal(reset.disabled, false);
+  assert.equal(page.querySelector(".bc-row-hint").hidden, true);
+  assert.equal(root.dataset.bcPageBlur, "true", "the remembered option applies again");
+});
+
+test("the console drives the experimental page blur through readability.js' API", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem("beauticode-page-material", "35");
+  storage.setItem("beauticode-page-blur", "true");
+  let api = null;
+  await loadConsole(document, {
+    storage,
+    prepare(context) {
+      api = installLayeredMaterial(context, storage);
+    },
+  });
+
+  const root = rootEl(document);
+  assert.equal(root.dataset.bcPageBlur, "true", "the bridge publishes the stored experiment");
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const toggle = page.querySelector('[data-act="page-blur"]');
+  assert.equal(toggle.textContent, "已开", "the row reads the live option, not the markup default");
+
+  toggle.click();
+  assert.deepEqual(api.calls.at(-1), ["setPageBlur", false], "the switch goes through the live API");
+  assert.equal(storage.getItem("beauticode-page-blur"), "false");
+  assert.equal(root.dataset.bcPageBlur, undefined);
+  assert.equal(toggle.textContent, "已关");
+
+  toggle.click();
+  assert.deepEqual(api.calls.at(-1), ["setPageBlur", true]);
+  assert.equal(storage.getItem("beauticode-page-blur"), "true");
+  assert.equal(root.dataset.bcPageBlur, "true");
+});
+
+/**
+ * A build that knows the material API but not the page-blur one (or a bridge
+ * that fails mid-flight) must not lose the switch: the fallback writes the key
+ * and the html flag itself, like every other material row.
+ */
+test("a page-blur bridge that throws falls back to the standalone write", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem("beauticode-page-blur", "true");
+  await loadConsole(document, {
+    storage,
+    prepare(context) {
+      installLayeredMaterial(context, storage);
+      const broken = () => {
+        throw new Error("page blur bridge missing");
+      };
+      context.BeauticodeReadableSurfaces.getPageBlur = broken;
+      context.BeauticodeReadableSurfaces.setPageBlur = broken;
+    },
+  });
+
+  const root = rootEl(document);
+  assert.equal(
+    root.dataset.bcPageBlur,
+    "true",
+    "the stored option still reaches the html flag at load",
+  );
+  navCell(document).click();
+  const page = pageEl(document);
+  const toggle = page.querySelector('[data-act="page-blur"]');
+  assert.equal(toggle.textContent, "已开");
+
+  toggle.click();
+  assert.equal(storage.getItem("beauticode-page-blur"), "false");
+  assert.equal(root.dataset.bcPageBlur, undefined);
+  assert.equal(toggle.textContent, "已关");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+});
+
+/**
+ * Storage can be denied (quota, private mode). The switch must still show and
+ * apply the in-memory value for this window instead of snapping back.
+ */
+test("a denied storage write still shows and applies the page blur", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem = () => {
+    throw new Error("QuotaExceededError");
+  };
+  await loadConsole(document, { storage });
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const toggle = page.querySelector('[data-act="page-blur"]');
+  toggle.click();
+  assert.equal(toggle.textContent, "已开", "the row keeps the in-memory value");
+  assert.equal(toggle.getAttribute("aria-pressed"), "true");
+  assert.equal(rootEl(document).dataset.bcPageBlur, "true", "and the flag applies to this window");
+  assert.equal(storage.getItem("beauticode-page-blur"), null, "nothing persisted, and nothing pretends to");
+});
+
+test("another window's page blur preference re-renders the row", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  const runtime = await loadConsole(document, { storage });
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  runtime.emitStorage("beauticode-page-blur", "true");
+  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已开");
+  assert.equal(page.querySelector('[data-act="page-blur"]').getAttribute("aria-pressed"), "true");
+  assert.equal(root.dataset.bcPageBlur, "true");
+
+  runtime.emitStorage("beauticode-page-blur", "false");
+  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已关");
+  assert.equal(root.dataset.bcPageBlur, undefined);
+});
+
+/**
+ * Only the literal "true" turns the experiment on. Old builds never wrote this
+ * key at all, and a corrupt value must not enable a known-risky mode.
+ */
+test("invalid or legacy page-blur preferences read as off", async () => {
+  for (const [raw, expected] of [
+    [null, "已关"],
+    ["false", "已关"],
+    ["true", "已开"],
+    ["1", "已关"],
+    ["yes", "已关"],
+  ]) {
+    const document = createConsoleDocument();
+    mountSettingsDialog(document);
+    const storage = createMemoryStorage();
+    if (raw != null) storage.setItem("beauticode-page-blur", raw);
+    await loadConsole(document, { storage });
+    navCell(document).click();
+
+    const page = pageEl(document);
+    assert.equal(
+      page.querySelector('[data-act="page-blur"]').textContent,
+      expected,
+      `stored ${raw} renders as ${expected}`,
+    );
+    assert.equal(
+      page.querySelector('[data-act="page-blur"]').getAttribute("aria-pressed"),
+      expected === "已开" ? "true" : "false",
+    );
+  }
+});
+
+/**
+ * The two 0% opt-outs are independent: page 0% drops only the page channel and
+ * panel 0% only the panel channel, exactly as ADR 0011 §3.3 defines them.
+ */
+test("0% page material drops only the page channel", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  const runtime = await loadConsole(document, { storage });
+  const panel = installReadableSurfaces(runtime.context, storage);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  dragSlider(page.querySelector(".bc-page-material-slider"), 0);
+  assert.equal(storage.getItem("beauticode-page-material"), "0");
+  assert.equal(root.dataset.bcPageMaterial, undefined, "the page gate is removed, not set to false");
+  assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "");
+  assert.equal(panel.get(), 100, "the panel strength is untouched");
+  assert.equal(storage.getItem("beauticode-readable-surfaces"), null);
+  assert.equal(page.querySelector(".bc-readability-slider").value, "100");
+
+  dragSlider(page.querySelector(".bc-page-material-slider"), 30);
+  assert.equal(root.dataset.bcPageMaterial, "true");
+  assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "30");
+});
+
+test("0% panel material drops only the panel channel", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  const runtime = await loadConsole(document, { storage });
+  const panel = installReadableSurfaces(runtime.context, storage);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  dragSlider(page.querySelector(".bc-readability-slider"), 0);
+  assert.equal(panel.get(), 0);
+  assert.equal(
+    storage.getItem("beauticode-readable-surfaces"),
+    "false",
+    "0 keeps the legacy spelling readability.js writes",
+  );
+  assert.equal(page.querySelector(".bc-readability-value").textContent, "0%");
+  assert.equal(root.dataset.bcPageMaterial, "true", "the page material stays on");
+  assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "30");
+  assert.equal(storage.getItem("beauticode-page-material"), null);
+});
+
+/**
+ * Preferences are shared by every same-origin window. A storage event from
+ * another window must move the sliders, the labels and the live variables;
+ * unrelated keys must be ignored.
+ */
+test("another window's material changes re-render the rows", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  const runtime = await loadConsole(document, { storage });
+  const panel = installReadableSurfaces(runtime.context, storage);
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  runtime.emitStorage("beauticode-page-material", "55");
+  assert.equal(page.querySelector(".bc-page-material-slider").value, "55");
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "55%");
+  assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "55");
+
+  runtime.emitStorage("beauticode-material-alpha-step", "12");
+  assert.equal(page.querySelector(".bc-alpha-step-value").textContent, "12%");
+  runtime.emitStorage("beauticode-material-blur-step", "4");
+  assert.equal(page.querySelector(".bc-blur-step-value").textContent, "4px");
+  runtime.emitStorage("beauticode-material-max-blur", "10");
+  assert.equal(page.querySelector(".bc-max-blur-value").textContent, "10px");
+  runtime.emitStorage("beauticode-material-direction", "down");
+  assert.equal(page.querySelector('[data-act="direction"]').textContent, "越上层越透");
+  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "down");
+
+  runtime.emitStorage("beauticode-unrelated", "x");
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "55%", "unrelated keys are ignored");
+
+  // In production readability.js' own storage listener runs first and publishes
+  // the new strength; the console only has to refresh the label.
+  panel.adopt(0);
+  runtime.emitStorage("beauticode-readable-surfaces", "false");
+  assert.equal(page.querySelector(".bc-readability-value").textContent, "0%");
+});
+
+test("invalid stored material values fall back to the ADR defaults", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem("beauticode-page-material", "abc");
+  storage.setItem("beauticode-material-alpha-step", "-4");
+  storage.setItem("beauticode-material-blur-step", "99");
+  storage.setItem("beauticode-material-max-blur", "oops");
+  storage.setItem("beauticode-material-direction", "sideways");
+  await loadConsole(document, { storage });
+  navCell(document).click();
+
+  const page = pageEl(document);
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "30%", "unparsable falls back");
+  assert.equal(page.querySelector(".bc-alpha-step-value").textContent, "0%", "out of range is clamped");
+  assert.equal(page.querySelector(".bc-blur-step-value").textContent, "8px", "too large is clamped");
+  assert.equal(page.querySelector(".bc-max-blur-value").textContent, "8px", "unparsable falls back");
+  assert.equal(page.querySelector('[data-act="direction"]').textContent, "越上层越实");
+  assert.equal(rootEl(document).style.getPropertyValue("--bc-material-direction"), "up");
+});
+
+/**
+ * The panel key predates this work. Old builds stored "true"/"false"; newer
+ * ones store 0-100. The row must show what readability.js reports for either
+ * spelling and must not migrate the key behind its back.
+ */
+test("the panel row still reads the legacy beauticode-readable-surfaces value", async () => {
+  for (const [raw, expected] of [
+    [null, "100%"],
+    ["true", "100%"],
+    ["false", "0%"],
+    ["40", "40%"],
+    ["oops", "100%"],
+  ]) {
+    const document = createConsoleDocument();
+    mountSettingsDialog(document);
+    const storage = createMemoryStorage();
+    if (raw != null) storage.setItem("beauticode-readable-surfaces", raw);
+    const runtime = await loadConsole(document, { storage });
+    installReadableSurfaces(runtime.context, storage);
+    navCell(document).click();
+
+    const page = pageEl(document);
+    assert.equal(
+      page.querySelector(".bc-readability-value").textContent,
+      expected,
+      `stored ${raw} renders as ${expected}`,
+    );
+    assert.equal(
+      storage.getItem("beauticode-page-material"),
+      null,
+      "reading the panel preference must not write the page key",
+    );
+    assert.equal(
+      storage.getItem("beauticode-readable-surfaces"),
+      raw,
+      "and must not rewrite the legacy key",
+    );
+  }
+});
+
+/**
+ * In production readability.js loads before this page and owns the material.
+ * The console then goes through the live API instead of writing the keys
+ * behind its back: that is what keeps the ramp, the stored value and the
+ * repaint in one transaction (a direct storage write would not fire a storage
+ * event in this window, so readability's state would stay stale).
+ */
+test("the console drives the layered preferences through readability.js' API", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem("beauticode-page-material", "35");
+  let api = null;
+  await loadConsole(document, {
+    storage,
+    prepare(context) {
+      api = installLayeredMaterial(context, storage);
+    },
+  });
+
+  const root = rootEl(document);
+  assert.equal(
+    root.style.getPropertyValue("--bc-page-material-strength"),
+    "35",
+    "readability publishes the stored value before the page opens",
+  );
+
+  navCell(document).click();
+  const page = pageEl(document);
+  assert.equal(
+    page.querySelector(".bc-page-material-value").textContent,
+    "35%",
+    "the row reads the live state, not the markup default",
+  );
+
+  dragSlider(page.querySelector(".bc-page-material-slider"), 60);
+  assert.deepEqual(api.calls.at(-1), ["setPage", 60], "the slider goes through the live API");
+  assert.equal(storage.getItem("beauticode-page-material"), "60");
+  assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "60");
+
+  dragSlider(page.querySelector(".bc-alpha-step-slider"), 15);
+  assert.deepEqual(api.calls.at(-1), ["setMaterial", { alphaStep: 15 }]);
+  assert.equal(storage.getItem("beauticode-material-alpha-step"), "15");
+  assert.equal(root.style.getPropertyValue("--bc-material-alpha-step"), "15");
+
+  dragSlider(page.querySelector(".bc-blur-step-slider"), 3);
+  assert.equal(storage.getItem("beauticode-material-blur-step"), "3");
+  dragSlider(page.querySelector(".bc-max-blur-slider"), 6);
+  assert.equal(storage.getItem("beauticode-material-max-blur"), "6");
+
+  page.querySelector('[data-act="direction"]').click();
+  assert.deepEqual(api.calls.at(-1), ["setMaterial", { direction: "down" }]);
+  assert.equal(storage.getItem("beauticode-material-direction"), "down");
+  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "down");
+
+  page.querySelector('[data-act="page-material-reset"]').click();
+  assert.deepEqual(api.calls.at(-1), ["setPage", 30]);
+  assert.equal(storage.getItem("beauticode-page-material"), "30");
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "30%");
+});
+
+/**
+ * One geometry for every slider: a per-row selector list is how the reset
+ * arrows once drifted, so the rows share a class instead and this test keeps a
+ * new row from shipping an unstyled input.
+ */
+test("every range slider in the page markup shares one rule", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  await loadConsole(document);
+
+  const page = pageEl(document);
+  const sheet = document.head.querySelector("style")?.textContent ?? "";
+  const inputs = [...page.innerHTML.matchAll(/<input type="range" class="([^"]*)"/g)].map(
+    (match) => match[1],
+  );
+  assert.equal(
+    inputs.length,
+    7,
+    "page, panel, shadow, wallpaper blur, alpha step, blur step and max blur",
+  );
+  for (const classes of inputs) assert.match(classes, /\bbc-range\b/);
+
+  const labels = [...page.innerHTML.matchAll(/class="(bc-range-value [^"]*)"/g)].map(
+    (match) => match[1],
+  );
+  assert.equal(labels.length, 7, "every slider shows its value");
+  for (const classes of labels) assert.match(classes, /-value\b/);
+
+  assert.match(sheet, /\.bc-range\{[^}]*appearance:none/);
+  assert.match(sheet, /\.bc-range::-webkit-slider-thumb\{/);
+  assert.match(sheet, /\.bc-range-value\{[^}]*min-width:2\.6em/);
+});
+
+/**
+ * A half-loaded readability.js must not take the settings page down with it:
+ * when its bridge cannot answer, the console falls back to writing the ADR
+ * contract itself and every control keeps working.
+ */
+test("a broken material bridge falls back to the standalone write", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  const runtime = await loadConsole(document, {
+    storage,
+    prepare(context) {
+      const broken = () => {
+        throw new Error("bridge not ready");
+      };
+      context.BeauticodeReadableSurfaces = {
+        get: () => 100,
+        set: () => 100,
+        getPage: broken,
+        setPage: broken,
+        getMaterial: broken,
+        setMaterial: broken,
+      };
+    },
+  });
+
+  const root = rootEl(document);
+  assert.equal(
+    root.style.getPropertyValue("--bc-page-material-strength"),
+    "30",
+    "the standalone path publishes the defaults anyway",
+  );
+
+  navCell(document).click();
+  const page = pageEl(document);
+  dragSlider(page.querySelector(".bc-page-material-slider"), 40);
+  assert.equal(storage.getItem("beauticode-page-material"), "40");
+  assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "40");
+  assert.equal(page.querySelector(".bc-page-material-value").textContent, "40%");
+  dragSlider(page.querySelector(".bc-alpha-step-slider"), 12);
+  assert.equal(storage.getItem("beauticode-material-alpha-step"), "12");
+  assert.equal(root.style.getPropertyValue("--bc-material-alpha-step"), "12");
+});
+
 function statusBody(extra = {}) {
   return {
     ok: true,
@@ -392,13 +1145,45 @@ function routedFetch(routes) {
   };
 }
 
-async function loadConsole(document, { fetch: fetchImpl } = {}) {
+/** localStorage stand-in shared by console.js and the tests. */
+function createMemoryStorage() {
+  const data = new Map();
+  return {
+    data,
+    getItem(key) {
+      return data.has(String(key)) ? data.get(String(key)) : null;
+    },
+    setItem(key, value) {
+      data.set(String(key), String(value));
+    },
+    removeItem(key) {
+      data.delete(String(key));
+    },
+    clear() {
+      data.clear();
+    },
+  };
+}
+
+async function loadConsole(
+  document,
+  { fetch: fetchImpl, storage = createMemoryStorage(), prepare } = {},
+) {
   const source = await fs.readFile(new URL("../console.js", import.meta.url), "utf8");
   const ticks = [];
   const observerCallbacks = [];
+  const windowListeners = new Map();
+  const windowEvents = [];
   const context = {
     window: null,
     document,
+    localStorage: storage,
+    CustomEvent: class CustomEvent {
+      constructor(type, init = {}) {
+        this.type = type;
+        this.detail = init.detail ?? null;
+      }
+    },
     MutationObserver: class {
       constructor(callback) {
         this.callback = callback;
@@ -407,7 +1192,16 @@ async function loadConsole(document, { fetch: fetchImpl } = {}) {
         observerCallbacks.push(this.callback);
       }
     },
-    addEventListener() {},
+    addEventListener(name, handler) {
+      const list = windowListeners.get(name) ?? [];
+      list.push(handler);
+      windowListeners.set(name, list);
+    },
+    dispatchEvent(event) {
+      windowEvents.push(event);
+      for (const handler of windowListeners.get(event?.type) ?? []) handler(event);
+      return true;
+    },
     setInterval: (fn) => {
       ticks.push(fn);
       return ticks.length;
@@ -423,10 +1217,26 @@ async function loadConsole(document, { fetch: fetchImpl } = {}) {
   };
   context.window = context;
   context.globalThis = context;
+  // Lets a test stand in for readability.js (which the host concatenates before
+  // console.js) so the shared-API path is exercised, not just the fallback.
+  prepare?.(context);
   vm.runInNewContext(source, context);
   return {
     source,
     context,
+    storage,
+    /** Names of the window events console.js dispatched, in order. */
+    windowEvents() {
+      return windowEvents.map((event) => event.type);
+    },
+    /** Another same-origin window wrote storage; the browser delivers this. */
+    emitStorage(key, value) {
+      if (value == null) storage.removeItem(key);
+      else storage.setItem(key, value);
+      for (const handler of windowListeners.get("storage") ?? []) {
+        handler({ type: "storage", key, newValue: value ?? null });
+      }
+    },
     /** The interval is the drift net console.js keeps for DOM churn. */
     tick() {
       for (const fn of ticks) fn();
@@ -446,6 +1256,164 @@ const flushAsync = async () => {
 const navCell = (document) => document.querySelectorAll('[data-bc-nav="console"]')[0] ?? null;
 const pageEl = (document) => document.getElementById("beauticode-console-page");
 const filePicker = (document) => document.getElementById("beauticode-console-file");
+const rootEl = (document) => document.documentElement;
+
+/** Moves a range input the way a drag does: value first, then the input event. */
+const dragSlider = (slider, value) => {
+  slider.value = String(value);
+  slider.listeners.get("input")[0].handler({ stopPropagation() {} });
+};
+
+/**
+ * Stands in for readability.js, the owner of the panel key. It keeps the old
+ * boolean / 0-100 semantics the ADR preserves ("true" = 100, "false" = 0, a
+ * number is clamped, anything else falls back to 100) and publishes the value
+ * through the same global the console already calls.
+ */
+function installReadableSurfaces(context, storage) {
+  const read = () => {
+    const raw = storage.getItem("beauticode-readable-surfaces");
+    if (raw == null || raw === "" || raw === "true") return 100;
+    if (raw === "false") return 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 100;
+  };
+  let strength = read();
+  context.BeauticodeReadableSurfaces = {
+    get: () => strength,
+    set(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return strength;
+      strength = Math.min(100, Math.max(0, Math.round(n)));
+      // 0 keeps the old "false" spelling so a rollback still reads the opt-out.
+      storage.setItem("beauticode-readable-surfaces", strength === 0 ? "false" : String(strength));
+      context.dispatchEvent(new context.CustomEvent("beauticode-readability-change"));
+      return strength;
+    },
+  };
+  return {
+    get: () => strength,
+    /** The panel global already re-read storage on its own storage listener. */
+    adopt(value) {
+      strength = value;
+    },
+  };
+}
+
+/**
+ * readability.js as the layered-material implementation exposes it: one object
+ * owns the preferences, writes the html-level variables and repaints on every
+ * set. The console must go through setPage/setMaterial — writing storage behind
+ * this object's back would leave its in-memory ramp stale.
+ */
+function installLayeredMaterial(context, storage) {
+  const defaults = {
+    page: 30,
+    panel: 100,
+    alphaStep: 8,
+    blurStep: 2,
+    maxBlur: 8,
+    direction: "up",
+  };
+  const num = (value, min, max, fallback) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
+  };
+  const readNumber = (key, min, max, fallback) => {
+    const raw = storage.getItem(key);
+    return raw == null || String(raw).trim() === "" ? fallback : num(raw, min, max, fallback);
+  };
+  const state = {
+    page: readNumber("beauticode-page-material", 0, 100, defaults.page),
+    panel: readNumber("beauticode-readable-surfaces", 0, 100, defaults.panel),
+    alphaStep: readNumber("beauticode-material-alpha-step", 0, 30, defaults.alphaStep),
+    blurStep: readNumber("beauticode-material-blur-step", 0, 8, defaults.blurStep),
+    maxBlur: readNumber("beauticode-material-max-blur", 0, 16, defaults.maxBlur),
+    direction: storage.getItem("beauticode-material-direction") === "down" ? "down" : "up",
+    pageBlur: storage.getItem("beauticode-page-blur") === "true",
+  };
+  const calls = [];
+  const root = context.document.documentElement;
+  const snapshot = () => ({
+    alphaStep: state.alphaStep,
+    blurStep: state.blurStep,
+    maxBlur: state.maxBlur,
+    direction: state.direction,
+  });
+  const emit = (type) => context.dispatchEvent(new context.CustomEvent(type));
+  const publish = () => {
+    if (state.page > 0) root.dataset.bcPageMaterial = "true";
+    else delete root.dataset.bcPageMaterial;
+    // The experiment needs both this html flag and the page root's own blur
+    // marker; page 0% keeps the stored option but removes the flag.
+    if (state.pageBlur && state.page > 0) root.dataset.bcPageBlur = "true";
+    else delete root.dataset.bcPageBlur;
+    root.style.setProperty("--bc-page-material-strength", String(state.page));
+    root.style.setProperty("--bc-material-alpha-step", String(state.alphaStep));
+    root.style.setProperty("--bc-material-blur-step", String(state.blurStep));
+    root.style.setProperty("--bc-material-max-blur", String(state.maxBlur));
+    root.style.setProperty("--bc-material-direction", state.direction);
+  };
+  context.BeauticodeReadableSurfaces = {
+    defaults,
+    get: () => state.panel,
+    set(value) {
+      const next = typeof value === "boolean" ? (value ? 100 : 0) : num(value, 0, 100, state.panel);
+      state.panel = next;
+      storage.setItem("beauticode-readable-surfaces", next === 0 ? "false" : String(next));
+      emit("beauticode-readability-change");
+      return state.panel;
+    },
+    getPage: () => state.page,
+    setPage(value) {
+      calls.push(["setPage", value]);
+      const next = num(value, 0, 100, null);
+      if (next == null) return state.page;
+      state.page = next;
+      storage.setItem("beauticode-page-material", String(next));
+      publish();
+      emit("beauticode-material-change");
+      return state.page;
+    },
+    getMaterial: snapshot,
+    setMaterial(patch) {
+      calls.push(["setMaterial", { ...patch }]);
+      if (patch.alphaStep !== undefined) {
+        state.alphaStep = num(patch.alphaStep, 0, 30, state.alphaStep);
+        storage.setItem("beauticode-material-alpha-step", String(state.alphaStep));
+      }
+      if (patch.blurStep !== undefined) {
+        state.blurStep = num(patch.blurStep, 0, 8, state.blurStep);
+        storage.setItem("beauticode-material-blur-step", String(state.blurStep));
+      }
+      if (patch.maxBlur !== undefined) {
+        state.maxBlur = num(patch.maxBlur, 0, 16, state.maxBlur);
+        storage.setItem("beauticode-material-max-blur", String(state.maxBlur));
+      }
+      if (patch.direction !== undefined) {
+        state.direction = patch.direction === "down" ? "down" : "up";
+        storage.setItem("beauticode-material-direction", state.direction);
+      }
+      publish();
+      emit("beauticode-material-change");
+      return snapshot();
+    },
+    // Experimental page blur: the option survives page 0% (only the html flag
+    // goes away), exactly like the real readability.js.
+    getPageBlur: () => state.pageBlur,
+    setPageBlur(value) {
+      calls.push(["setPageBlur", value]);
+      const next = value === true || value === "true";
+      state.pageBlur = next;
+      storage.setItem("beauticode-page-blur", next ? "true" : "false");
+      publish();
+      emit("beauticode-material-change");
+      return state.pageBlur;
+    },
+  };
+  publish();
+  return { calls, state };
+}
 
 test("console adds a 背景 cell and page to the settings dialog, inactive", async () => {
   const document = createConsoleDocument();
@@ -561,7 +1529,7 @@ test("console page includes a dim slider and restore-default control", async () 
   await loadConsole(document);
 
   const page = pageEl(document);
-  assert.match(page.innerHTML, /class="bc-dim-slider"/);
+  assert.match(page.innerHTML, /class="bc-range bc-dim-slider"/);
   assert.match(page.innerHTML, /type="range"/);
   assert.match(page.innerHTML, /data-act="dim-reset"/);
   assert.ok(page.querySelector(".bc-dim-slider"));
@@ -647,7 +1615,17 @@ test("every reset arrow in the page markup has a rule in the injected sheet", as
   const classes = [...page.innerHTML.matchAll(/class="(bc-[\w-]*reset)"/g)].map((m) => m[1]);
   assert.deepEqual(
     classes.sort(),
-    ["bc-blur-reset", "bc-dim-reset", "bc-readability-reset"],
+    [
+      "bc-alpha-step-reset",
+      "bc-blur-reset",
+      "bc-blur-step-reset",
+      "bc-dim-reset",
+      "bc-direction-reset",
+      "bc-max-blur-reset",
+      "bc-page-blur-reset",
+      "bc-page-material-reset",
+      "bc-readability-reset",
+    ],
     "every row exposes a reset arrow",
   );
   // The sheet writes the three as one selector list (`.bc-readability-reset,
@@ -672,15 +1650,19 @@ test("every reset arrow in the page markup has a rule in the injected sheet", as
     assert.match(base, /cursor:pointer/, `${name} keeps the hand cursor`);
     assert.ok(decl(name, ":hover"), `${name} has a hover rule`);
   }
-  // Same affordance, so the three must not drift apart again.
-  assert.equal(
-    decl("bc-readability-reset"),
-    decl("bc-dim-reset"),
-    "the reset arrows share one appearance",
-  );
-  assert.equal(decl("bc-readability-reset"), decl("bc-blur-reset"));
-  assert.equal(decl("bc-readability-reset", ":hover"), decl("bc-blur-reset", ":hover"));
-  assert.equal(decl("bc-dim-reset", ":hover"), decl("bc-blur-reset", ":hover"));
+  // Same affordance, so the arrows must not drift apart again.
+  for (const name of classes) {
+    assert.equal(
+      decl(name),
+      decl("bc-readability-reset"),
+      `the reset arrows share one appearance: ${name}`,
+    );
+    assert.equal(
+      decl(name, ":hover"),
+      decl("bc-readability-reset", ":hover"),
+      `the reset arrows share one hover: ${name}`,
+    );
+  }
 });
 
 /**
@@ -766,12 +1748,16 @@ test("console page follows the settings row recipe", async () => {
     /data-act="(?:fullscreen|sound|gallery|clear)"/,
     "no other control sits between them",
   );
-  // Display preferences plus import, gallery and clear.
-  assert.equal(page.querySelectorAll(".bc-row-title").length, 8);
-  assert.equal(page.querySelectorAll(".bc-row-desc").length, 8);
+  // Display preferences (fullscreen, page material, panel material, shadow,
+  // blur, sound) plus the four advanced material rows, the experimental page
+  // blur, import, gallery and clear.
+  assert.equal(page.querySelectorAll(".bc-row-title").length, 14);
+  assert.equal(page.querySelectorAll(".bc-row-desc").length, 14);
   assert.ok(page.querySelector('[data-act="sound"]'));
   assert.ok(page.querySelector('[data-act="clear"]'));
   assert.ok(page.querySelector('[data-act="gallery"]'));
+  assert.ok(page.querySelector('[data-act="direction"]'), "the direction toggle is a row");
+  assert.ok(page.querySelector('[data-act="page-blur"]'), "the experimental page blur is a row");
   assert.ok(page.querySelector(".bc-themes"));
   assert.ok(runtime.source.includes("--dsw-alias-border-l2"), "rows use the shipped tokens");
 });

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>backdrop-filter model fixture (ADR 0011 §2.3 / §2.4)</title>
+<!--
+  Minimal reproduction of the two physical facts the layered-material model
+  rests on. This file is deliberately static: it is not loaded by the automated
+  suite because pixel comparison needs an image decoder, but t4 can rerun the
+  original measurement here without the gitignored .tmp directory.
+
+  1) Nested chain: four isolated 760x680 cases with three nested layers. The
+     `fixed` and `sqrt` cases must be pixel-identical (only the first filter in
+     a chain is honored); `outer` must be visibly blurrier.
+  2) Cross-root: open with ?page=<px>&panel=<px>. #page is inside #root, #panel
+     is a position:fixed sibling, so both filters composite. Reference values:
+     4+4 ≈ single 5.66, 4+6.93 ≈ single 8, i.e. sqrt(s1² + s2²).
+
+  Measurement: screenshot, convert to grayscale, take the same 120x120 region in
+  each case and compare mean absolute difference plus Laplacian energy. Expected
+  mean abs diff: fixed vs sqrt 0.0, fixed vs outer ≈ 16.6. Anti-aliasing/GPU
+  differences are allowed, but the ordering must not change.
+-->
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 1600px; height: 1400px;
+    background: #e9edf2; font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .case {
+    position: absolute; width: 760px; height: 680px; overflow: hidden;
+    border: 2px solid #2b3340; background: #fff; isolation: isolate;
+  }
+  #case-none { left: 16px; top: 16px; }
+  #case-fixed { left: 816px; top: 16px; }
+  #case-sqrt { left: 16px; top: 716px; }
+  #case-outer { left: 816px; top: 716px; }
+  .bg {
+    position: absolute; inset: 0;
+    background: repeating-conic-gradient(#141922 0% 25%, #f6f6f6 0% 50%) 0 0 / 8px 8px;
+  }
+  .bg .text {
+    position: absolute; inset: 0; padding: 10px; overflow: hidden;
+    word-break: break-all; color: #111; opacity: .92;
+    font: 12px/16px "Consolas", "Microsoft YaHei", monospace;
+  }
+  .layer {
+    position: absolute; background: rgba(255, 255, 255, .08);
+    border: 1px solid rgba(20, 24, 32, .45);
+  }
+  .layer::after {
+    content: attr(data-tag); position: absolute; left: 6px; top: 6px; padding: 1px 4px;
+    border-radius: 3px; background: rgba(255, 255, 255, .82); color: #111;
+    font: 11px/14px "Consolas", monospace;
+  }
+  .layer.l1, .layer.l2, .layer.l3 { inset: 30px; }
+  .label {
+    position: absolute; left: 12px; top: 10px; z-index: 5; padding: 4px 8px;
+    border-radius: 4px; background: rgba(0, 0, 0, .72); color: #fff;
+    font: 600 15px/20px "Segoe UI", sans-serif;
+  }
+  #background {
+    position: absolute; inset: 0; z-index: 0;
+    background: repeating-conic-gradient(#141922 0% 25%, #f6f6f6 0% 50%) 0 0 / 32px 32px;
+  }
+  #background .text {
+    position: absolute; inset: 0; padding: 10px; overflow: hidden;
+    word-break: break-all; color: #111; opacity: .92;
+    font: 700 24px/32px "Consolas", "Microsoft YaHei", monospace;
+  }
+  #cross-root { position: absolute; inset: 0; display: none; }
+  #root { position: absolute; inset: 0; z-index: 1; }
+  #page {
+    position: absolute; inset: 0; background: rgba(255, 255, 255, .06);
+    border: 1px solid rgba(20, 24, 32, .35);
+  }
+  #panel {
+    position: fixed; left: 350px; top: 400px; width: 900px; height: 600px; z-index: 2;
+    background: rgba(255, 255, 255, .06); border: 1px solid rgba(20, 24, 32, .45);
+  }
+  #debug {
+    position: fixed; right: 12px; bottom: 12px; z-index: 9; padding: 6px 10px;
+    border-radius: 5px; background: #111c; color: #fff; font: 12px/18px monospace;
+  }
+</style>
+</head>
+<body>
+<div id="nested">
+  <section class="case" id="case-none" data-mode="none">
+    <div class="label">无模糊（对照）</div>
+    <div class="bg"><div class="text"></div></div>
+    <div class="layer l1"><div class="layer l2"><div class="layer l3"></div></div></div>
+  </section>
+  <section class="case" id="case-fixed" data-mode="fixed">
+    <div class="label">每层固定 4px</div>
+    <div class="bg"><div class="text"></div></div>
+    <div class="layer l1"><div class="layer l2"><div class="layer l3"></div></div></div>
+  </section>
+  <section class="case" id="case-sqrt" data-mode="sqrt">
+    <div class="label">sqrt(2n-1) 反推</div>
+    <div class="bg"><div class="text"></div></div>
+    <div class="layer l1"><div class="layer l2"><div class="layer l3"></div></div></div>
+  </section>
+  <section class="case" id="case-outer" data-mode="outer">
+    <div class="label">只最外层 12px</div>
+    <div class="bg"><div class="text"></div></div>
+    <div class="layer l1"><div class="layer l2"><div class="layer l3"></div></div></div>
+  </section>
+</div>
+
+<div id="cross-root" aria-hidden="true">
+  <div id="background"><div class="text"></div></div>
+  <div id="root"><div id="page"><span class="label">Page</span></div></div>
+  <div id="panel"><span class="label">Panel</span></div>
+  <div id="debug"></div>
+</div>
+
+<script>
+  const BG = "背景文字 background text 0123456789 模糊 blur nesting fixture 你好世界 0123456789 ".repeat(40);
+  document.querySelectorAll(".bg .text, #background .text").forEach((el) => { el.textContent = BG; });
+
+  const modes = {
+    none: [0, 0, 0],
+    fixed: [4, 4, 4],
+    sqrt: [4, 4 * Math.sqrt(3), 4 * Math.sqrt(5)],
+    outer: [12, 0, 0],
+  };
+  for (const section of document.querySelectorAll(".case")) {
+    const values = modes[section.dataset.mode] || modes.none;
+    [...section.querySelectorAll(".layer")].forEach((layer, index) => {
+      const radius = values[index] || 0;
+      if (radius > 0) {
+        layer.style.backdropFilter = "blur(" + radius.toFixed(2) + "px)";
+        layer.style.webkitBackdropFilter = "blur(" + radius.toFixed(2) + "px)";
+      }
+      layer.dataset.tag = "L" + (index + 1) + ": " + (radius > 0 ? radius.toFixed(2) + "px" : "no blur");
+    });
+  }
+
+  const params = new URLSearchParams(location.search);
+  const crossRoot = params.has("page") || params.has("panel");
+  if (crossRoot) {
+    document.getElementById("nested").remove();
+    document.getElementById("cross-root").style.display = "block";
+    const pageRadius = Number(params.get("page") || 0) || 0;
+    const panelRadius = Number(params.get("panel") || 0) || 0;
+    for (const [id, radius] of [["page", pageRadius], ["panel", panelRadius]]) {
+      const element = document.getElementById(id);
+      if (radius > 0) {
+        element.style.backdropFilter = "blur(" + radius.toFixed(2) + "px)";
+        element.style.webkitBackdropFilter = "blur(" + radius.toFixed(2) + "px)";
+      }
+      element.dataset.radius = radius.toFixed(2);
+    }
+    document.getElementById("debug").textContent = "page=" + pageRadius + "px  panel=" + panelRadius + "px";
+  }
+</script>
+</body>
+</html>
