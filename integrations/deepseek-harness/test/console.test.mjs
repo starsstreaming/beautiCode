@@ -336,24 +336,38 @@ function mountSettingsDialog(document) {
 
 const okJson = (body) => ({ ok: true, status: 200, json: async () => body });
 
-test("the readability control switches the local preference and reflects its state", async () => {
+test("the readability control is a strength slider and reflects its value", async () => {
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   const { context, tick } = await loadConsole(document);
-  let enabled = true;
+  let strength = 100;
+  const calls = [];
   context.BeauticodeReadableSurfaces = {
-    get: () => enabled,
-    set: (value) => { enabled = value; },
+    get: () => strength,
+    set: (value) => {
+      calls.push(value);
+      strength = value;
+      return value;
+    },
   };
-  const button = pageEl(document).querySelector('[data-act="readability"]');
-  assert.equal(button.getAttribute("aria-pressed"), "true");
-  button.click();
-  assert.equal(enabled, false);
-  assert.equal(button.textContent, "已关");
-  assert.equal(button.getAttribute("aria-pressed"), "false");
-  button.click();
-  assert.equal(enabled, true);
-  assert.equal(button.getAttribute("aria-pressed"), "true");
+  navCell(document).click();
+  const page = pageEl(document);
+  const slider = page.querySelector(".bc-readability-slider");
+  const value = page.querySelector(".bc-readability-value");
+  assert.equal(slider.getAttribute("min"), "0");
+  assert.equal(slider.getAttribute("max"), "100");
+  assert.equal(slider.value, "100");
+  assert.equal(value.textContent, "100%");
+
+  slider.value = "40";
+  slider.listeners.get("input")[0].handler({ stopPropagation() {} });
+  assert.deepEqual(calls, [40], "dragging writes the percentage straight through");
+  assert.equal(value.textContent, "40%");
+
+  page.querySelector('[data-act="readability-reset"]').click();
+  assert.deepEqual(calls, [40, 100], "the arrow writes the 100% default");
+  assert.equal(slider.value, "100");
+  assert.equal(value.textContent, "100%");
   tick();
 });
 
@@ -633,13 +647,14 @@ test("every reset arrow in the page markup has a rule in the injected sheet", as
   const classes = [...page.innerHTML.matchAll(/class="(bc-[\w-]*reset)"/g)].map((m) => m[1]);
   assert.deepEqual(
     classes.sort(),
-    ["bc-blur-reset", "bc-dim-reset"],
-    "both rows expose a reset arrow",
+    ["bc-blur-reset", "bc-dim-reset", "bc-readability-reset"],
+    "every row exposes a reset arrow",
   );
-  // The sheet writes the pair as a selector list (`.bc-dim-reset,.bc-blur-reset{…}`)
-  // precisely so the two cannot drift, so locate the declaration block by finding
-  // the class name and then reading forward to its braces: a regex anchored on
-  // `\.name\{` would only accept the one-class-per-rule shape.
+  // The sheet writes the three as one selector list (`.bc-readability-reset,
+  // .bc-dim-reset,.bc-blur-reset{…}`) precisely so they cannot drift, so locate
+  // the declaration block by finding the class name and then reading forward to
+  // its braces: a regex anchored on `\.name\{` would only accept the
+  // one-class-per-rule shape.
   const decl = (name, suffix = "") => {
     // Require a selector boundary after the name. A bare indexOf would accept
     // `.bc-dim-reset:hover` as the base rule for `.bc-dim-reset`, so dropping the
@@ -657,12 +672,14 @@ test("every reset arrow in the page markup has a rule in the injected sheet", as
     assert.match(base, /cursor:pointer/, `${name} keeps the hand cursor`);
     assert.ok(decl(name, ":hover"), `${name} has a hover rule`);
   }
-  // Same affordance, so the two must not drift apart again.
+  // Same affordance, so the three must not drift apart again.
   assert.equal(
+    decl("bc-readability-reset"),
     decl("bc-dim-reset"),
-    decl("bc-blur-reset"),
     "the reset arrows share one appearance",
   );
+  assert.equal(decl("bc-readability-reset"), decl("bc-blur-reset"));
+  assert.equal(decl("bc-readability-reset", ":hover"), decl("bc-blur-reset", ":hover"));
   assert.equal(decl("bc-dim-reset", ":hover"), decl("bc-blur-reset", ":hover"));
 });
 

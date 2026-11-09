@@ -10,9 +10,17 @@ function load(initial, denied = false) {
   const store = new Map(initial === undefined ? [] : [[key, initial]]);
   const styles = [];
   const listeners = new Map();
+  const vars = new Map();
+  const documentElement = {
+    dataset: {},
+    style: {
+      setProperty: (name, value) => vars.set(name, value),
+      removeProperty: (name) => vars.delete(name),
+    },
+  };
   const context = {
     document: {
-      documentElement: { dataset: {} },
+      documentElement,
       createElement: () => ({ dataset: {} }),
       head: { append: (style) => styles.push(style) },
     },
@@ -29,54 +37,86 @@ function load(initial, denied = false) {
     addEventListener: (name, handler) => listeners.set(name, handler),
   };
   vm.runInNewContext(source, context);
-  return { context, store, styles, listeners, api: context.BeauticodeReadableSurfaces };
+  return { context, store, styles, listeners, vars, api: context.BeauticodeReadableSurfaces };
 }
 
-test("functional surfaces are protected on first use and with invalid preferences", () => {
-  for (const initial of [undefined, "true", "0", "invalid", "null"]) {
-    const { context, api } = load(initial);
-    assert.equal(api.get(), true);
+test("full protection is the default and survives invalid preferences", () => {
+  for (const initial of [undefined, "true", "invalid", "101", "null", ""]) {
+    const { context, api, vars } = load(initial);
+    assert.equal(api.get(), 100);
     assert.equal(context.document.documentElement.dataset.bcReadableSurfaces, "true");
+    assert.equal(vars.get("--bc-readable-strength"), "100");
   }
 });
 
-test("a boolean opt-out persists and restores independently of background settings", () => {
-  const { api, store, context } = load();
-  assert.equal(api.set(false), false);
-  assert.equal(store.get(key), "false");
+test("the legacy boolean opt-out reads as 0% and the numeric strength persists", () => {
+  for (const initial of ["false", "0"]) {
+    const { api, vars } = load(initial);
+    assert.equal(api.get(), 0);
+    assert.equal(vars.has("--bc-readable-strength"), false);
+  }
+
+  const { api, store, context, vars } = load();
+  assert.equal(api.set(false), 0);
+  assert.equal(store.get(key), "false", "0 keeps the old spelling for rollback");
   assert.equal(context.document.documentElement.dataset.bcReadableSurfaces, "false");
-  assert.equal(load(store.get(key)).api.get(), false);
-  for (const value of ["true", 1, null, {}]) assert.equal(api.set(value), false);
-  assert.equal(api.set(true), true);
-  assert.equal(store.get(key), "true");
+  assert.equal(vars.has("--bc-readable-strength"), false);
+  assert.equal(load(store.get(key)).api.get(), 0);
+
+  assert.equal(api.set(35), 35);
+  assert.equal(store.get(key), "35");
+  assert.equal(context.document.documentElement.dataset.bcReadableSurfaces, "true");
+  assert.equal(vars.get("--bc-readable-strength"), "35");
+  assert.equal(load(store.get(key)).api.get(), 35);
+
+  // Boolean True is the old "on" state and means the original opaque plate.
+  assert.equal(api.set(true), 100);
+  assert.equal(store.get(key), "100");
+  assert.equal(vars.get("--bc-readable-strength"), "100");
+});
+
+test("numeric values are clamped and invalid input keeps the current strength", () => {
+  const { api, store, context, vars } = load();
+  assert.equal(api.set(101), 100);
+  assert.equal(api.set(-5), 0);
+  assert.equal(context.document.documentElement.dataset.bcReadableSurfaces, "false");
+  assert.equal(vars.has("--bc-readable-strength"), false);
+
+  assert.equal(api.set(40.6), 41);
+  assert.equal(store.get(key), "41");
+  for (const value of [null, "", {}, "abc", NaN]) assert.equal(api.set(value), 41);
+  assert.equal(api.set("55"), 55, "numeric strings are accepted");
 });
 
 test("storage failure preserves the user's selection for the current page", () => {
   const { api, context } = load(undefined, true);
-  assert.equal(api.get(), true);
-  assert.equal(api.set(false), false);
+  assert.equal(api.get(), 100);
+  assert.equal(api.set(false), 0);
   assert.equal(context.document.documentElement.dataset.bcReadableSurfaces, "false");
 });
 
-test("preference changes in another page synchronize and clearing restores protection", () => {
+test("preference changes in another page synchronize and clearing restores full protection", () => {
   const { api, store, listeners } = load();
   store.set(key, "false");
   listeners.get("storage")({ key: "beauticode-dim" });
-  assert.equal(api.get(), true);
+  assert.equal(api.get(), 100);
   listeners.get("storage")({ key });
-  assert.equal(api.get(), false);
-  store.clear();
+  assert.equal(api.get(), 0);
+  store.set(key, "40");
+  listeners.get("storage")({ key });
+  assert.equal(api.get(), 40);
+  store.delete(key);
   listeners.get("storage")({ key: null });
-  assert.equal(api.get(), true);
+  assert.equal(api.get(), 100);
 });
 
-test("reloading the client does not duplicate styles or reset an opt-out", () => {
+test("reloading the client does not duplicate styles or reset the strength", () => {
   const { context, api, styles } = load();
-  api.set(false);
+  api.set(30);
   vm.runInNewContext(source, context);
   assert.equal(styles.length, 1);
   assert.equal(context.BeauticodeReadableSurfaces, api);
-  assert.equal(api.get(), false);
+  assert.equal(api.get(), 30);
 });
 
 test("pending-interaction panels are protected by their frame's semantic key", () => {
@@ -95,6 +135,21 @@ test("pending-interaction panels are protected by their frame's semantic key", (
   // These panels carry no dialog role, which is why role protection missed them.
   assert.ok(style.textContent.includes("--dsw-specific-input-major:var(--bc-readable-fill)"),
     "panels must repaint the same token the composer uses");
+});
+
+test("the plate's alpha is driven by the strength token, never a literal", () => {
+  const { styles } = load();
+  const [style] = styles;
+  assert.match(
+    style.textContent,
+    /--bc-readable-fill:color-mix\(in srgb,var\(--dsw-static-neutral-bluish-800,#232833\) calc\(var\(--bc-readable-strength,100\) \* 1%\),transparent\)/,
+    "dark plate is the palette color at the strength alpha",
+  );
+  assert.match(
+    style.textContent,
+    /--bc-readable-fill:color-mix\(in srgb,var\(--dsw-static-neutral-bluish-00,#fff\) calc\(var\(--bc-readable-strength,100\) \* 1%\),transparent\)/,
+    "light plate uses the light palette color and the same alpha",
+  );
 });
 
 test("the plugin page keeps the wallpaper and ships only non-covering legibility aids", () => {

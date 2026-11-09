@@ -44,7 +44,7 @@ const OUT_OF_RANGE_CASES = [
   { tone: "light", background: "#000000", why: "dark text on a black wallpaper" },
 ];
 
-async function fixture(t, { enabled = true, inject = true } = {}) {
+async function fixture(t, { strength = 100, inject = true } = {}) {
   const { chromium } = await import(runtime);
   const browser = await chromium.launch({ headless: true,
     ...(process.env.BEAUTICODE_BROWSER_CHANNEL ? { channel: process.env.BEAUTICODE_BROWSER_CHANNEL } : {}) });
@@ -52,14 +52,14 @@ async function fixture(t, { enabled = true, inject = true } = {}) {
   const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
   await page.setContent(`<html data-bc-active="true" data-bc-resolved-tone="dark"><head><style>${hostCss}${clientCss}</style></head>
     <body><div id="wallpaper"></div><div id="root">${listHtml}</div><div data-composer-card>Composer</div></body></html>`);
-  await page.evaluate(enabled => {
+  await page.evaluate(strength => {
     // Storage/transport is external to CSS rendering; a real in-memory store
     // lets about:blank exercise preference changes without accessing user data.
-    const data = new Map([["beauticode-readable-surfaces", String(enabled)]]);
+    const data = new Map([["beauticode-readable-surfaces", String(strength)]]);
     Object.defineProperty(globalThis, "localStorage", { value: {
       getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value),
     }, configurable: true });
-  }, enabled);
+  }, strength);
   if (inject) await page.addScriptTag({ content: readable });
   // Later gallery CSS must not weaken independently protected plugin surfaces.
   await page.addStyleTag({ content: galleryCss });
@@ -230,28 +230,28 @@ browserTest("bright, dark, complex and playing video backgrounds keep the page t
 
 browserTest("disabled protection and clearing wallpaper restore host appearance and typography", async t => {
   const baseline = await fixture(t, { inject: false });
-  const page = await fixture(t, { enabled: false });
+  const page = await fixture(t, { strength: 0 });
   // Locators for repeated descriptions must identify the intended card.
   const snapshot = async page => Promise.all(["[data-plugin-panel]>header", "[data-plugin-group=official]", "[data-plugin-package]", "[data-plugin-package] .host-description", "[data-plugin-group=official] .host-count"].map(selector => surface(page, selector)));
   assert.deepEqual(await snapshot(page), await snapshot(baseline));
   assert.deepEqual(await tiers(page), await tiers(baseline), "protection off must restore host typography");
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(true));
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(100));
   assert.equal((await surface(page, "[data-plugin-package]")).alpha, 0, "the card still keeps the wallpaper");
   assert.notDeepEqual(await tiers(page), await tiers(baseline), "protection lifts captions one tier");
   await page.evaluate(() => { document.documentElement.dataset.bcActive = "false"; document.documentElement.dataset.bcGallery = "false"; });
   await baseline.evaluate(() => { document.documentElement.dataset.bcActive = "false"; document.documentElement.dataset.bcGallery = "false"; });
   assert.deepEqual(await snapshot(page), await snapshot(baseline));
   assert.deepEqual(await tiers(page), await tiers(baseline));
-  await page.evaluate(() => { document.documentElement.dataset.bcActive = "true"; globalThis.BeauticodeReadableSurfaces.set(false); });
+  await page.evaluate(() => { document.documentElement.dataset.bcActive = "true"; globalThis.BeauticodeReadableSurfaces.set(0); });
   assert.equal((await surface(page, "[data-plugin-package]")).alpha, 0);
 });
 
 browserTest("transparent rows preserve geometry, card hover, keyboard focus and controls", async t => {
-  const page = await fixture(t, { enabled: false });
+  const page = await fixture(t, { strength: 0 });
   const geometry = () => page.evaluate(() => [...document.querySelectorAll("[data-plugin-panel],header,[data-plugin-group],[data-plugin-package],[data-plugin-item]")]
     .map(el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }));
   const before = await geometry();
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(true));
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(100));
   assert.deepEqual(await geometry(), before);
   const normal = await surface(page, "[data-plugin-package]");
   await page.locator("[data-plugin-package]").hover();
@@ -273,4 +273,22 @@ browserTest("transparent rows preserve geometry, card hover, keyboard focus and 
   assert.equal((await surface(page, "[role=dialog]")).alpha, 255);
   assert.equal((await surface(page, "[role=tooltip]")).alpha, 255);
   assert.equal(await page.locator("[data-plugin-panel]>header").getAttribute("data-window-drag"), "");
+});
+
+browserTest("the strength slider paints the plate at its alpha and 0% restores the host surface", async t => {
+  const page = await fixture(t);
+  const composerAlpha = () => page.evaluate(() => {
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.fillStyle = getComputedStyle(document.querySelector("[data-composer-card]")).backgroundColor;
+    ctx.fillRect(0, 0, 1, 1);
+    return ctx.getImageData(0, 0, 1, 1).data[3];
+  });
+  assert.equal(await composerAlpha(), 255, "the default strength keeps the plate opaque");
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(40));
+  const mid = await composerAlpha();
+  assert.ok(Math.abs(mid - 102) <= 1, `40% paints about 40% of 255: ${mid}`);
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(0));
+  const host = await composerAlpha();
+  assert.ok(host > 0 && host < 255, `0% restores the host's translucent composer: ${host}`);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.bcReadableSurfaces), "false");
 });

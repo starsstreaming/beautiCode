@@ -3,20 +3,51 @@
   if (globalThis.BeauticodeReadableSurfaces) return;
 
   const STORAGE_KEY = "beauticode-readable-surfaces";
+  // 0 = protection off (the host's own translucent surfaces), 100 = the
+  // original fully-opaque plate. Anything between paints the plate at that
+  // alpha, so a user can trade occlusion against the wallpaper reading through
+  // instead of flipping one boolean.
+  const DEFAULT_STRENGTH = 100;
   const root = document.documentElement;
-  // Only an explicit opt-out disables protection. Missing/corrupt preferences
-  // and unavailable storage must not make text behind a panel visible again.
-  function readPreference() {
+
+  function clampStrength(value) {
+    if (value == null || value === "") return null;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.min(100, Math.max(0, Math.round(n)));
+  }
+
+  // Older builds stored a boolean. An explicit "false" must keep meaning "off";
+  // "true" and missing/corrupt storage keep full protection.
+  function readStrength() {
     try {
-      return globalThis.localStorage?.getItem(STORAGE_KEY) !== "false";
+      const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
+      if (raw == null || raw === "" || raw === "true") return DEFAULT_STRENGTH;
+      if (raw === "false") return 0;
+      return clampStrength(raw) ?? DEFAULT_STRENGTH;
     } catch {
-      return true;
+      return DEFAULT_STRENGTH;
     }
   }
 
-  let enabled = readPreference();
+  let strength = readStrength();
+
+  function writeStrength(value) {
+    try {
+      // 0 keeps the old "false" spelling so rolling back to a previous plugin
+      // version still reads the opt-out instead of re-enabling protection.
+      const stored = value === 0 ? "false" : String(value);
+      globalThis.localStorage?.setItem(STORAGE_KEY, stored);
+    } catch {
+      // Storage can be denied; the current page still honors the selection.
+    }
+  }
+
   function applyPreference() {
-    root.dataset.bcReadableSurfaces = String(enabled);
+    const protectedOn = strength > 0;
+    root.dataset.bcReadableSurfaces = protectedOn ? "true" : "false";
+    if (protectedOn) root.style?.setProperty?.("--bc-readable-strength", String(strength));
+    else root.style?.removeProperty?.("--bc-readable-strength");
     globalThis.dispatchEvent?.(new CustomEvent("beauticode-readability-change"));
   }
 
@@ -24,11 +55,11 @@
   style.dataset.beauticodeReadability = "true";
   style.textContent = `
 html[data-bc-active="true"] body{
-  --bc-readable-fill:var(--dsw-static-neutral-bluish-800,#232833);
+  --bc-readable-fill:color-mix(in srgb,var(--dsw-static-neutral-bluish-800,#232833) calc(var(--bc-readable-strength,100) * 1%),transparent);
   --bc-text-halo:#000;
 }
 html[data-bc-active="true"][data-bc-resolved-tone="light"] body{
-  --bc-readable-fill:var(--dsw-static-neutral-bluish-00,#fff);
+  --bc-readable-fill:color-mix(in srgb,var(--dsw-static-neutral-bluish-00,#fff) calc(var(--bc-readable-strength,100) * 1%),transparent);
   --bc-text-halo:#fff;
 }
 /* DSH settings are body portals; its sticky composer sits over the transcript.
@@ -78,22 +109,24 @@ html[data-bc-active="true"]:not([data-bc-readable-surfaces="false"]) [data-plugi
   applyPreference();
 
   globalThis.BeauticodeReadableSurfaces = {
-    get: () => enabled,
+    // 0-100. 0 turns protection off and restores the host's translucent
+    // surfaces; 100 is the original opaque plate. Boolean values are accepted
+    // for callers of the old switch.
+    get: () => strength,
     set(value) {
-      if (typeof value !== "boolean") return enabled;
-      enabled = value;
-      try {
-        globalThis.localStorage?.setItem(STORAGE_KEY, String(enabled));
-      } catch {
-        // Storage can be denied; the current page still honors the selection.
-      }
+      const next = typeof value === "boolean"
+        ? (value ? DEFAULT_STRENGTH : 0)
+        : clampStrength(value);
+      if (next == null) return strength;
+      strength = next;
+      writeStrength(strength);
       applyPreference();
-      return enabled;
+      return strength;
     },
   };
   globalThis.addEventListener?.("storage", (event) => {
     if (event.key !== STORAGE_KEY && event.key !== null) return;
-    enabled = readPreference();
+    strength = readStrength();
     applyPreference();
   });
 })();

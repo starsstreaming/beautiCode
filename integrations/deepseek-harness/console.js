@@ -38,19 +38,15 @@
 #beauticode-console-page .bc-link{cursor:pointer;height:auto;padding:0;border:0;border-radius:6px;background:0 0;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;text-decoration:underline;text-underline-offset:3px}
 #beauticode-console-page .bc-link:hover{color:var(--dsw-alias-label-primary)}
 #beauticode-console-page .bc-slider{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:18px;background:var(--dsw-alias-bg-module-platform)}
-#beauticode-console-page .bc-blur-slider{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
-#beauticode-console-page .bc-blur-slider::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
-#beauticode-console-page .bc-blur-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
-#beauticode-console-page .bc-blur-value{min-width:2.6em;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;text-align:right}
-/* Both reset buttons share one appearance. bc-dim-reset used to be missing from
+#beauticode-console-page .bc-blur-slider,#beauticode-console-page .bc-dim-slider,#beauticode-console-page .bc-readability-slider{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
+#beauticode-console-page .bc-blur-slider::-webkit-slider-runnable-track,#beauticode-console-page .bc-dim-slider::-webkit-slider-runnable-track,#beauticode-console-page .bc-readability-slider::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
+#beauticode-console-page .bc-blur-slider::-webkit-slider-thumb,#beauticode-console-page .bc-dim-slider::-webkit-slider-thumb,#beauticode-console-page .bc-readability-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
+#beauticode-console-page .bc-blur-value,#beauticode-console-page .bc-dim-value,#beauticode-console-page .bc-readability-value{min-width:2.6em;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;text-align:right}
+/* All reset arrows share one appearance. bc-dim-reset used to be missing from
    this sheet entirely, so the shadow row rendered a raw UA button next to the
-   styled blur row; keep the two selectors together so they cannot drift again. */
-#beauticode-console-page .bc-dim-reset,#beauticode-console-page .bc-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
-#beauticode-console-page .bc-dim-reset:hover,#beauticode-console-page .bc-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
-#beauticode-console-page .bc-dim-slider{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
-#beauticode-console-page .bc-dim-slider::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
-#beauticode-console-page .bc-dim-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
-#beauticode-console-page .bc-dim-value{min-width:2.6em;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;text-align:right}
+   styled blur row; keep the selectors together so they cannot drift again. */
+#beauticode-console-page .bc-readability-reset,#beauticode-console-page .bc-dim-reset,#beauticode-console-page .bc-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
+#beauticode-console-page .bc-readability-reset:hover,#beauticode-console-page .bc-dim-reset:hover,#beauticode-console-page .bc-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
 /* Title and tabs. The tab row is the one Settings -> 插件 puts above its two
    pages: a hairline rule with the tabs on it, the active one in label-primary
    with a 2px underline. */
@@ -135,8 +131,20 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-act="fullscreen" aria-pressed="false">进入全屏</button></div></div>' +
     '<div class="bc-row"><div class="bc-row-text">' +
     '<span class="bc-row-title">功能面板不透明</span>' +
-    '<span class="bc-row-desc">遮住设置、弹层、消息编辑栏和提问窗口后方的内容</span>' +
-    '</div><div class="bc-control"><button type="button" class="bc-btn bc-pill on" data-act="readability" aria-pressed="true">已开</button></div></div>' +
+    '<span class="bc-row-desc">遮住设置、弹层、消息编辑栏和提问窗口后方的内容，0% 关闭</span>' +
+    "</div>" +
+    '<div class="bc-control">' +
+    '<span class="bc-slider">' +
+    '<input type="range" class="bc-readability-slider" min="0" max="100" step="1" value="100" aria-label="功能面板不透明"/>' +
+    '<span class="bc-readability-value">100%</span>' +
+    "</span>" +
+    '<button type="button" class="bc-readability-reset" data-act="readability-reset" aria-label="恢复默认" title="恢复默认">' +
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+    '<path d="M13.2 10.4A5.6 5.6 0 1 1 12.9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
+    '<path d="M13.9 1.7 13.2 5.2l-3.5-.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    "</svg>" +
+    "</button>" +
+    "</div></div>" +
     '<div class="bc-row"><div class="bc-row-text">' +
     '<span class="bc-row-title">背景阴影</span>' +
     '<span class="bc-row-desc">压暗背景，让内容更清楚</span>' +
@@ -217,7 +225,9 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   document.body.append(fileInput);
 
   const soundBtn = page.querySelector('[data-act="sound"]');
-  const readabilityBtn = page.querySelector('[data-act="readability"]');
+  const readabilitySlider = page.querySelector(".bc-readability-slider");
+  const readabilityValue = page.querySelector(".bc-readability-value");
+  const readabilityReset = page.querySelector('[data-act="readability-reset"]');
   const dimSlider = page.querySelector(".bc-dim-slider");
   const dimValue = page.querySelector(".bc-dim-value");
   const dimReset = page.querySelector('[data-act="dim-reset"]');
@@ -234,6 +244,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   const msgEl = page.querySelector(".bc-msg");
   const mediaBtn = page.querySelector('[data-act="media"]');
   const AUTO_DIM_PERCENT = 49;
+  const AUTO_READABILITY_PERCENT = 100;
   let busy = false;
   let muted = true;
   let currentThemeId = "";
@@ -259,11 +270,17 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     dimValue.textContent = `${percent}%`;
   }
 
+  // The slider is the single source of truth, like the shadow and blur rows:
+  // the label always shows the percentage the protection actually paints. 0% is
+  // the old opt-out and 100% the original opaque plate.
   function renderReadability() {
-    const enabled = globalThis.BeauticodeReadableSurfaces?.get?.() !== false;
-    readabilityBtn.classList.toggle("on", enabled);
-    readabilityBtn.textContent = enabled ? "已开" : "已关";
-    readabilityBtn.setAttribute("aria-pressed", String(enabled));
+    const current = globalThis.BeauticodeReadableSurfaces?.get?.();
+    const percent = Number.isFinite(current) ? Math.round(current) : AUTO_READABILITY_PERCENT;
+    if (readabilitySlider.value !== String(percent)) {
+      readabilitySlider.value = String(percent);
+    }
+    const label = `${percent}%`;
+    if (readabilityValue.textContent !== label) readabilityValue.textContent = label;
   }
 
   function isOurs(node) {
@@ -808,10 +825,16 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
       }
     })();
   });
-  readabilityBtn.addEventListener("click", (event) => {
+  readabilitySlider.addEventListener("input", (event) => {
     event.stopPropagation();
-    const enabled = globalThis.BeauticodeReadableSurfaces?.get?.() !== false;
-    globalThis.BeauticodeReadableSurfaces?.set?.(!enabled);
+    const n = Number(readabilitySlider.value);
+    if (!Number.isFinite(n)) return;
+    globalThis.BeauticodeReadableSurfaces?.set?.(n);
+    renderReadability();
+  });
+  readabilityReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    globalThis.BeauticodeReadableSurfaces?.set?.(AUTO_READABILITY_PERCENT);
     renderReadability();
   });
   globalThis.addEventListener?.("beauticode-readability-change", renderReadability);
