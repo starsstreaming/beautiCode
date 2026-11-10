@@ -11,11 +11,65 @@ beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`beauticode-d
 - 视频播放位置随已保存主题记录；切换主题、重新应用与页面恢复时从最近位置继续。
 - 摸鱼模式：隐藏 DSH 的 `#root`，背景舞台继续显示和播放；`Ctrl+Shift+Space` 可退出（托盘全局热键）。网页控制台不提供摸鱼。
 - 外观浅色 / 深色跟随 DSH 自己的设置，插件不再改写 DSH 主题 DOM。
-- 默认开启「功能面板不透明」，让设置、弹层、菜单、消息编辑栏与提问窗口（提问、计划审核、授权确认）遮住后方内容；可在「设置 → 背景」关闭并保存偏好。该选项独立于背景阴影、会话阶段和画窗模式。
+- 分层材质：「页面材质」默认 30%，只铺在页面模式的 MainPanel 布局列 `[data-global-panel]`；「功能面板不透明」默认 60%，作用于设置、弹层、菜单、消息编辑栏和提问窗口。两条通道互相独立，另有透明度档位、模糊档位、最大模糊和默认开启的「页面模糊」；页内浮层出现时页面模糊暂停。0% 各自关闭并回退到原有半透明外观。详见[分层材质与设置](#分层材质与设置)与 [ADR 0011](adr/0011-dsh-layered-material.md)。
 - 图片/视频主题的保存、切换和删除。
 - 页面刷新或稍后打开时，会恢复当前背景。找不到 `#root` 时应用失败并回滚，不会静默画坏页。
 
 同一个 beautiCode 数据目录一次只能运行一个宿主会话，避免 Codex 与 DSH 同时写入造成状态损坏。
+
+## 分层材质与设置
+
+背景启用后，「设置 → 背景」提供两条独立材质通道和一组高级档位：
+
+| 设置行 | 默认 | 作用 |
+|---|---:|---|
+| 页面材质 | 30% | 页面模式 MainPanel 布局列 `[data-global-panel]` 的 30% 底色；主会话没有该锚点，不铺页面材质 |
+| 功能面板不透明 | 60% | dialog / alertdialog / menu / listbox、消息编辑栏 `[data-composer-card]`、提问/计划审核/授权确认卡片；已有用户值保留、重置 60 |
+| 材质档位间隔（透明度） | 8% | 嵌套层每深一层，alpha 增加多少（只增不减、越上层越实） |
+| 材质档位间隔（模糊） | 2px | 每多一个独立面板层，模型总模糊增加多少 |
+| 最大模糊 | 8px | 面板栈的模型总模糊上限，0–16px；页面强度只提供尺度 `I` |
+| 页面模糊 | 开启 | 默认给页面加 2.4px 模糊；关闭后页面只保留 30% 底色。页面 0% 时按钮/重置禁用、提示「需要页面材质 >0」 |
+
+嵌套 alpha 固定为 `根 alpha + (depth - 1) × alphaStep`，**越上层越实**，没有「越上层越透」选项。旧存储键 `beauticode-material-direction` 不再读取/写入，旧值保留但被忽略；`getMaterial()` 只返回 `{alphaStep, blurStep, maxBlur}`，`setMaterial()` 收到 `direction` 会静默忽略。高级设置只有三个档位滑杆加页面模糊开关。
+
+插件页、技能页、自动化任务页都按页面通道处理；主会话不是页面，不铺页面材质。页面根默认 alpha 0.30，页面模糊默认开启：`html[data-bc-page-blur="true"]`、页面根 `position:relative`/`isolation:isolate`、`::before` `blur(2.4px)`；`getPageBlur()` 默认 true，`getBlur()` 默认 `{page:2.4, panel:3.69}`。面板根默认 alpha 0.60（153/255），独立覆盖层只应用一次 `backdrop-filter`；默认页面下为 `blur(3.69px)`。主会话 composer 同样为面板 60%、blur 2px，没有 page root。嵌套层只按 alpha 档位变化，**不应用 `backdrop-filter`**。
+
+页面根内的标准 role 分两类：
+
+- `tooltip` **不再材质化**：不是候选、不加 alpha/层，也不改写 `--dsw-alias-tooltip-bg`；保留宿主黑底白字、背景和定位（页内/页外都一样）。
+- `menu` / `listbox` / `dialog` / `alertdialog` 按**面板材质** 60% 处理，`backdrop-filter:none`，不继承 page alpha/档位；它们不会因为页面根 isolation 而漂移。
+
+**页面模糊暂停**：页面根内出现可见的 tooltip/menu/listbox/dialog/alertdialog 时，页面根加 `data-bc-page-blur-paused`，移除 `position`/`isolation`/`::before`，仅保留 30% 底色；`getBlur().page=0`，面板 blur 3.69 不变。关闭浮层后自动恢复 `relative/isolate` 与 `blur(2.4px)`。暂停是为了消除这些页内浮层在 V9/V10 下的现场漂移；**不是把 V9/V10 永久解决**：没有页内浮层时，页面根仍存在 V9 absolute 包含块（探测 250）和 V10 层叠（default-outside）。
+
+判定只使用宿主语义锚点：页面只认 `[data-global-panel]`；面板标准 role、`[data-composer-card]` 和三个待交互面板的内层卡片；`[data-shell-overlay]`（`shell.overlay`）容器本身跳过，但其中的 role 浮层仍按独立/嵌套处理；无标准 role 的第三方浮层不处理。tooltip 不在材质候选里；页面根内的 menu/listbox/dialog/alertdialog 是面板材质，不是 page 嵌套层。
+
+### 为什么侧栏和主会话不在页面材质内
+
+- **左侧栏**是 DSH chrome，位于 `[data-global-panel]` 之外，不属于页面/面板材质根。它的半透明由 `client.js` 的 `--bc-surface-mix`（默认 36%，会话 active/settling 86%）与 `--dsw-specific-sidebar-fill` 决定，不随页面/面板强度滑杆或页面模糊变化。背景阴影/壁纸磨砂会改变透过侧栏看到的壁纸，但不是侧栏自身材质；页面/面板材质控制不改变它。
+- **主会话**没有 `[data-global-panel]`，页面材质与页面模糊都不铺；会话页保持壁纸直出，只有 composer/待交互卡片等面板材质。若以后要“统一页面”，需要独立可选项并单独验收，不应默认扩到主会话。
+
+0% 语义与旧偏好：
+
+- 页面 0%：移除页面根、30% 底色、页面模糊/背板与插件页文字辅助；`beauticode-page-blur` 偏好保留，恢复页面强度 > 0 后自动恢复模糊。页面回到 `client.js` 发布的半透明宿主外观；面板材质不受影响。
+- 面板 0%：移除所有面板/嵌套层标记与模糊，role 面板、编辑栏、待交互卡片回到半透明；页面材质不受影响。
+- 两者都 0%：没有材质标记，等同当前半透明宿主外观。
+- 旧键 `beauticode-readable-surfaces`：缺失或 `"true"` 读作 60、`"false"` 读作 0、数字原样保留（例如已存 35 仍是 35）、无效值回退 60；0 仍写 `"false"` 以兼容旧包。页面和高级档位使用新键，旧包忽略。
+- 页面模糊键 `beauticode-page-blur`：仅字面 `"false"` 关闭；缺失/无效按 true。设置即时生效并跨同源窗口同步；清除背景后恢复宿主样式，偏好保留。
+
+已知风险与边界（详见 [ADR 0011 §4](adr/0011-dsh-layered-material.md#4-风险边界与取舍) 与[验证记录](verification/2026-11-10-dsh-layered-material.md)）：
+
+- **V3 fixed 已关闭**：页面根内 fixed 开/关均 `(60,60)`、portal `(40,40)`；页面根自身不持有 `backdrop-filter`，页面模糊由 `::before` 背板承担。
+- **V9/V10 默认仍存在**：页面模糊默认开启且没有页内浮层时，absolute 探测为 250、页面内高 z-index 为 `default-outside`。只有页内 tooltip/menu/listbox/dialog/alertdialog 可见触发暂停时，才回到 absolute `(10,12)`、`high-inside`；暂停结束后恢复。不能写成 V9/V10 已解决。
+- **V11 仍开放**：页面列自身滚动时，`absolute` 背板随内容滚动，底部一段（fixture `scrollTop=300` 后 bottom strip）失去模糊（delta 1）；暂停机制不解决该问题。
+- **V13 仍开放**：页面模糊使用页面根 `::before`；宿主/第三方页面若占用该伪元素仍有覆盖风险，需现场复核。
+- **V14 开放**：页面模糊关闭时，30% alpha 只能把高对比后景文字从 21:1 降到约 10.68:1，不能消除后方文字透出；页面模糊开启也不宣称完全解决。
+- **V15 已闭合**：默认页面模糊开启时 blur 标记与 `::before` 一致；关闭/0% 后标记和变量移除，`getBlur().page=0`。
+- **V16 低-中，开放**：暂停选择器覆盖任意可见的页内 listbox/dialog 等，常驻页内控件可能让页面模糊一直暂停；需真实 DSH/第三方页面现场复核。
+- **面板 60% 取舍**：默认从 100% 降到 60%，会更明显地透出后景；设置页/添加插件弹窗在 35% 下已偏透，60% 是新的基线。用户可自行调高；已有 35 等保存值不会被强制迁移。
+- **性能**：页面模糊默认开启，整列 `::before` 背板有每帧模糊开销；视频背景需现场测量。面板 filter 面积小。
+- **对比度**：30% 页面底色不是「任意壁纸都 ≥ 4.5:1」的保证；插件页仍保留随主题取色的文字光晕和一级次级文字色提升，浅/深主题各有适用壁纸范围。
+
+验证范围：t4（t6 修复后）/t7/t9/t11/t15/t19/t23 的浏览器材质用例在真实 Chromium/Edge fixture 上均为 **15/15 pass、0 skip**，全量 harness **150/150 pass、0 skip**，`readability.test.mjs` **21/21**、`console.test.mjs` **49/49**。这些是 fixture/真实浏览器联动结果，**不是真实 DSH 现场验收**。本机真实 DSH 当前运行上一版候选，未验证本轮 tooltip/暂停/面板 60/页面模糊默认开启/方向移除的现场效果；需要重新安装/重启候选后现场确认，不能宣称本轮现场通过。完整命令、结果、跳过项与风险见[验证记录](verification/2026-11-10-dsh-layered-material.md) §21（t23 方向移除/越上层越实复验）与 §24（t26 文档一致性修复/最终状态）；§19 为 t19 现场修复复验，§20 为 t20 历史记录，§22/§23 为 t24 文档同步与 t25 提交前审计。
 
 ## 官方 Desktop 安装
 
