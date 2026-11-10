@@ -21,10 +21,11 @@ const galleryCss = atmosphere.match(css)[1];
 
 // ADR 0011's acceptance matrix, expressed as the fixture's expected values.
 const PAGE_ALPHA = 0.3;
-const NESTED_PAGE_ALPHA = 0.38;
+const PANEL_ALPHA = 0.6;
+const NESTED_PANEL_ALPHA = 0.68;
+const PAGE_BLUR = "blur(2.4px)";
 const PANEL_BLUR = "blur(3.69px)";
 const PANEL_BLUR_NO_PAGE = "blur(2px)";
-const NESTED_DOWN = { page: 0.22, panel: 0.92 };
 
 // #92's honesty bars: each tone is valid only while the local background stays
 // in its range. The page plate (30%) now sits between the text and the
@@ -45,7 +46,7 @@ const OUT_OF_RANGE_CASES = [
 async function open(t, {
   html = pageModeHtml,
   pageStrength = 30,
-  panelStrength = 100,
+  panelStrength = 60,
   material = {},
   tone = "dark",
   inject = true,
@@ -136,32 +137,6 @@ const backplate = (page, selector = "#global-panel") => page.locator(selector).f
   };
 });
 
-/** Max per-channel difference between two screenshots (compositing noise safe). */
-async function clipDiff(page, first, second) {
-  return page.evaluate(async ({ first, second }) => {
-    const draw = async (base64) => {
-      const image = new Image();
-      image.src = `data:image/png;base64,${base64}`;
-      await image.decode();
-      const canvas = document.createElement("canvas");
-      canvas.width = image.width;
-      canvas.height = image.height;
-      const context = canvas.getContext("2d");
-      context.drawImage(image, 0, 0);
-      return context.getImageData(0, 0, canvas.width, canvas.height).data;
-    };
-    const [left, right] = await Promise.all([draw(first), draw(second)]);
-    let max = 0;
-    for (let index = 0; index < left.length; index += 4) {
-      max = Math.max(max,
-        Math.abs(left[index] - right[index]),
-        Math.abs(left[index + 1] - right[index + 1]),
-        Math.abs(left[index + 2] - right[index + 2]));
-    }
-    return max;
-  }, { first: first.toString("base64"), second: second.toString("base64") });
-}
-
 function hexToRgb(hex) {
   const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex).trim());
   if (!match) return null;
@@ -236,7 +211,7 @@ const tiers = (page) => page.evaluate(() => {
   };
 });
 
-browserTest("page mode: page 30% alpha-only, independent panel 100% / 3.69px, nested layers alpha only", async (t) => {
+browserTest("page mode: page 30% + blur on, panels 60% + 3.69px", async (t) => {
   const page = await open(t);
 
   const root = await surface(page, "#global-panel");
@@ -245,24 +220,29 @@ browserTest("page mode: page 30% alpha-only, independent panel 100% / 3.69px, ne
   assert.equal(root.attributes["data-bc-material-level"], "1");
   assert.equal(root.attributes["data-bc-material-depth"], "1");
   assert.ok(Math.abs(root.alpha - Math.round(PAGE_ALPHA * 255)) <= 2, `page plate alpha: ${root.background}`);
-  assert.equal(root.backdrop, "none", "the page channel is alpha-only");
+  assert.equal(root.backdrop, "none", "the page root itself never owns the filter");
   assert.equal(root.inlineMaterialAlpha, "0.3");
-  assert.equal(root.inlineMaterialBlur, "", "page blur is opt-in and off by default");
-  assert.equal(root.attributes["data-bc-material-blur"], null);
+  assert.equal(root.inlineMaterialBlur, "2.4px", "the page backplate is on by default");
+  assert.equal(root.attributes["data-bc-material-blur"], "on");
   const pageBackplate = await backplate(page);
-  assert.equal(pageBackplate.content, "none", "the page channel has no backplate");
+  assert.equal(pageBackplate.content, '""', "the page blur lives on ::before");
+  assert.equal(pageBackplate.position, "absolute");
+  assert.equal(pageBackplate.zIndex, "-1");
+  assert.equal(pageBackplate.pointerEvents, "none");
+  assert.equal(pageBackplate.backdrop, PAGE_BLUR);
   assert.equal(pageBackplate.rootBackdrop, "none");
-  assert.equal(pageBackplate.rootPosition, "static");
-  assert.equal(pageBackplate.rootIsolation, "auto");
+  assert.equal(pageBackplate.rootPosition, "relative");
+  assert.equal(pageBackplate.rootIsolation, "isolate");
 
   const dialog = await surface(page, "#portal-dialog");
   assert.equal(dialog.attributes["data-bc-material-root"], "panel");
   assert.equal(dialog.attributes["data-bc-material-level"], "2");
   assert.equal(dialog.attributes["data-bc-material-depth"], "1");
   assert.equal(dialog.attributes["data-bc-material-blur"], "on");
-  assert.equal(dialog.alpha, 255, "a panel root is opaque by default");
+  assert.ok(Math.abs(dialog.alpha - Math.round(PANEL_ALPHA * 255)) <= 1,
+    `a panel root uses the 60% default: ${dialog.background}`);
   assert.equal(dialog.backdrop, PANEL_BLUR);
-  assert.equal(dialog.inlineMaterialAlpha, "1");
+  assert.equal(dialog.inlineMaterialAlpha, "0.6");
 
   const dialogList = await surface(page, "#dialog-listbox");
   assert.equal(dialogList.attributes["data-bc-material-root"], null);
@@ -275,15 +255,9 @@ browserTest("page mode: page 30% alpha-only, independent panel 100% / 3.69px, ne
   // nested layer must not declare the variable itself or carry the flag.
   assert.equal(dialogList.inlineMaterialBlur, "", "a nested layer must not set its own blur radius");
   assert.equal(dialogList.attributes["data-bc-material-blur"], null);
-  assert.equal(dialogList.alpha, 255, "panel alpha clamps at 100%");
-
-  const pageNested = await surface(page, "#page-nested-panel");
-  assert.equal(pageNested.attributes["data-bc-material-layer"], "");
-  assert.equal(pageNested.attributes["data-bc-material-depth"], "2");
-  assert.equal(pageNested.backdrop, "none");
-  assert.ok(Math.abs(pageNested.alpha - Math.round(NESTED_PAGE_ALPHA * 255)) <= 2,
-    `page nested alpha: ${pageNested.background}`);
-  assert.equal(pageNested.inlineMaterialAlpha, "0.38");
+  assert.ok(Math.abs(dialogList.alpha - Math.round(NESTED_PANEL_ALPHA * 255)) <= 1,
+    `nested panel uses 60% + one 8% step: ${dialogList.background}`);
+  assert.equal(dialogList.inlineMaterialAlpha, "0.68");
 
   assert.equal((await surface(page, "#sidebar")).attributes["data-bc-material-root"], null,
     "the sidebar never gets the page plate");
@@ -292,9 +266,13 @@ browserTest("page mode: page 30% alpha-only, independent panel 100% / 3.69px, ne
   for (const selector of ["#composer", "#question-card", "#plan-card", "#approval-card"]) {
     const panel = await surface(page, selector);
     assert.equal(panel.attributes["data-bc-material-root"], "panel", selector);
-    assert.equal(panel.alpha, 255, selector);
+    assert.ok(Math.abs(panel.alpha - Math.round(PANEL_ALPHA * 255)) <= 1, selector);
     assert.equal(panel.backdrop, PANEL_BLUR, selector);
   }
+  assert.deepEqual(await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getBlur()),
+    { page: 2.4, panel: 3.69 });
+  assert.equal(await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getPageBlur()), true);
+  assert.equal(await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.get()), 60);
 });
 
 browserTest("conversation mode: no page material; composer and pending cards get 2px", async (t) => {
@@ -305,7 +283,7 @@ browserTest("conversation mode: no page material; composer and pending cards get
   for (const selector of ["#composer", "#question-card", "#plan-card", "#approval-card", "#settings-dialog"]) {
     const panel = await surface(page, selector);
     assert.equal(panel.attributes["data-bc-material-root"], "panel", selector);
-    assert.equal(panel.alpha, 255, selector);
+    assert.ok(Math.abs(panel.alpha - Math.round(PANEL_ALPHA * 255)) <= 1, selector);
     assert.equal(panel.backdrop, PANEL_BLUR_NO_PAGE, `${selector} uses I = 0`);
     assert.equal(panel.inlineMaterialBlur, "2px", selector);
   }
@@ -336,7 +314,8 @@ browserTest("panel 0% keeps the 30% page plate and the plugin aids but returns r
   const root = await surface(page, "#global-panel");
   assert.equal(root.attributes["data-bc-material-root"], "page");
   assert.equal(root.backdrop, "none");
-  assert.equal((await backplate(page)).content, "none", "the alpha-only page channel has no backplate");
+  assert.equal((await backplate(page)).content, '""', "the page backplate is independent of the panel channel");
+  assert.equal((await backplate(page)).backdrop, PAGE_BLUR);
   assert.ok(Math.abs(root.alpha - Math.round(PAGE_ALPHA * 255)) <= 2);
 
   const dialog = await surface(page, "#portal-dialog");
@@ -357,20 +336,39 @@ browserTest("panel 0% keeps the 30% page plate and the plugin aids but returns r
 
 browserTest("advanced settings drive depth alpha and the sqrt blur stack", async (t) => {
   const page = await open(t);
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setMaterial({ direction: "down" }));
-  const pageNested = await surface(page, "#page-nested-panel");
-  assert.ok(Math.abs(pageNested.alpha - Math.round(NESTED_DOWN.page * 255)) <= 2, `down page nested: ${pageNested.background}`);
   const dialogList = await surface(page, "#dialog-listbox");
-  assert.ok(Math.abs(dialogList.alpha - Math.round(NESTED_DOWN.panel * 255)) <= 2, `down panel nested: ${dialogList.background}`);
+  assert.ok(Math.abs(dialogList.alpha - Math.round(NESTED_PANEL_ALPHA * 255)) <= 1,
+    `nested panel uses the fixed upward ramp: ${dialogList.background}`);
   assert.equal(dialogList.backdrop, "none");
 
+  // Deeper levels are strictly more opaque: 60% root -> 68% -> 76%.
   await page.evaluate(() => {
-    globalThis.BeauticodeReadableSurfaces.setMaterial({ direction: "up", alphaStep: 0, blurStep: 2, maxBlur: 8 });
+    document.querySelector("#dialog-listbox").insertAdjacentHTML("beforeend", '<div role="listbox" id="dialog-deep"></div>');
+    globalThis.BeauticodeReadableSurfaces.refresh();
+  });
+  const deep = await surface(page, "#dialog-deep");
+  assert.ok(deep.alpha > dialogList.alpha,
+    `depth alpha must increase with depth: ${dialogList.alpha} -> ${deep.alpha}`);
+  assert.equal(deep.inlineMaterialAlpha, "0.76");
+
+  // The retired direction input is ignored: no key in the snapshot, no ramp flip.
+  const snapshot = await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setMaterial({ direction: "down" }));
+  assert.deepEqual(snapshot, { alphaStep: 8, blurStep: 2, maxBlur: 8 });
+  assert.equal((await surface(page, "#dialog-listbox")).inlineMaterialAlpha, "0.68");
+  assert.equal((await surface(page, "#dialog-deep")).inlineMaterialAlpha, "0.76");
+
+  // An old beauticode-material-direction storage value is ignored on load.
+  const legacy = await open(t, { material: { "beauticode-material-direction": "down" } });
+  assert.equal((await surface(legacy, "#dialog-listbox")).inlineMaterialAlpha, "0.68",
+    "the retired storage key does not flip the ramp");
+
+  await page.evaluate(() => {
+    globalThis.BeauticodeReadableSurfaces.setMaterial({ alphaStep: 0, blurStep: 2, maxBlur: 8 });
     globalThis.BeauticodeReadableSurfaces.setPage(100);
   });
   const fullPage = await surface(page, "#global-panel");
   assert.equal(fullPage.backdrop, "none", "the page root never owns the filter");
-  assert.equal((await backplate(page)).content, "none", "the page channel has no backplate");
+  assert.equal((await backplate(page)).backdrop, "blur(8px)", "page 100% reaches maxBlur on the backplate");
   const noPanelBlur = await surface(page, "#portal-dialog");
   assert.equal(noPanelBlur.backdrop, "none", "I = M leaves nothing for the panel filter");
   assert.equal(noPanelBlur.attributes["data-bc-material-root"], "panel");
@@ -389,7 +387,7 @@ browserTest("advanced settings drive depth alpha and the sqrt blur stack", async
     globalThis.BeauticodeReadableSurfaces.setMaterial({ blurStep: 0 });
   });
   assert.equal((await surface(page, "#global-panel")).backdrop, "none");
-  assert.equal((await backplate(page)).content, "none");
+  assert.equal((await backplate(page)).backdrop, PAGE_BLUR, "the page backplate does not depend on blurStep");
   assert.equal((await surface(page, "#portal-dialog")).backdrop, "none", "blurStep 0 leaves no panel blur");
 });
 
@@ -435,7 +433,8 @@ browserTest("plugin page keeps the wallpaper and the text halo across themes, ph
       const pageRoot = await surface(page, "#global-panel");
       assert.equal(pageRoot.attributes["data-bc-material-root"], "page");
       assert.equal(pageRoot.backdrop, "none");
-      assert.equal((await backplate(page)).content, "none", "the page channel is alpha-only");
+      assert.equal((await backplate(page)).content, '""', "the page backplate is on by default");
+      assert.equal((await backplate(page)).backdrop, PAGE_BLUR);
       assert.ok(pageRoot.alpha > 0 && pageRoot.alpha < 255, "the page plate stays translucent");
       assert.equal((await surface(page, "[data-plugin-panel]")).alpha, 0, "page surroundings and gaps retain wallpaper");
       const painted = await halo(page);
@@ -577,7 +576,9 @@ browserTest("transparent rows preserve geometry, card hover, keyboard focus and 
   await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPage(30));
   assert.deepEqual(await geometry(), before, "the page plate does not move the layout");
   const normal = await surface(page, "[data-plugin-package]");
-  await page.locator("[data-plugin-package]").hover();
+  // The fixed shell.overlay dialog is unrelated to this host-hover check and
+  // covers the card's centre in the fixture, so hover the clear left portion.
+  await page.locator("[data-plugin-package]").hover({ position: { x: 24, y: 40 } });
   const hover = await surface(page, "[data-plugin-package]");
   assert.notEqual(hover.background, normal.background, "host hover feedback survives");
   assert.ok(hover.alpha > 0 && hover.alpha < 255, `hover stays translucent: ${hover.background}`);
@@ -605,14 +606,21 @@ browserTest("transparent rows preserve geometry, card hover, keyboard focus and 
   assert.equal((await surface(page, "#late-dialog")).alpha, 255);
   assert.equal((await surface(page, "#late-dialog")).backdrop, "blur(3.69px)");
   assert.equal((await surface(page, "#late-dialog")).attributes["data-bc-material-blur"], "on");
-  assert.equal((await surface(page, "#late-tooltip")).alpha, 255);
+  // A tooltip is not a material layer: it keeps the host surface and has no
+  // material attributes even when mounted late.
+  const lateTooltip = await surface(page, "#late-tooltip");
+  assert.equal(lateTooltip.attributes["data-bc-material-root"], null);
+  assert.equal(lateTooltip.attributes["data-bc-material-layer"], null);
+  assert.equal(lateTooltip.backdrop, "none");
   assert.equal(await page.locator("[data-plugin-panel]>header").getAttribute("data-window-drag"), "");
 });
 
 browserTest("the panel slider paints its alpha and 0% restores the host surface", async (t) => {
   const page = await open(t);
+  assert.ok(Math.abs((await surface(page, "#composer")).alpha - Math.round(PANEL_ALPHA * 255)) <= 1,
+    "the default panel strength is 60%");
   await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(100));
-  assert.equal((await surface(page, "#composer")).alpha, 255, "the default strength keeps the plate opaque");
+  assert.equal((await surface(page, "#composer")).alpha, 255, "100% paints the opaque plate");
   await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(40));
   const mid = (await surface(page, "#composer")).alpha;
   assert.ok(Math.abs(mid - 102) <= 1, `40% paints about 40% of 255: ${mid}`);
@@ -625,235 +633,158 @@ browserTest("the panel slider paints its alpha and 0% restores the host surface"
     "the page channel is independent of the panel slider");
 });
 
-browserTest("alpha-only page channel keeps absolute, fixed and stacking baseline", async (t) => {
+browserTest("page backplate pauses for page overlays; tooltips keep host look and position", async (t) => {
   const page = await open(t);
   const pageRect = await page.locator("#global-panel").boundingBox();
 
-  // The page channel is alpha-only: 30% fill, no filter, no backplate, and no
-  // positioning/stacking context of our own (V9/V10/V11 fallback).
+  // Default: page 30% + page backplate on, no pause (the fixture column has no
+  // page-internal overlay).
   const root = await surface(page, "#global-panel");
   assert.equal(root.attributes["data-bc-material-root"], "page");
   assert.ok(Math.abs(root.alpha - Math.round(PAGE_ALPHA * 255)) <= 2,
     `the page plate keeps its 30% fill: ${root.background}`);
   assert.equal(root.backdrop, "none", "the page root must not create a containing block");
-  assert.equal(root.filter, "none");
+  assert.equal(root.attributes["data-bc-material-blur"], "on");
   const plate = await backplate(page);
-  assert.equal(plate.content, "none", "the page channel owns no backplate pseudo-element");
-  assert.equal(plate.rootBackdrop, "none");
-  assert.equal(plate.rootPosition, "static");
-  assert.equal(plate.rootIsolation, "auto");
-
-  // Panel blur is unchanged by the page fallback.
-  assert.equal((await surface(page, "#portal-dialog")).backdrop, PANEL_BLUR);
-
-  // V9: an absolute descendant must resolve against the host's containing block
-  // (#root is position:relative), not against the page column.
-  const absoluteOn = await page.evaluate(() => {
-    const node = document.createElement("div");
-    node.id = "absolute-probe";
-    node.style.cssText = "position:absolute;left:10px;top:12px;width:20px;height:20px";
-    document.querySelector("#global-panel").append(node);
-    const rect = node.getBoundingClientRect();
-    return { x: rect.x, y: rect.y };
-  });
-  assert.ok(Math.abs(absoluteOn.x - 10) <= 1 && Math.abs(absoluteOn.y - 12) <= 1,
-    `absolute probe must use #root, not the page column: ${JSON.stringify(absoluteOn)} (column x=${pageRect.x})`);
-
-  // V10: a high z-index layer inside the page column must participate in #root's
-  // stacking context. With isolation it would be trapped and lose to a z-index:1
-  // sibling outside the page.
-  const stackingOn = await page.evaluate(() => {
-    const inside = document.createElement("div");
-    inside.id = "high-inside";
-    inside.style.cssText = "position:absolute;left:300px;top:400px;width:80px;height:80px;z-index:9999;background:rgb(255,0,0)";
-    document.querySelector("#global-panel").append(inside);
-    const outside = document.createElement("div");
-    outside.id = "high-outside";
-    outside.style.cssText = "position:absolute;left:320px;top:420px;width:80px;height:80px;z-index:1;background:rgb(0,0,255)";
-    document.querySelector("#root").append(outside);
-    return document.elementFromPoint(340, 440)?.id;
-  });
-  assert.equal(stackingOn, "high-inside", "page-internal z-index:9999 is not trapped by the page root");
+  assert.equal(plate.content, '""');
+  assert.equal(plate.backdrop, PAGE_BLUR);
+  assert.equal(plate.rootPosition, "relative");
+  assert.equal(plate.rootIsolation, "isolate");
+  assert.equal(await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getPageBlur()), true);
+  assert.deepEqual(await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getBlur()),
+    { page: 2.4, panel: 3.69 });
+  assert.equal(await page.evaluate(() => document.documentElement.getAttribute("data-bc-page-blur")), "true");
 
   const portalOn = await page.locator("#portal-fixed").boundingBox();
   assert.ok(Math.abs(portalOn.x - 40) <= 1 && Math.abs(portalOn.y - 40) <= 1,
     `a body-portal fixed dropdown keeps viewport coordinates: ${JSON.stringify(portalOn)}`);
   const innerOn = await page.locator("#page-fixed").boundingBox();
   assert.ok(Math.abs(innerOn.x - 60) <= 1 && Math.abs(innerOn.y - 60) <= 1,
-    `in-page fixed popover must stay viewport-relative: ${JSON.stringify(innerOn)}`);
+    `in-page fixed popover stays viewport-relative: ${JSON.stringify(innerOn)}`);
 
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPage(0));
-  const pageOff = await page.locator("#global-panel").boundingBox();
-  assert.ok(Math.abs(pageOff.x - pageRect.x) <= 1 && Math.abs(pageOff.y - pageRect.y) <= 1
-    && Math.abs(pageOff.width - pageRect.width) <= 1 && Math.abs(pageOff.height - pageRect.height) <= 1,
-  "the page fill must not change the page column's own layout");
-  const absoluteOff = await page.locator("#absolute-probe").boundingBox();
-  assert.ok(Math.abs(absoluteOff.x - absoluteOn.x) <= 1 && Math.abs(absoluteOff.y - absoluteOn.y) <= 1,
-    `absolute coordinates must be identical with page material on and off: ${JSON.stringify({ absoluteOn, absoluteOff })}`);
-  const stackingOff = await page.evaluate(() => document.elementFromPoint(340, 440)?.id);
-  assert.equal(stackingOff, stackingOn, "stacking must be identical with page material on and off");
-  const portalOff = await page.locator("#portal-fixed").boundingBox();
-  assert.ok(Math.abs(portalOff.x - portalOn.x) <= 1 && Math.abs(portalOff.y - portalOn.y) <= 1,
-    "toggling page material never moves a portal dropdown");
-  const innerOff = await page.locator("#page-fixed").boundingBox();
-  assert.ok(Math.abs(innerOff.x - innerOn.x) <= 1 && Math.abs(innerOff.y - innerOn.y) <= 1,
-    `fixed coordinates must be identical with page material on and off: ${JSON.stringify({ innerOn, innerOff })}`);
-  const plateOff = await backplate(page);
-  assert.equal(plateOff.content, "none", "page 0% has no backplate either");
-  assert.equal(plateOff.rootPosition, "static");
-  assert.equal(plateOff.rootIsolation, "auto");
+  // A page-internal menu + tooltip: the menu becomes a 60% alpha-only panel,
+  // the tooltip keeps the host tooltip token, and the page backplate pauses.
+  await page.evaluate(() => {
+    document.querySelector("#global-panel").insertAdjacentHTML("beforeend", `
+      <div role="menu" id="page-menu" style="position:absolute;left:200px;top:200px;width:240px;height:120px">
+        <div role="tooltip" id="menu-tooltip" style="position:fixed;left:40px;top:40px;padding:8px;background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-label-primary)">Hint</div>
+      </div>`);
+    document.body.insertAdjacentHTML("beforeend", `
+      <div role="tooltip" id="host-tooltip" style="position:fixed;left:40px;top:40px;padding:8px;background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-label-primary)">Hint</div>`);
+  });
+  await page.waitForFunction(() => document.querySelector("#global-panel")?.hasAttribute("data-bc-page-blur-paused"));
 
-  // V11: there is no backplate to scroll away. The page column is a scroll
-  // container in this fixture; after scrolling, the fill still covers the
-  // scrollport and neither a filter nor a pseudo-element appears.
-  const scroll = await page.locator("#global-panel").evaluate((el) => {
-    const style = getComputedStyle(el);
+  const pausedPlate = await backplate(page);
+  assert.equal(pausedPlate.content, "none", "a page overlay removes the backplate pseudo-element");
+  assert.equal(pausedPlate.rootPosition, "static", "a page overlay removes position:relative");
+  assert.equal(pausedPlate.rootIsolation, "auto", "a page overlay removes isolation");
+  assert.equal((await surface(page, "#global-panel")).backdrop, "none");
+  assert.ok(Math.abs((await surface(page, "#global-panel")).alpha - Math.round(PAGE_ALPHA * 255)) <= 2,
+    "the paused page keeps its 30% fill");
+  assert.equal((await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getBlur())).page, 0,
+    "paused page blur is not applied");
+
+  const pageMenu = await surface(page, "#page-menu");
+  assert.equal(pageMenu.attributes["data-bc-material-root"], "panel");
+  assert.equal(pageMenu.backdrop, "none", "page-internal panels are alpha-only");
+  assert.equal(pageMenu.attributes["data-bc-material-blur"], null);
+  assert.ok(Math.abs(pageMenu.alpha - Math.round(PANEL_ALPHA * 255)) <= 1,
+    `page-internal menu uses panel 60%, not page alpha: ${pageMenu.background}`);
+
+  const tooltipLook = await page.evaluate(() => {
+    const read = (selector) => {
+      const element = document.querySelector(selector);
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        background: style.backgroundColor,
+        color: style.color,
+        rect: { x: rect.x, y: rect.y },
+        material: element.getAttribute("data-bc-material-root"),
+        layer: element.getAttribute("data-bc-material-layer"),
+        backdrop: style.backdropFilter || style.webkitBackdropFilter || "none",
+      };
+    };
+    const bodyToken = getComputedStyle(document.body).getPropertyValue("--dsw-alias-tooltip-bg").trim();
+    const menuToken = getComputedStyle(document.querySelector("#page-menu")).getPropertyValue("--dsw-alias-tooltip-bg").trim();
+    return { menu: read("#menu-tooltip"), host: read("#host-tooltip"), bodyToken, menuToken };
+  });
+  assert.equal(tooltipLook.menu.material, null, "tooltip is not a material root");
+  assert.equal(tooltipLook.menu.layer, null, "tooltip is not a nested material layer");
+  assert.equal(tooltipLook.menu.backdrop, "none");
+  assert.equal(tooltipLook.menu.background, tooltipLook.host.background,
+    "tooltip keeps the host tooltip background inside a page-internal menu");
+  assert.equal(tooltipLook.menu.color, tooltipLook.host.color, "tooltip keeps the host tooltip text colour");
+  assert.ok(Math.abs(tooltipLook.menu.rect.x - 40) <= 1 && Math.abs(tooltipLook.menu.rect.y - 40) <= 1,
+    `tooltip keeps host fixed positioning: ${JSON.stringify(tooltipLook.menu.rect)}`);
+  assert.equal(tooltipLook.menuToken, tooltipLook.bodyToken, "--dsw-alias-tooltip-bg is never rewritten");
+
+  // Closing every page overlay resumes the backplate.
+  await page.evaluate(() => {
+    document.querySelector("#page-menu").remove();
+    document.querySelector("#host-tooltip").remove();
+  });
+  await page.waitForFunction(() => !document.querySelector("#global-panel")?.hasAttribute("data-bc-page-blur-paused"));
+  assert.equal((await backplate(page)).content, '""', "removing the overlay restores the page backplate");
+  assert.equal((await backplate(page)).rootPosition, "relative");
+  assert.equal((await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getBlur())).page, 2.4);
+
+  // Standalone page tooltip (the reported plugin-market case): host black card
+  // stays black/white, positioned at 70/70, while the page pauses.
+  await page.evaluate(() => {
+    document.querySelector("#global-panel").insertAdjacentHTML("beforeend",
+      '<div role="tooltip" id="page-tooltip" style="position:fixed;left:70px;top:70px;padding:6px;background:rgb(0,0,0);color:rgb(255,255,255)">Hint</div>');
+  });
+  await page.waitForFunction(() => document.querySelector("#global-panel")?.hasAttribute("data-bc-page-blur-paused"));
+  const tooltip = await page.evaluate(() => {
+    const element = document.querySelector("#page-tooltip");
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
     return {
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      overflowY: style.overflowY,
-      scrollable: el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(style.overflowY),
+      background: style.backgroundColor,
+      color: style.color,
+      rect: { x: rect.x, y: rect.y },
+      material: element.getAttribute("data-bc-material-root"),
+      layer: element.getAttribute("data-bc-material-layer"),
     };
   });
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPage(30));
-  const scrollTop = await page.locator("#global-panel").evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
-    return el.scrollTop;
-  });
-  const scrolled = await surface(page, "#global-panel");
-  assert.equal(scrolled.backdrop, "none");
-  assert.ok(Math.abs(scrolled.alpha - Math.round(PAGE_ALPHA * 255)) <= 2,
-    "the fill still covers the scrollport after scrolling");
-  const plateScrolled = await backplate(page);
-  assert.equal(plateScrolled.content, "none", "no backplate exists to scroll away");
-  assert.equal(await page.locator("[data-bc-material-backplate]").count(), 0);
-  // The fill must still cover the bottom of the scrollport after scrolling:
-  // toggling page material changes the bottom strip's pixels.
-  const bottomClip = {
-    x: Math.round(pageRect.x + 180),
-    y: Math.round(pageRect.y + 760),
-    width: 160,
-    height: 30,
-  };
-  const filledBottom = await page.screenshot({ clip: bottomClip });
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPage(0));
-  const unfilledBottom = await page.screenshot({ clip: bottomClip });
-  assert.notDeepEqual(filledBottom, unfilledBottom,
-    "the page fill must still cover the scrollport bottom after scrolling (V11)");
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPage(30));
-  await page.locator("#global-panel").evaluate((el) => { el.scrollTop = 0; });
+  assert.equal(tooltip.material, null);
+  assert.equal(tooltip.layer, null);
+  assert.equal(tooltip.background, "rgb(0, 0, 0)", "the host tooltip card stays black");
+  assert.equal(tooltip.color, "rgb(255, 255, 255)", "the host tooltip text stays white");
+  assert.ok(Math.abs(tooltip.rect.x - 70) <= 1 && Math.abs(tooltip.rect.y - 70) <= 1,
+    `host tooltip positioning is stable while page blur is on: ${JSON.stringify(tooltip.rect)}`);
+  assert.equal((await backplate(page)).rootPosition, "static", "the page backplate is paused for the tooltip");
 
-  // ---------------------------------------------------------------------------
-  // Experimental opt-in page blur (default off). It restores the v1 backplate
-  // *and* its known V9/V10/V11 side effects; the assertions below pin those
-  // limitations explicitly instead of presenting them as safe.
-  // ---------------------------------------------------------------------------
-  assert.equal(await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getPageBlur()), false);
+  await page.evaluate(() => { document.querySelector("#page-tooltip").remove(); });
+  await page.waitForFunction(() => !document.querySelector("#global-panel")?.hasAttribute("data-bc-page-blur-paused"));
+  assert.equal((await backplate(page)).content, '""');
+
+  // Turning the page backplate off keeps the same host tooltip/geometry and
+  // removes every page position/isolation.
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPageBlur(false));
+  const offPlate = await backplate(page);
+  assert.equal(offPlate.content, "none");
+  assert.equal(offPlate.rootPosition, "static");
+  assert.equal(offPlate.rootIsolation, "auto");
+  assert.equal(await page.evaluate(() => document.documentElement.hasAttribute("data-bc-page-blur")), false);
   assert.equal((await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getBlur())).page, 0);
   await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPageBlur(true));
-  assert.equal(await page.evaluate(() => document.documentElement.getAttribute("data-bc-page-blur")), "true");
+  assert.equal((await backplate(page)).content, '""');
 
-  const expRoot = await surface(page, "#global-panel");
-  assert.equal(expRoot.backdrop, "none", "the page root still clears the generic filter");
-  const expPlate = await backplate(page);
-  assert.equal(expPlate.content, '""');
-  assert.equal(expPlate.position, "absolute");
-  assert.equal(expPlate.zIndex, "-1");
-  assert.equal(expPlate.pointerEvents, "none");
-  assert.equal(expPlate.backdrop, "blur(2.4px)");
-  assert.equal(expPlate.rootPosition, "relative");
-  assert.equal(expPlate.rootIsolation, "isolate");
-  assert.deepEqual(await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getBlur()),
-    { page: 2.4, panel: 3.69 });
-
-  // Known limitation V9: the page root becomes an absolute containing block.
-  const absoluteExperimental = await page.locator("#absolute-probe").boundingBox();
-  assert.ok(Math.abs(absoluteExperimental.x - (pageRect.x + 10)) <= 1,
-    `experimental page blur makes the page root the absolute containing block: ${JSON.stringify(absoluteExperimental)}`);
-  // Known limitation V10: isolation traps a high z-index page layer below an
-  // outside z-index:1 sibling. Move the inside probe to viewport x=300 first.
-  await page.locator("#high-inside").evaluate((el) => { el.style.left = "60px"; el.style.top = "400px"; });
-  const stackingExperimental = await page.evaluate(() => document.elementFromPoint(340, 440)?.id);
-  assert.equal(stackingExperimental, "high-outside",
-    "experimental page blur traps page-internal z-index:9999 under an outside z-index:1 sibling");
-  // The backplate form does not reintroduce the original V3 fixed containing
-  // block (60 stays 60); it is the absolute/isolation/scroll side effects that
-  // are known.
-  const innerExperimental = await page.locator("#page-fixed").boundingBox();
-  assert.ok(Math.abs(innerExperimental.x - 60) <= 1 && Math.abs(innerExperimental.y - 60) <= 1,
-    `fixed stays viewport-relative even with the experimental backplate: ${JSON.stringify(innerExperimental)}`);
-
-  // The backplate really blurs (wallpaper strip clear of every overlay).
-  await page.locator("#wallpaper").evaluate((el) => {
-    el.style.background = "repeating-conic-gradient(#000 0% 25%, #fff 0% 50%) 0 0 / 8px 8px";
-  });
-  const blurClip = {
-    x: Math.round(pageRect.x + 180),
-    y: Math.round(pageRect.y + 560),
-    width: 160,
-    height: 80,
-  };
-  const experimentalBlurred = await page.screenshot({ clip: blurClip });
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setMaterial({ maxBlur: 0 }));
-  const experimentalSharp = await page.screenshot({ clip: blurClip });
-  const experimentalDelta = await clipDiff(page, experimentalBlurred, experimentalSharp);
-  assert.ok(experimentalDelta > 8,
-    `the opt-in backplate must blur the wallpaper (max channel delta ${experimentalDelta})`);
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setMaterial({ maxBlur: 8 }));
-
-  // Known limitation V11: the absolute backplate scrolls with a scrollable page
-  // column, so its bottom rows lose the blur. Record (and pin) the limitation.
-  const experimentalScrollTop = await page.locator("#global-panel").evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
-    return el.scrollTop;
-  });
-  const scrollStrip = {
-    x: Math.round(pageRect.x + 180),
-    y: Math.round(pageRect.y + 768),
-    width: 160,
-    height: 20,
-  };
-  const scrollBlurred = await page.screenshot({ clip: scrollStrip });
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setMaterial({ maxBlur: 0 }));
-  const scrollSharp = await page.screenshot({ clip: scrollStrip });
-  const scrollDelta = await clipDiff(page, scrollBlurred, scrollSharp);
-  assert.ok(scrollDelta <= 2,
-    `known experimental scroll limitation: the bottom strip loses the backplate blur (delta ${scrollDelta})`);
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setMaterial({ maxBlur: 8 }));
-  await page.locator("#global-panel").evaluate((el) => { el.scrollTop = 0; });
-
-  // Turning the experiment off restores the safe alpha-only shape exactly.
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPageBlur(false));
-  const safePlate = await backplate(page);
-  assert.equal(safePlate.content, "none");
-  assert.equal(safePlate.rootPosition, "static");
-  assert.equal(safePlate.rootIsolation, "auto");
-  assert.equal(expRoot.backdrop, "none");
-  assert.equal((await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getBlur())).page, 0);
-  assert.equal(await page.evaluate(() => document.documentElement.hasAttribute("data-bc-page-blur")), false);
-  const absoluteRestored = await page.locator("#absolute-probe").boundingBox();
-  assert.ok(Math.abs(absoluteRestored.x - (pageRect.x + 10)) > 100,
-    `safe mode restores the host containing block: ${JSON.stringify(absoluteRestored)}`);
-  assert.ok(Math.abs(absoluteRestored.x - 10) <= 1);
-  await page.locator("#high-inside").evaluate((el) => { el.style.left = "300px"; el.style.top = "400px"; });
-  assert.equal(await page.evaluate(() => document.elementFromPoint(340, 440)?.id), "high-inside",
-    "safe mode restores the host stacking");
-  const innerRestored = await page.locator("#page-fixed").boundingBox();
-  assert.ok(Math.abs(innerRestored.x - 60) <= 1 && Math.abs(innerRestored.y - 60) <= 1);
-
-  // Page 0% removes the opt-in flag/backplate while keeping the stored option.
-  await page.evaluate(() => {
-    globalThis.BeauticodeReadableSurfaces.setPageBlur(true);
-    globalThis.BeauticodeReadableSurfaces.setPage(0);
-  });
-  assert.equal(await page.evaluate(() => document.documentElement.hasAttribute("data-bc-page-blur")), false);
+  // Page 0% and maxBlur 0 both remove the backplate without leaving position or
+  // isolation behind; the stored page-blur preference is unchanged.
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPage(0));
   assert.equal(await page.locator("[data-bc-material-root='page']").count(), 0);
-  assert.equal(await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getPageBlur()), true);
-  await page.evaluate(() => {
-    globalThis.BeauticodeReadableSurfaces.setPage(30);
-    globalThis.BeauticodeReadableSurfaces.setPageBlur(false);
-  });
+  assert.equal(await page.evaluate(() => document.documentElement.hasAttribute("data-bc-page-blur")), false);
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setPage(30));
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setMaterial({ maxBlur: 0 }));
+  assert.equal((await backplate(page)).content, "none", "maxBlur 0 leaves no page backplate");
+  assert.equal((await backplate(page)).rootPosition, "static");
+  assert.equal((await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.getBlur())).page, 0);
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.setMaterial({ maxBlur: 8 }));
+  assert.equal((await backplate(page)).content, '""');
 
-  t.diagnostic(`alpha-only page: column x=${pageRect.x}, absolute=${JSON.stringify(absoluteOn)}, fixed=${JSON.stringify(innerOn)}, portal=${JSON.stringify(portalOn)}, stacking=${stackingOn}, scroll=${JSON.stringify(scroll)}, scrollTop=${scrollTop}`);
-  t.diagnostic(`experimental page blur: absolute=${JSON.stringify(absoluteExperimental)}, stacking=${stackingExperimental}, fixed=${JSON.stringify(innerExperimental)}, blurDelta=${experimentalDelta}, scrollTop=${experimentalScrollTop}, bottomDelta=${scrollDelta}`);
+  t.diagnostic(`page blur default on: column x=${pageRect.x}, root alpha=${root.alpha}, fixed=${JSON.stringify(innerOn)}, portal=${JSON.stringify(portalOn)}`);
+  t.diagnostic(`paused page: menu alpha=${pageMenu.alpha}, tooltip=${JSON.stringify(tooltipLook.menu)}, standalone=${JSON.stringify(tooltip)}`);
 });

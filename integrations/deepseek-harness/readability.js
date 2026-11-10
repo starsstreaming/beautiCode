@@ -24,16 +24,16 @@
     alphaStep: "beauticode-material-alpha-step",
     blurStep: "beauticode-material-blur-step",
     maxBlur: "beauticode-material-max-blur",
-    direction: "beauticode-material-direction",
   });
   const DEFAULTS = Object.freeze({
     page: 30,
-    pageBlur: false,
-    panel: 100,
+    // The page backplate is the default now (t17); only the literal "false"
+    // opts out. Pausing while a page-internal overlay is visible is separate.
+    pageBlur: true,
+    panel: 60,
     alphaStep: 8,
     blurStep: 2,
     maxBlur: 8,
-    direction: "up",
   });
   const KNOWN_KEYS = new Set(Object.values(STORAGE_KEYS));
 
@@ -48,18 +48,34 @@
   // of the three pending-interaction panels. Build-generated class hashes are
   // never used. `[data-question-key] > section` paints the inner card, not the
   // transparent frame that owns the side padding.
+  //
+  // role="tooltip" is deliberately absent: it keeps the host's own tooltip
+  // token, background, colour and positioning. Treating it as a page nested
+  // layer painted a 38% light plate and rewrote --dsw-alias-tooltip-bg, which
+  // produced white-on-white tooltips in the plugin market page.
   const CANDIDATE_SELECTORS = Object.freeze([
     '[role="dialog"]',
     '[role="alertdialog"]',
     '[role="menu"]',
     '[role="listbox"]',
-    '[role="tooltip"]',
     "[data-composer-card]",
     "[data-question-key] > section",
     "[data-plan-review-key] > section",
     "[data-approval-key] > div",
   ]);
   const CANDIDATE_SELECTOR = CANDIDATE_SELECTORS.join(",");
+  // Page-internal overlays that must pause the page backplate. Tooltips are
+  // included here even though they are not material layers: their absolute
+  // positioning and stacking must not be affected by the page root's
+  // position:relative/isolation.
+  const PAGE_OVERLAY_SELECTOR = [
+    '[role="tooltip"]',
+    '[role="menu"]',
+    '[role="listbox"]',
+    '[role="dialog"]',
+    '[role="alertdialog"]',
+  ].join(",");
+  const PAGE_BLUR_PAUSED_ATTR = "data-bc-page-blur-paused";
 
   const root = document.documentElement;
 
@@ -80,7 +96,8 @@
   }
 
   // Older builds stored a boolean. "false" must keep meaning "off"; "true" and
-  // missing/corrupt storage keep full protection. Numeric strings are clamped.
+  // missing/corrupt storage fall back to the new 60% default. Existing numeric
+  // values (for example 35) are preserved, not migrated.
   function readPanelStrength() {
     try {
       const raw = globalThis.localStorage?.getItem(STORAGE_KEYS.panel);
@@ -92,34 +109,25 @@
     }
   }
 
-  function readDirection() {
+  // Page blur is on by default. Missing and invalid values read as true; only
+  // the literal "false" opts out.
+  function readPageBlur() {
     try {
-      return globalThis.localStorage?.getItem(STORAGE_KEYS.direction) === "down"
-        ? "down"
-        : DEFAULTS.direction;
+      const raw = globalThis.localStorage?.getItem(STORAGE_KEYS.pageBlur);
+      if (raw === "false") return false;
+      return true;
     } catch {
-      return DEFAULTS.direction;
-    }
-  }
-
-  // Experimental page blur is opt-in and defaults off. Any storage value other
-  // than the literal "true" (missing, "false", "1", corrupt) reads as false.
-  function readBoolean(key) {
-    try {
-      return globalThis.localStorage?.getItem(key) === "true";
-    } catch {
-      return false;
+      return true;
     }
   }
 
   const state = {
     page: readNumber(STORAGE_KEYS.page, 0, 100, DEFAULTS.page),
-    pageBlur: readBoolean(STORAGE_KEYS.pageBlur),
+    pageBlur: readPageBlur(),
     panel: readPanelStrength(),
     alphaStep: readNumber(STORAGE_KEYS.alphaStep, 0, 30, DEFAULTS.alphaStep),
     blurStep: readNumber(STORAGE_KEYS.blurStep, 0, 8, DEFAULTS.blurStep),
     maxBlur: readNumber(STORAGE_KEYS.maxBlur, 0, 16, DEFAULTS.maxBlur),
-    direction: readDirection(),
   };
 
   function writeValue(key, value) {
@@ -146,14 +154,14 @@
 
   // ---------------------------------------------------------------------------
   // Stylesheet. Shape is frozen by ADR 0011 §3.2: the page root only paints a
-  // base fill (it must NOT rewrite the eight surface tokens, or every card on
-  // the page would paint its own 30% plate); panel roots and nested layers
-  // rewrite the tokens so the whole overlay shares one material. Only a panel
-  // root with [data-bc-material-blur="on"] gets a backdrop-filter: the page
-  // channel is alpha-only after the V9/V10/V11 fallback (see the note on the
-  // page rule). Nested layers never get one: the outermost filter is the only
-  // one the compositor honors, and a nested filter would smuggle blur past
-  // maxBlur:0 / 0% (fixture A).
+  // base fill (it must NOT rewrite the surface tokens, or every card on the
+  // page would paint its own 30% plate); panel roots and nested layers rewrite
+  // the tokens so the whole overlay shares one material. No material root gets
+  // a backdrop-filter on itself: the page blur lives on a same-root ::before
+  // backplate and only while no page-internal overlay is visible, panels keep
+  // their own filter, and nested layers never get one (the outermost filter is
+  // the only one the compositor honors; a nested filter would also smuggle blur
+  // past maxBlur:0 / 0% - fixture A).
   // ---------------------------------------------------------------------------
   const style = document.createElement("style");
   style.dataset.beauticodeReadability = "true";
@@ -170,7 +178,7 @@ html[data-bc-active="true"][data-bc-resolved-tone="light"] body{
    inline with the computed value (page strength, panel strength, or the nested
    step). */
 html[data-bc-active="true"] [data-bc-material-root="page"]{--bc-material-alpha:.3;}
-html[data-bc-active="true"] [data-bc-material-root="panel"]{--bc-material-alpha:1;}
+html[data-bc-active="true"] [data-bc-material-root="panel"]{--bc-material-alpha:.6;}
 
 /* Page root and nested layers both paint a material fill. A nested layer inside
    a page root is page-channel material, so it must not get its own
@@ -181,9 +189,11 @@ html[data-bc-active="true"] [data-bc-material-layer]{
   background-color:var(--bc-material-fill);
 }
 
-/* Panel roots and nested layers repaint the eight surface tokens so menus,
+/* Panel roots and nested layers repaint the seven surface tokens so menus,
    lists and inputs inside the overlay share the same material instead of
-   letting the transcript read through. */
+   letting the transcript read through. --dsw-alias-tooltip-bg is deliberately
+   NOT rewritten: a tooltip must keep the host's tooltip token even when it is
+   nested inside a material panel. */
 html[data-bc-active="true"] [data-bc-material-root="panel"],
 html[data-bc-active="true"] [data-bc-material-layer]{
   --dsw-alias-bg-base:var(--bc-material-fill);
@@ -193,7 +203,6 @@ html[data-bc-active="true"] [data-bc-material-layer]{
   --dsw-alias-bg-overlay:var(--bc-material-fill);
   --dsw-specific-input-major:var(--bc-material-fill);
   --dsw-specific-menu:var(--bc-material-fill);
-  --dsw-alias-tooltip-bg:var(--bc-material-fill);
 }
 
 /* Exactly one backdrop-filter per independent root. Nested layers never match:
@@ -202,44 +211,35 @@ html[data-bc-active="true"] [data-bc-material-root][data-bc-material-blur="on"]{
   -webkit-backdrop-filter:blur(var(--bc-material-blur,0px));
   backdrop-filter:blur(var(--bc-material-blur,0px));
 }
-/* V9/V10/V11 fallback: the page channel is alpha-only. A backdrop-filter on the
-   page root creates a containing block for fixed descendants (V3), and every
-   way to move that filter to a same-root backplate needs something back:
-     - position:relative on the root changes the absolute containing block (V9);
-     - isolation:isolate traps page-internal high z-index layers (V10);
-     - an absolute inset:0 backplate scrolls with the column and loses the
-       bottom of the scrollport (V11);
-     - a fixed/JS-synced layer that keeps the root untouched paints below the
-       root's in-flow content (its backdrop is the wallpaper stage, not the
-       page's real backdrop) or, above it, blurs the page content itself.
-   Removing the page filter is the only option that keeps the page root's
-   containing block and stacking identical to "page material off" while the
-   backdrop stays complete. This is the default: the page keeps its 30% fill,
-   panel roots keep their own filter, and the JS blur model still derives the
-   panel radius from the page-strength scale (I). */
+/* The page root itself never owns a backdrop-filter (that would create a fixed
+   containing block, V3). It clears the generic panel filter rule; the single
+   page blur lives on ::before while the page-backplate rules below match and no
+   page-internal overlay has paused it. */
 html[data-bc-active="true"] [data-bc-material-root="page"][data-bc-material-blur="on"]{
   -webkit-backdrop-filter:none;
   backdrop-filter:none;
 }
 
-/* Experimental opt-in, default off (beauticode-page-blur=true). It restores the
-   v1 backplate and deliberately re-opens its documented side effects:
+/* The page backplate is on by default now. It re-opens the documented side
+   effects:
      - position:relative makes the page root the containing block for absolute
        descendants (V9);
      - isolation:isolate traps page-internal high z-index layers under outside
        siblings (V10);
      - the absolute inset:0 backplate scrolls with a scrollable page column and
        stops blurring its last rows (V11).
-   The option is not recommended and must never be enabled by default. Both the
-   html flag and the page root's [data-bc-material-blur] are required, so
-   disabling the option, page 0% or maxBlur 0 leaves no position/isolation and
-   no pseudo-element behind. Only the page root is affected; panel rules are
-   unchanged. */
-html[data-bc-active="true"][data-bc-page-blur="true"] [data-bc-material-root="page"][data-bc-material-blur="on"]{
+   The pause flag is the mitigation: JS adds [data-bc-page-blur-paused] to the
+   page root while a visible tooltip/menu/listbox/dialog/alertdialog exists
+   inside it. The :not() below then drops position/isolation and the pseudo
+   element while the 30% alpha fill stays. Both the html flag and the page
+   root's [data-bc-material-blur] are required, so page 0%, maxBlur 0 or a
+   paused page leave no position/isolation and no pseudo-element behind. Only
+   the page root is affected; panel rules are unchanged. */
+html[data-bc-active="true"][data-bc-page-blur="true"] [data-bc-material-root="page"][data-bc-material-blur="on"]:not([data-bc-page-blur-paused]){
   position:relative;
   isolation:isolate;
 }
-html[data-bc-active="true"][data-bc-page-blur="true"] [data-bc-material-root="page"][data-bc-material-blur="on"]::before{
+html[data-bc-active="true"][data-bc-page-blur="true"] [data-bc-material-root="page"][data-bc-material-blur="on"]:not([data-bc-page-blur-paused])::before{
   content:"";
   position:absolute;
   inset:0;
@@ -339,6 +339,7 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
     setAttribute(element, LEVEL_ATTR, null);
     setAttribute(element, DEPTH_ATTR, null);
     setAttribute(element, BLUR_ATTR, null);
+    setAttribute(element, PAGE_BLUR_PAUSED_ATTR, null);
     removeStyleVar(element, "--bc-material-alpha");
     removeStyleVar(element, "--bc-material-blur");
   }
@@ -394,15 +395,24 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
         if (isOwnUi(element)) continue;
         const owner = nearestDesiredAncestor(element, desired);
         if (!owner) {
-          desired.set(element, { kind: "panel", root: true, level: 2, depth: 1 });
+          desired.set(element, { kind: "panel", root: true, level: 2, depth: 1, pageInternal: false });
           continue;
         }
         const ownerInfo = desired.get(owner);
+        // A standard role inside the page column is a panel, not a page nested
+        // layer: it must use the panel strength (default 60%) and must never
+        // inherit page alpha. It is alpha-only (no backdrop-filter), so a menu
+        // or dialog inside a page cannot pick up another containing block.
+        if (ownerInfo.kind === "page") {
+          desired.set(element, { kind: "panel", root: true, level: 2, depth: 1, pageInternal: true });
+          continue;
+        }
         desired.set(element, {
           kind: ownerInfo.kind,
           root: false,
           level: ownerInfo.level + 1,
           depth: ownerInfo.depth + 1,
+          pageInternal: ownerInfo.pageInternal === true,
         });
       }
     }
@@ -410,12 +420,23 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
     return desired;
   }
 
+  /** True when a visible standard overlay lives inside the page column. */
+  function pageHasVisibleOverlay(pageRoot) {
+    if (typeof pageRoot.querySelectorAll !== "function") return false;
+    for (const overlay of pageRoot.querySelectorAll(PAGE_OVERLAY_SELECTOR)) {
+      if (isOwnUi(overlay)) continue;
+      if (isVisuallyCovering(overlay)) return true;
+    }
+    return false;
+  }
+
   function applyMaterial(element, info, pageBlur, panelBlur) {
     const baseAlpha = (info.kind === "page" ? state.page : state.panel) / 100;
+    // The ramp is fixed: each deeper level is more opaque (越上层越实). There
+    // is no direction preference any more; the old storage key is ignored.
     let alpha = baseAlpha;
     if (!info.root) {
-      const sign = state.direction === "down" ? -1 : 1;
-      alpha = baseAlpha + (sign * (info.depth - 1) * state.alphaStep) / 100;
+      alpha = baseAlpha + ((info.depth - 1) * state.alphaStep) / 100;
     }
     alpha = Math.min(1, Math.max(0, alpha));
 
@@ -425,10 +446,12 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
     setAttribute(element, DEPTH_ATTR, info.depth);
     setStyleVar(element, "--bc-material-alpha", formatAlpha(alpha));
 
-    // The page blur is experimental and off by default: only an opt-in page
-    // root gets the blur marker/variable (and therefore the ::before backplate).
+    // The page blur is on by default; the pause flag (not this marker) switches
+    // the CSS side effects off while a page-internal overlay is visible.
     const pageBlurActive = info.kind === "page" && state.pageBlur;
-    const blur = info.root ? (info.kind === "page" ? (pageBlurActive ? pageBlur : 0) : panelBlur) : 0;
+    const blur = info.root
+      ? (info.kind === "page" ? (pageBlurActive ? pageBlur : 0) : (info.pageInternal ? 0 : panelBlur))
+      : 0;
     if (info.root && blur > 0 && isVisuallyCovering(element)) {
       setAttribute(element, BLUR_ATTR, "on");
       setStyleVar(element, "--bc-material-blur", `${formatPx(blur)}px`);
@@ -453,17 +476,34 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
     }
     if (cleared > 0) desired = desiredLayers();
 
-    // The page-strength scale I feeds the panel's sqrt radius even while the
-    // page itself is alpha-only; getBlur().page reports only the radius that is
-    // actually applied to the page (0 unless the opt-in experiment is on).
-    const pageRooted = [...desired.values()].some((info) => info.kind === "page" && info.root);
+    // Page-internal tooltips/menus/lists/dialogs pause the page backplate: the
+    // position:relative/isolation pair would otherwise move or trap them. The
+    // pause flag lives on the page root; panel roots stay materialized.
+    const pageRoots = [];
+    for (const [element, info] of desired) {
+      if (info.kind === "page" && info.root) pageRoots.push(element);
+    }
+    const pausedRoots = new Set();
+    for (const pageRoot of pageRoots) {
+      const paused = state.pageBlur && state.page > 0 && pageHasVisibleOverlay(pageRoot);
+      setAttribute(pageRoot, PAGE_BLUR_PAUSED_ATTR, paused ? "" : null);
+      if (paused) pausedRoots.add(pageRoot);
+    }
+
+    // The page-strength scale I feeds the panel's sqrt radius independently of
+    // whether the page blur is actually painted. getBlur().page reports only
+    // the radius actually applied (0 when off, page 0% or paused).
+    const pageRooted = pageRoots.length > 0;
     const base = pageRooted ? (state.page / 100) * state.maxBlur : 0;
     const pageBlur = pageRooted ? base : 0;
     const target = Math.min(state.maxBlur, base + state.blurStep);
     // Cross-root composition is sqrt(s1^2 + s2^2) = target (fixture B), so the
     // panel's own radius is sqrt(target^2 - base^2), not target - base.
     const panelBlur = Math.max(0, Math.sqrt(Math.max(0, target * target - base * base)));
-    const appliedPageBlur = pageRooted && state.pageBlur ? pageBlur : 0;
+    const appliedPageBlur = pageRooted && state.pageBlur
+      && pageRoots.some((pageRootEl) => !pausedRoots.has(pageRootEl))
+      ? pageBlur
+      : 0;
     lastBlur = { page: Number(appliedPageBlur.toFixed(2)), panel: Number(panelBlur.toFixed(2)) };
 
     for (const [element, info] of desired) {
@@ -477,8 +517,8 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
       root.dataset.bcReadableSurfaces = state.panel > 0 ? "true" : "false";
       if (state.page > 0) root.dataset.bcPageMaterial = "true";
       else delete root.dataset.bcPageMaterial;
-      // Opt-in experimental page blur; the CSS also requires the page root's
-      // blur marker, so maxBlur 0 / page 0% never leave position/isolation.
+      // Page blur is on by default; the CSS also requires the page root's blur
+      // marker, so page 0% or maxBlur 0 never leave position/isolation behind.
       if (state.pageBlur && state.page > 0) root.dataset.bcPageBlur = "true";
       else delete root.dataset.bcPageBlur;
     }
@@ -490,7 +530,6 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
     setStyleVar(root, "--bc-material-alpha-step", String(state.alphaStep));
     setStyleVar(root, "--bc-material-blur-step", String(state.blurStep));
     setStyleVar(root, "--bc-material-max-blur", String(state.maxBlur));
-    setStyleVar(root, "--bc-material-direction", state.direction);
   }
 
   function apply(options = {}) {
@@ -567,7 +606,6 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
       alphaStep: state.alphaStep,
       blurStep: state.blurStep,
       maxBlur: state.maxBlur,
-      direction: state.direction,
     };
   }
 
@@ -605,9 +643,9 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
       return state.page;
     },
     getMaterial: materialSnapshot,
-    // Experimental page blur, default false. Enabling it restores the v1
-    // backplate and its known V9/V10/V11 side effects; it is never recommended
-    // and never on by default.
+    // Page backplate, on by default. Missing/invalid storage reads as true;
+    // only the literal "false" switches it off. Page-internal overlays pause it
+    // through [data-bc-page-blur-paused] without changing this preference.
     getPageBlur: () => state.pageBlur,
     setPageBlur(value) {
       const next = value === true || value === "true";
@@ -616,8 +654,9 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
       apply();
       return state.pageBlur;
     },
-    // Partial update: {alphaStep?, blurStep?, maxBlur?, direction?}. Invalid
-    // numbers keep the current value; an unknown direction normalizes to "up".
+    // Partial update: {alphaStep?, blurStep?, maxBlur?}. Invalid numbers keep
+    // the current value. Unknown keys (including the retired "direction" and
+    // the old "beauticode-material-direction" storage key) are ignored.
     setMaterial(patch) {
       if (!patch || typeof patch !== "object") return materialSnapshot();
       if (patch.alphaStep !== undefined) {
@@ -641,10 +680,6 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
           writeValue(STORAGE_KEYS.maxBlur, next);
         }
       }
-      if (patch.direction !== undefined) {
-        state.direction = patch.direction === "down" ? "down" : "up";
-        writeValue(STORAGE_KEYS.direction, state.direction);
-      }
       apply();
       return materialSnapshot();
     },
@@ -662,12 +697,11 @@ html[data-bc-active="true"][data-bc-page-material="true"] [data-plugin-panel]{
     if (key != null && !KNOWN_KEYS.has(key)) return;
     const previousPanel = state.panel;
     state.page = readNumber(STORAGE_KEYS.page, 0, 100, DEFAULTS.page);
-    state.pageBlur = readBoolean(STORAGE_KEYS.pageBlur);
+    state.pageBlur = readPageBlur();
     state.panel = readPanelStrength();
     state.alphaStep = readNumber(STORAGE_KEYS.alphaStep, 0, 30, DEFAULTS.alphaStep);
     state.blurStep = readNumber(STORAGE_KEYS.blurStep, 0, 8, DEFAULTS.blurStep);
     state.maxBlur = readNumber(STORAGE_KEYS.maxBlur, 0, 16, DEFAULTS.maxBlur);
-    state.direction = readDirection();
     apply({ panelChanged: state.panel !== previousPanel });
   });
 })();

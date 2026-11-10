@@ -55,10 +55,11 @@ body{margin:0;font:14px/20px sans-serif;color:var(--dsw-alias-label-primary)}
 `;
 
 /**
- * Page mode: the [data-global-panel] column with the plugin page plus a nested
- * listbox/menu, a body-portal dialog with a nested listbox, a shell.overlay
- * container with its own dialog, a portal menu/tooltip, both fixed popovers and
- * a no-role third-party popover.
+ * Page mode: the [data-global-panel] column with the plugin page and no
+ * page-internal overlay by default (so the page backplate is active), a
+ * body-portal dialog with a nested listbox, a shell.overlay container with its
+ * own dialog, a portal menu/tooltip, both fixed popovers and a no-role
+ * third-party popover. Tests inject page-internal menus/tooltips where needed.
  */
 export const pageModeHtml = `
 <div id="wallpaper"></div>
@@ -66,8 +67,6 @@ export const pageModeHtml = `
   <aside id="sidebar">Settings</aside>
   <div data-global-panel id="global-panel">
     ${listHtml}
-    <div role="listbox" id="page-nested-panel">Page nested listbox</div>
-    <div role="menu" id="page-nested-menu">Page nested menu</div>
     <div id="page-fixed">fixed inside page</div>
   </div>
 </div>

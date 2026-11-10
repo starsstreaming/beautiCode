@@ -73,16 +73,16 @@ const attr = (node, name) => node.getAttribute(name);
 const cssVar = (node, name) => node.style.getPropertyValue(name);
 
 /**
- * A page-mode DOM: the [data-global-panel] column, an independent body dialog,
- * the composer and the three pending-interaction cards, the shell.overlay
- * container (and a dialog inside it), and a no-role third-party popover.
+ * A page-mode DOM: the [data-global-panel] column with no page-internal
+ * overlay (so the page backplate is active), an independent body dialog, the
+ * composer and the three pending-interaction cards, the shell.overlay container
+ * (and a dialog inside it), and a no-role third-party popover.
  */
 function buildPage(dom) {
   const page = element(dom, "div", { "data-global-panel": "" });
   page.id = "page";
   const plugin = element(dom, "section", { "data-plugin-panel": "" });
-  const pageMenu = element(dom, "div", { role: "listbox" });
-  page.append(plugin, pageMenu);
+  page.append(plugin);
 
   const dialog = element(dom, "div", { role: "dialog" });
   const dialogList = element(dom, "div", { role: "listbox" });
@@ -106,36 +106,37 @@ function buildPage(dom) {
 
   dom.body.append(page, dialog, composer, questionFrame, planFrame, approvalFrame, overlay, popover);
   return {
-    page, plugin, pageMenu, dialog, dialogList, composer,
+    page, plugin, dialog, dialogList, composer,
     questionFrame, questionCard, planFrame, planCard, approvalFrame, approvalCard,
     overlay, shellDialog, popover,
   };
 }
 
-test("defaults are page 30 / panel 100 with the documented advanced steps", () => {
+test("defaults are page 30 / page blur on / panel 60 with the documented advanced steps", () => {
   const { api, document, events } = load();
-  assert.equal(api.get(), 100);
+  assert.equal(api.get(), 60);
   assert.equal(api.getPage(), 30);
-  assert.equal(api.getPageBlur(), false);
-  assert.deepEqual({ ...api.getMaterial() }, { alphaStep: 8, blurStep: 2, maxBlur: 8, direction: "up" });
-  assert.deepEqual({ ...api.defaults }, { page: 30, pageBlur: false, panel: 100, alphaStep: 8, blurStep: 2, maxBlur: 8, direction: "up" });
+  assert.equal(api.getPageBlur(), true);
+  assert.deepEqual({ ...api.getMaterial() }, { alphaStep: 8, blurStep: 2, maxBlur: 8 });
+  assert.deepEqual({ ...api.defaults }, { page: 30, pageBlur: true, panel: 60, alphaStep: 8, blurStep: 2, maxBlur: 8 });
+  assert.equal(api.storageKeys.direction, undefined, "the direction storage key is retired");
   assert.equal(attr(document.documentElement, "data-bc-readable-surfaces"), "true");
   assert.equal(attr(document.documentElement, "data-bc-page-material"), "true");
-  assert.equal(attr(document.documentElement, "data-bc-page-blur"), null);
-  assert.equal(cssVar(document.documentElement, "--bc-readable-strength"), "100");
+  assert.equal(attr(document.documentElement, "data-bc-page-blur"), "true");
+  assert.equal(cssVar(document.documentElement, "--bc-readable-strength"), "60");
   assert.equal(cssVar(document.documentElement, "--bc-page-material-strength"), "30");
   assert.equal(cssVar(document.documentElement, "--bc-material-alpha-step"), "8");
   assert.equal(cssVar(document.documentElement, "--bc-material-blur-step"), "2");
   assert.equal(cssVar(document.documentElement, "--bc-material-max-blur"), "8");
-  assert.equal(cssVar(document.documentElement, "--bc-material-direction"), "up");
+  assert.equal(cssVar(document.documentElement, "--bc-material-direction"), "", "no direction variable is published");
   assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 2 }, "no page anchor; an independent panel would get the 2px step");
   assert.deepEqual(events, ["beauticode-material-change", "beauticode-readability-change"]);
 });
 
 test("legacy panel storage keeps true/false/number semantics; 0 still writes false", () => {
   for (const [stored, expected] of [
-    ["true", 100], ["false", 0], ["40", 40], ["100", 100], ["101", 100], ["-5", 0],
-    ["invalid", 100], ["null", 100], ["", 100],
+    ["true", 60], ["false", 0], ["40", 40], ["100", 100], ["101", 100], ["-5", 0],
+    ["invalid", 60], ["null", 60], ["", 60],
   ]) {
     const { api, document } = load({ initial: { [KEYS.panel]: stored } });
     assert.equal(api.get(), expected, `stored ${JSON.stringify(stored)}`);
@@ -146,8 +147,8 @@ test("legacy panel storage keeps true/false/number semantics; 0 still writes fal
   const { api, store, document } = load();
   assert.equal(api.set(false), 0);
   assert.equal(store.get(KEYS.panel), "false", "0 keeps the old spelling for rollback");
-  assert.equal(api.set(true), 100);
-  assert.equal(store.get(KEYS.panel), "100");
+  assert.equal(api.set(true), 60);
+  assert.equal(store.get(KEYS.panel), "60");
   assert.equal(api.set(35), 35);
   assert.equal(store.get(KEYS.panel), "35");
   assert.equal(attr(document.documentElement, "data-bc-readable-surfaces"), "true");
@@ -166,55 +167,58 @@ test("page storage defaults to 30, clamps, and writes 0 as the new key's zero", 
   assert.equal(api.setPage(30), 30);
   assert.equal(attr(document.documentElement, "data-bc-page-material"), "true");
 
-  // Experimental page blur: boolean only, default false, any other spelling off.
-  for (const [stored, expected] of [["true", true], ["false", false], ["1", false], ["yes", false], ["", false]]) {
+  // Page blur defaults ON: only the literal "false" opts out; missing/invalid
+  // spellings such as "1" or "yes" stay on.
+  for (const [stored, expected] of [["true", true], ["false", false], ["1", true], ["yes", true], ["", true]]) {
     const { api: blurApi } = load({ initial: { [KEYS.pageBlur]: stored } });
     assert.equal(blurApi.getPageBlur(), expected, `stored page blur ${JSON.stringify(stored)}`);
   }
   const { api: blurApi, store: blurStore, document: blurDocument } = load();
-  assert.equal(blurApi.getPageBlur(), false);
-  assert.equal(blurApi.setPageBlur(true), true);
-  assert.equal(blurStore.get(KEYS.pageBlur), "true");
-  assert.equal(attr(blurDocument.documentElement, "data-bc-page-blur"), "true");
+  assert.equal(blurApi.getPageBlur(), true);
   assert.equal(blurApi.setPageBlur(false), false);
   assert.equal(blurStore.get(KEYS.pageBlur), "false");
   assert.equal(attr(blurDocument.documentElement, "data-bc-page-blur"), null);
-  assert.equal(blurApi.setPageBlur("yes"), false, "only boolean true enables the experiment");
+  assert.equal(blurApi.setPageBlur(true), true);
+  assert.equal(blurStore.get(KEYS.pageBlur), "true");
+  assert.equal(attr(blurDocument.documentElement, "data-bc-page-blur"), "true");
+  assert.equal(blurApi.setPageBlur("yes"), false, "the API only accepts boolean true");
 
-  const { api: pageZero, document: pageZeroDocument } = load({ initial: { [KEYS.page]: "0", [KEYS.pageBlur]: "true" } });
+  const { api: pageZero, document: pageZeroDocument } = load({ initial: { [KEYS.page]: "0" } });
   assert.equal(pageZero.getPageBlur(), true);
   assert.equal(attr(pageZeroDocument.documentElement, "data-bc-page-blur"), null,
     "page 0% keeps the option but publishes no backplate flag");
 });
 
-test("advanced storage falls back, clamps, and normalizes direction", () => {
+test("advanced storage falls back, clamps, and ignores the retired direction", () => {
   const { api } = load({
     initial: {
       [KEYS.alphaStep]: "99",
       [KEYS.blurStep]: "9",
       [KEYS.maxBlur]: "-2",
-      [KEYS.direction]: "sideways",
+      [KEYS.direction]: "down",
     },
   });
-  assert.deepEqual({ ...api.getMaterial() }, { alphaStep: 30, blurStep: 8, maxBlur: 0, direction: "up" });
+  assert.deepEqual({ ...api.getMaterial() }, { alphaStep: 30, blurStep: 8, maxBlur: 0 });
 
   const { api: defaults } = load({
     initial: { [KEYS.alphaStep]: "x", [KEYS.blurStep]: "", [KEYS.maxBlur]: "x", [KEYS.direction]: "" },
   });
-  assert.deepEqual({ ...defaults.getMaterial() }, { alphaStep: 8, blurStep: 2, maxBlur: 8, direction: "up" });
+  assert.deepEqual({ ...defaults.getMaterial() }, { alphaStep: 8, blurStep: 2, maxBlur: 8 });
 
   const { api: setter, store } = load();
-  assert.deepEqual({ ...setter.setMaterial({ alphaStep: -1, blurStep: 99, maxBlur: 20, direction: "down" }) },
-    { alphaStep: 0, blurStep: 8, maxBlur: 16, direction: "down" });
+  assert.deepEqual({ ...setter.setMaterial({ alphaStep: -1, blurStep: 99, maxBlur: 20 }) },
+    { alphaStep: 0, blurStep: 8, maxBlur: 16 });
   assert.equal(store.get(KEYS.alphaStep), "0");
   assert.equal(store.get(KEYS.blurStep), "8");
   assert.equal(store.get(KEYS.maxBlur), "16");
-  assert.equal(store.get(KEYS.direction), "down");
-  assert.deepEqual({ ...setter.setMaterial({ direction: "sideways" }) }, { alphaStep: 0, blurStep: 8, maxBlur: 16, direction: "up" });
-  assert.deepEqual({ ...setter.setMaterial({ alphaStep: 1 }) }, { alphaStep: 1, blurStep: 8, maxBlur: 16, direction: "up" });
+  assert.equal(store.has(KEYS.direction), false, "setMaterial never writes the retired key");
+  const before = { ...setter.getMaterial() };
+  assert.deepEqual({ ...setter.setMaterial({ direction: "down" }) }, before, "direction is ignored");
+  assert.equal(store.has(KEYS.direction), false);
+  assert.deepEqual({ ...setter.setMaterial({ alphaStep: 1 }) }, { alphaStep: 1, blurStep: 8, maxBlur: 16 });
 });
 
-test("page mode: page 30% alpha-only by default, independent panel 100% + 3.69px", () => {
+test("page mode: page 30% + blur on by default, panels 60% + 3.69px", () => {
   const dom = new FakeDocument({ active: true });
   const nodes = buildPage(dom);
   const { api, document } = load({ dom });
@@ -223,56 +227,83 @@ test("page mode: page 30% alpha-only by default, independent panel 100% + 3.69px
   assert.equal(attr(nodes.page, "data-bc-material-level"), "1");
   assert.equal(attr(nodes.page, "data-bc-material-depth"), "1");
   assert.equal(attr(nodes.page, "data-bc-material-layer"), null);
-  assert.equal(attr(nodes.page, "data-bc-material-blur"), null, "page blur is opt-in and off by default");
+  assert.equal(attr(nodes.page, "data-bc-material-blur"), "on", "page blur is on by default");
+  assert.equal(attr(nodes.page, "data-bc-page-blur-paused"), null, "no page-internal overlay, so not paused");
   assert.equal(cssVar(nodes.page, "--bc-material-alpha"), "0.3");
-  assert.equal(cssVar(nodes.page, "--bc-material-blur"), "");
-  assert.equal(attr(document.documentElement, "data-bc-page-blur"), null);
+  assert.equal(cssVar(nodes.page, "--bc-material-blur"), "2.4px");
+  assert.equal(attr(document.documentElement, "data-bc-page-blur"), "true");
   assert.equal(attr(nodes.plugin, "data-bc-material-root"), null, "the plugin page content is not painted");
-
-  assert.equal(attr(nodes.pageMenu, "data-bc-material-layer"), "");
-  assert.equal(attr(nodes.pageMenu, "data-bc-material-level"), "2");
-  assert.equal(attr(nodes.pageMenu, "data-bc-material-depth"), "2");
-  assert.equal(attr(nodes.pageMenu, "data-bc-material-blur"), null);
-  assert.equal(cssVar(nodes.pageMenu, "--bc-material-alpha"), "0.38");
-  assert.equal(cssVar(nodes.pageMenu, "--bc-material-blur"), "");
 
   assert.equal(attr(nodes.dialog, "data-bc-material-root"), "panel");
   assert.equal(attr(nodes.dialog, "data-bc-material-level"), "2");
   assert.equal(attr(nodes.dialog, "data-bc-material-depth"), "1");
   assert.equal(attr(nodes.dialog, "data-bc-material-blur"), "on");
-  assert.equal(cssVar(nodes.dialog, "--bc-material-alpha"), "1");
+  assert.equal(cssVar(nodes.dialog, "--bc-material-alpha"), "0.6", "panel default is 60%");
   assert.equal(cssVar(nodes.dialog, "--bc-material-blur"), "3.69px");
 
   assert.equal(attr(nodes.dialogList, "data-bc-material-layer"), "");
   assert.equal(attr(nodes.dialogList, "data-bc-material-level"), "3");
   assert.equal(attr(nodes.dialogList, "data-bc-material-depth"), "2");
   assert.equal(attr(nodes.dialogList, "data-bc-material-blur"), null);
-  assert.equal(cssVar(nodes.dialogList, "--bc-material-alpha"), "1", "panel alpha clamps at 100%");
+  assert.equal(cssVar(nodes.dialogList, "--bc-material-alpha"), "0.68", "60% + one 8% step");
   assert.equal(cssVar(nodes.dialogList, "--bc-material-blur"), "");
 
   for (const card of [nodes.composer, nodes.questionCard, nodes.planCard, nodes.approvalCard]) {
     assert.equal(attr(card, "data-bc-material-root"), "panel");
-    assert.equal(cssVar(card, "--bc-material-alpha"), "1");
+    assert.equal(cssVar(card, "--bc-material-alpha"), "0.6");
     assert.equal(cssVar(card, "--bc-material-blur"), "3.69px");
   }
   assert.equal(attr(nodes.overlay, "data-bc-material-root"), null, "shell.overlay is not a root");
   assert.equal(attr(nodes.overlay, "data-bc-material-layer"), null);
   assert.equal(attr(nodes.shellDialog, "data-bc-material-root"), "panel", "role children inside shell.overlay stay independent");
   assert.equal(attr(nodes.popover, "data-bc-material-root"), null, "no-role popovers are outside the contract");
-  assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 3.69 }, "default page blur is not applied");
-
-  // Opt-in experiment: it restores the page blur marker and keeps the same
-  // panel radius; disabling it removes every trace again.
-  assert.equal(api.setPageBlur(true), true);
-  assert.equal(attr(document.documentElement, "data-bc-page-blur"), "true");
-  assert.equal(attr(nodes.page, "data-bc-material-blur"), "on");
-  assert.equal(cssVar(nodes.page, "--bc-material-blur"), "2.4px");
   assert.deepEqual({ ...api.getBlur() }, { page: 2.4, panel: 3.69 });
+
+  // A standard role inside the page column is a panel root, not a page nested
+  // layer: 60% panel alpha, alpha only, and it pauses the page backplate.
+  const pageMenu = element(dom, "div", { role: "menu" });
+  const pageMenuList = element(dom, "div", { role: "listbox" });
+  pageMenu.append(pageMenuList);
+  nodes.page.append(pageMenu);
+  api.refresh();
+  assert.equal(attr(pageMenu, "data-bc-material-root"), "panel");
+  assert.equal(attr(pageMenu, "data-bc-material-level"), "2");
+  assert.equal(attr(pageMenu, "data-bc-material-depth"), "1");
+  assert.equal(attr(pageMenu, "data-bc-material-blur"), null, "page-internal panels are alpha-only");
+  assert.equal(cssVar(pageMenu, "--bc-material-alpha"), "0.6");
+  assert.equal(cssVar(pageMenu, "--bc-material-blur"), "");
+  assert.equal(attr(pageMenuList, "data-bc-material-layer"), "");
+  assert.equal(attr(pageMenuList, "data-bc-material-level"), "3");
+  assert.equal(attr(pageMenuList, "data-bc-material-depth"), "2");
+  assert.equal(cssVar(pageMenuList, "--bc-material-alpha"), "0.68");
+  assert.equal(attr(nodes.page, "data-bc-page-blur-paused"), "", "a page menu pauses the page backplate");
+  assert.equal(attr(nodes.page, "data-bc-material-blur"), "on", "the marker stays; the pause CSS disables the effect");
+  assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 3.69 }, "paused page blur is not applied");
+
+  // Tooltips are not material layers at all, but they also pause the page
+  // backplate so the host's positioning/stacking is preserved.
+  const tooltip = element(dom, "div", { role: "tooltip" });
+  nodes.page.append(tooltip);
+  api.refresh();
+  for (const name of ["data-bc-material-root", "data-bc-material-layer", "data-bc-material-blur"]) {
+    assert.equal(attr(tooltip, name), null, `tooltip must not become a material layer (${name})`);
+  }
+  assert.equal(cssVar(tooltip, "--bc-material-alpha"), "");
+  assert.equal(attr(nodes.page, "data-bc-page-blur-paused"), "");
+
+  pageMenu.remove();
+  tooltip.remove();
+  api.refresh();
+  assert.equal(attr(nodes.page, "data-bc-page-blur-paused"), null, "closing the overlays resumes the page blur");
+  assert.deepEqual({ ...api.getBlur() }, { page: 2.4, panel: 3.69 });
+
   assert.equal(api.setPageBlur(false), false);
   assert.equal(attr(document.documentElement, "data-bc-page-blur"), null);
   assert.equal(attr(nodes.page, "data-bc-material-blur"), null);
   assert.equal(cssVar(nodes.page, "--bc-material-blur"), "");
   assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 3.69 });
+  assert.equal(api.setPageBlur(true), true);
+  assert.deepEqual({ ...api.getBlur() }, { page: 2.4, panel: 3.69 });
 });
 
 test("main conversation: no page anchor means the panel's own blur is the blur step", () => {
@@ -304,7 +335,6 @@ test("page 0% removes only the page channel; panels then use I = 0", () => {
   assert.equal(attr(document.documentElement, "data-bc-page-material"), null);
   assert.equal(attr(nodes.dialog, "data-bc-material-root"), "panel", "panel channel is independent");
   assert.equal(cssVar(nodes.dialog, "--bc-material-blur"), "2px");
-  assert.equal(attr(nodes.pageMenu, "data-bc-material-layer"), null, "no page root, no page nested layers");
   assert.deepEqual(events, ["beauticode-material-change"], "page changes do not fire the legacy panel event");
 });
 
@@ -321,8 +351,8 @@ test("panel 0% removes only the panel channel; the page keeps its 30% plate", ()
   assert.equal(attr(nodes.dialogList, "data-bc-material-layer"), null);
   assert.equal(attr(nodes.page, "data-bc-material-root"), "page");
   assert.equal(cssVar(nodes.page, "--bc-material-alpha"), "0.3");
-  assert.equal(cssVar(nodes.page, "--bc-material-blur"), "", "the page stays alpha-only at panel 0%");
-  assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 3.69 }, "the panel radius is still reported for the next enable");
+  assert.equal(cssVar(nodes.page, "--bc-material-blur"), "2.4px", "the page backplate is independent of the panel channel");
+  assert.deepEqual({ ...api.getBlur() }, { page: 2.4, panel: 3.69 }, "the panel radius is still reported for the next enable");
 
   api.set(100);
   assert.equal(attr(nodes.dialog, "data-bc-material-root"), "panel");
@@ -340,7 +370,7 @@ test("both channels at 0% clear every mark, inline variable and filter flag", ()
   api.set(0);
   api.setPage(0);
   assert.equal(attr(document.documentElement, "data-bc-page-blur"), null, "page 0% removes the opt-in flag");
-  for (const node of [nodes.page, nodes.pageMenu, nodes.dialog, nodes.dialogList, nodes.composer]) {
+  for (const node of [nodes.page, nodes.dialog, nodes.dialogList, nodes.composer]) {
     for (const name of ["data-bc-material-root", "data-bc-material-layer", "data-bc-material-level", "data-bc-material-depth", "data-bc-material-blur"]) {
       assert.equal(attr(node, name), null, `${name} must be cleared`);
     }
@@ -361,27 +391,59 @@ test("alpha step applies to depth, only inside a root, and clamps at 0/1", () =>
   const page = element(dom, "div", { "data-global-panel": "" });
   const pageList = element(dom, "div", { role: "listbox" });
   const pageMenu = element(dom, "div", { role: "menu" });
+  const pageDeep = element(dom, "div", { role: "listbox" });
   page.append(pageList, pageMenu);
   pageList.append(pageMenu);
+  pageMenu.append(pageDeep);
   const dialog = element(dom, "div", { role: "dialog" });
   const dialogList = element(dom, "div", { role: "listbox" });
   dialog.append(dialogList);
   dom.body.append(page, dialog);
   const { api } = load({ dom });
 
-  assert.equal(attr(pageList, "data-bc-material-depth"), "2");
-  assert.equal(cssVar(pageList, "--bc-material-alpha"), "0.38");
-  assert.equal(attr(pageMenu, "data-bc-material-depth"), "3", "depth is 2 + candidate ancestors");
-  assert.equal(cssVar(pageMenu, "--bc-material-alpha"), "0.46");
+  // Both page-internal roles are panel channel now: the outer listbox is a
+  // panel root at 60%, deeper levels add one 8% step each (fixed upward ramp).
+  assert.equal(attr(pageList, "data-bc-material-root"), "panel");
+  assert.equal(attr(pageList, "data-bc-material-depth"), "1");
+  assert.equal(cssVar(pageList, "--bc-material-alpha"), "0.6");
+  assert.equal(attr(pageList, "data-bc-material-blur"), null, "page-internal panels are alpha-only");
+  assert.equal(attr(pageMenu, "data-bc-material-depth"), "2", "depth is 1 + panel ancestors");
+  assert.equal(cssVar(pageMenu, "--bc-material-alpha"), "0.68");
+  assert.equal(attr(pageDeep, "data-bc-material-depth"), "3");
+  assert.equal(cssVar(pageDeep, "--bc-material-alpha"), "0.76");
+  const ramp = [0.6, 0.68, 0.76];
+  assert.ok(ramp[0] < ramp[1] && ramp[1] < ramp[2], "deeper levels are strictly more opaque");
+  assert.equal(attr(page, "data-bc-page-blur-paused"), "", "page-internal roles pause the backplate");
+  assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 3.69 });
 
-  api.setMaterial({ direction: "down" });
-  assert.equal(cssVar(pageList, "--bc-material-alpha"), "0.22", "0.30 - 0.08");
-  assert.equal(cssVar(pageMenu, "--bc-material-alpha"), "0.14", "0.30 - 0.16");
-  assert.equal(cssVar(dialogList, "--bc-material-alpha"), "0.92", "1.00 - 0.08");
+  // The retired direction input is ignored: no key, no API field, no ramp flip.
+  assert.deepEqual({ ...api.setMaterial({ direction: "down" }) },
+    { alphaStep: 8, blurStep: 2, maxBlur: 8 });
+  assert.equal(cssVar(pageList, "--bc-material-alpha"), "0.6");
+  assert.equal(cssVar(pageMenu, "--bc-material-alpha"), "0.68");
+  assert.equal(cssVar(pageDeep, "--bc-material-alpha"), "0.76");
+  assert.equal(cssVar(dialogList, "--bc-material-alpha"), "0.68");
 
-  api.setMaterial({ direction: "up", alphaStep: 0 });
-  assert.equal(cssVar(pageList, "--bc-material-alpha"), "0.3");
-  assert.equal(cssVar(dialogList, "--bc-material-alpha"), "1");
+  // An old beauticode-material-direction value in storage is ignored too.
+  const legacyDom = new FakeDocument({ active: true });
+  const legacyPage = element(legacyDom, "div", { "data-global-panel": "" });
+  const legacyList = element(legacyDom, "div", { role: "listbox" });
+  legacyPage.append(legacyList);
+  legacyDom.body.append(legacyPage);
+  load({ dom: legacyDom, initial: { "beauticode-material-direction": "down" } });
+  assert.equal(cssVar(legacyList, "--bc-material-alpha"), "0.6");
+  assert.equal(attr(legacyPage, "data-bc-page-blur-paused"), "");
+
+  api.setMaterial({ alphaStep: 0 });
+  assert.equal(cssVar(pageList, "--bc-material-alpha"), "0.6");
+  assert.equal(cssVar(pageMenu, "--bc-material-alpha"), "0.6");
+  assert.equal(cssVar(pageDeep, "--bc-material-alpha"), "0.6");
+  assert.equal(cssVar(dialogList, "--bc-material-alpha"), "0.6");
+
+  api.set(100);
+  assert.equal(cssVar(pageList, "--bc-material-alpha"), "1");
+  assert.equal(cssVar(pageMenu, "--bc-material-alpha"), "1", "depth alpha clamps at 1");
+  assert.equal(cssVar(pageDeep, "--bc-material-alpha"), "1");
 });
 
 test("blur follows the sqrt model: page 30/50/100, blur step 0, max blur 0", () => {
@@ -389,37 +451,31 @@ test("blur follows the sqrt model: page 30/50/100, blur step 0, max blur 0", () 
   const nodes = buildPage(dom);
   const { api } = load({ dom });
 
-  // Default: alpha-only page, panel radius still uses the page-strength scale I.
-  assert.equal(attr(nodes.page, "data-bc-material-blur"), null);
-  assert.equal(cssVar(nodes.page, "--bc-material-blur"), "");
-  assert.equal(cssVar(nodes.dialog, "--bc-material-blur"), "3.69px");
-  assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 3.69 });
-
-  api.setPage(50); // I = 4, T2 = 6, s2 = sqrt(36 - 16) = 4.47
-  assert.equal(cssVar(nodes.dialog, "--bc-material-blur"), "4.47px");
-  assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 4.47 });
-
-  api.setPage(100); // I = 8 = M, nothing left for the panel
-  assert.equal(attr(nodes.dialog, "data-bc-material-blur"), null);
-  assert.equal(cssVar(nodes.dialog, "--bc-material-blur"), "");
-  assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 0 });
-
-  // Opt-in experiment: the page radius becomes actual and follows the same I.
-  api.setPage(30);
-  api.setPageBlur(true);
+  // Default: the page backplate is on and uses the page-strength scale I.
   assert.equal(attr(nodes.page, "data-bc-material-blur"), "on");
   assert.equal(cssVar(nodes.page, "--bc-material-blur"), "2.4px");
+  assert.equal(cssVar(nodes.dialog, "--bc-material-blur"), "3.69px");
   assert.deepEqual({ ...api.getBlur() }, { page: 2.4, panel: 3.69 });
 
-  api.setPage(50);
+  api.setPage(50); // I = 4, T2 = 6, s2 = sqrt(36 - 16) = 4.47
   assert.equal(cssVar(nodes.page, "--bc-material-blur"), "4px");
   assert.equal(cssVar(nodes.dialog, "--bc-material-blur"), "4.47px");
   assert.deepEqual({ ...api.getBlur() }, { page: 4, panel: 4.47 });
 
-  api.setPage(100);
+  api.setPage(100); // I = 8 = M, nothing left for the panel
   assert.equal(cssVar(nodes.page, "--bc-material-blur"), "8px");
   assert.equal(attr(nodes.dialog, "data-bc-material-blur"), null);
+  assert.equal(cssVar(nodes.dialog, "--bc-material-blur"), "");
   assert.deepEqual({ ...api.getBlur() }, { page: 8, panel: 0 });
+
+  // The on/off preference removes the marker and reports zero applied radius.
+  api.setPage(30);
+  api.setPageBlur(false);
+  assert.equal(attr(nodes.page, "data-bc-material-blur"), null);
+  assert.equal(cssVar(nodes.page, "--bc-material-blur"), "");
+  assert.deepEqual({ ...api.getBlur() }, { page: 0, panel: 3.69 });
+  api.setPageBlur(true);
+  assert.deepEqual({ ...api.getBlur() }, { page: 2.4, panel: 3.69 });
 
   api.setPage(30);
   api.setMaterial({ blurStep: 0 });
@@ -466,7 +522,7 @@ test("inactive background clears marks but keeps preferences for the next apply"
   assert.equal(attr(nodes.page, "data-bc-material-root"), null);
   assert.equal(attr(nodes.dialog, "data-bc-material-root"), null);
   assert.equal(api.getPage(), 30, "the preference is untouched");
-  assert.equal(api.get(), 100);
+  assert.equal(api.get(), 60);
 
   dom.documentElement.dataset.bcActive = "true";
   api.refresh();
@@ -521,7 +577,7 @@ test("role changes are rescanned and stale marks are removed", () => {
   assert.equal(attr(node, "data-bc-material-root"), null, "leaving the candidate set clears the root");
   assert.equal(cssVar(node, "--bc-material-alpha"), "");
 
-  node.setAttribute("role", "tooltip");
+  node.setAttribute("role", "menu");
   dom.flushObservers();
   flush();
   assert.equal(attr(node, "data-bc-material-root"), "panel");
@@ -566,6 +622,9 @@ test("cross-window storage sync re-reads only known keys and ignores unrelated o
   trigger("storage", { key: KEYS.page });
   assert.equal(api.getPage(), 0);
 
+  store.set(KEYS.pageBlur, "false");
+  trigger("storage", { key: KEYS.pageBlur });
+  assert.equal(api.getPageBlur(), false);
   store.set(KEYS.pageBlur, "true");
   trigger("storage", { key: KEYS.pageBlur });
   assert.equal(api.getPageBlur(), true);
@@ -579,14 +638,14 @@ test("cross-window storage sync re-reads only known keys and ignores unrelated o
   store.delete(KEYS.page);
   store.delete(KEYS.pageBlur);
   trigger("storage", { key: null });
-  assert.equal(api.get(), 100);
+  assert.equal(api.get(), 60);
   assert.equal(api.getPage(), 30);
-  assert.equal(api.getPageBlur(), false);
+  assert.equal(api.getPageBlur(), true, "missing page-blur storage falls back to on");
 });
 
 test("storage denial keeps the in-memory selection for this page", () => {
   const { api, document } = load({ denied: true });
-  assert.equal(api.get(), 100);
+  assert.equal(api.get(), 60);
   assert.equal(api.getPage(), 30);
   assert.equal(api.set(false), 0);
   assert.equal(api.setPage(0), 0);
@@ -625,7 +684,7 @@ test("stylesheet: the old global alias-token rule is gone, the material-root rul
 
   const panelRoot = css.match(/html\[data-bc-active="true"\] \[data-bc-material-root="panel"\]\{([^}]*)\}/);
   assert.ok(panelRoot, "panel root rule");
-  assert.match(panelRoot[1], /--bc-material-alpha:1/);
+  assert.match(panelRoot[1], /--bc-material-alpha:\.6/);
 
   assert.match(css, /\[data-bc-material-root\],\s*html\[data-bc-active="true"\] \[data-bc-material-layer\]\{[^}]*--bc-material-fill:color-mix\(in srgb,var\(--bc-material-base,#232833\) calc\(var\(--bc-material-alpha,1\) \* 100%\),transparent\)[^}]*background-color:var\(--bc-material-fill\)/);
 
@@ -634,10 +693,12 @@ test("stylesheet: the old global alias-token rule is gone, the material-root rul
   for (const token of [
     "--dsw-alias-bg-base", "--dsw-alias-bg-layer-1", "--dsw-alias-bg-layer-2",
     "--dsw-alias-bg-layer-3", "--dsw-alias-bg-overlay", "--dsw-specific-input-major",
-    "--dsw-specific-menu", "--dsw-alias-tooltip-bg",
+    "--dsw-specific-menu",
   ]) {
     assert.ok(tokens[1].includes(`${token}:var(--bc-material-fill)`), `${token} shares the fill`);
   }
+  assert.doesNotMatch(tokens[1], /--dsw-alias-tooltip-bg/,
+    "tooltips keep the host tooltip token even inside a material panel");
 
   const blur = css.match(/html\[data-bc-active="true"\] \[data-bc-material-root\]\[data-bc-material-blur="on"\]\{([^}]*)\}/);
   assert.ok(blur, "the blur is scoped to an independent root");
@@ -645,18 +706,18 @@ test("stylesheet: the old global alias-token rule is gone, the material-root rul
   assert.match(blur[1], /-webkit-backdrop-filter:blur\(var\(--bc-material-blur,0px\)\)/);
   assert.doesNotMatch(blur[1], /data-bc-material-layer/);
 
-  // The page root always clears the generic filter; the experimental backplate
-  // is opt-in behind [data-bc-page-blur="true"] and must not leak by default.
+  // The page root always clears the generic filter; the backplate is on by
+  // default but paused while a page-internal overlay is visible.
   assert.match(css, /html\[data-bc-active="true"\] \[data-bc-material-root="page"\]\[data-bc-material-blur="on"\]\{[^}]*backdrop-filter:none/);
-  assert.match(css, /html\[data-bc-active="true"\]\[data-bc-page-blur="true"\] \[data-bc-material-root="page"\]\[data-bc-material-blur="on"\]\{[^}]*position:relative[^}]*isolation:isolate/);
-  const optIn = css.match(/html\[data-bc-active="true"\]\[data-bc-page-blur="true"\] \[data-bc-material-root="page"\]\[data-bc-material-blur="on"\]::before\{([^}]*)\}/);
-  assert.ok(optIn, "the opt-in page backplate rule");
-  assert.match(optIn[1], /content:""/);
-  assert.match(optIn[1], /position:absolute/);
-  assert.match(optIn[1], /inset:0/);
-  assert.match(optIn[1], /z-index:-1/);
-  assert.match(optIn[1], /pointer-events:none/);
-  assert.match(optIn[1], /backdrop-filter:blur\(var\(--bc-material-blur,0px\)\)/);
+  assert.match(css, /html\[data-bc-active="true"\]\[data-bc-page-blur="true"\] \[data-bc-material-root="page"\]\[data-bc-material-blur="on"\]:not\(\[data-bc-page-blur-paused\]\)\{[^}]*position:relative[^}]*isolation:isolate/);
+  const backplate = css.match(/html\[data-bc-active="true"\]\[data-bc-page-blur="true"\] \[data-bc-material-root="page"\]\[data-bc-material-blur="on"\]:not\(\[data-bc-page-blur-paused\]\)::before\{([^}]*)\}/);
+  assert.ok(backplate, "the page backplate rule");
+  assert.match(backplate[1], /content:""/);
+  assert.match(backplate[1], /position:absolute/);
+  assert.match(backplate[1], /inset:0/);
+  assert.match(backplate[1], /z-index:-1/);
+  assert.match(backplate[1], /pointer-events:none/);
+  assert.match(backplate[1], /backdrop-filter:blur\(var\(--bc-material-blur,0px\)\)/);
   // No unconditional page position/isolation rule may exist.
   assert.doesNotMatch(css, /html\[data-bc-active="true"\] \[data-bc-material-root="page"\]\{[^}]*position/);
 
