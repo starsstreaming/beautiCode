@@ -31,3 +31,4 @@ coverage/
 .workbuddy/
 .cache/
 .tmp/
+.agent-teams/
