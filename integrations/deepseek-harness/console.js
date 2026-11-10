@@ -50,15 +50,15 @@
 #beauticode-console-page .bc-group-head{display:flex;align-items:baseline;gap:7px;padding:16px 0 0}
 #beauticode-console-page .bc-group-title{color:var(--dsw-alias-label-primary);margin:0;font-size:13px;font-weight:600;line-height:20px}
 /* A row-level note that only matters while its control is unavailable (the
-   experimental page blur needs the page channel on). */
+   page blur needs the page channel on). */
 #beauticode-console-page .bc-row-hint{color:var(--dsw-alias-state-business-primary,var(--dsw-alias-label-tertiary));font-size:12px;font-weight:400;line-height:18px}
 /* A pill whose switch is unavailable for the current configuration. */
 #beauticode-console-page .bc-pill:disabled{opacity:.38;cursor:default}
 /* All reset arrows share one appearance. bc-dim-reset used to be missing from
    this sheet entirely, so the shadow row rendered a raw UA button next to the
    styled blur row; keep the selectors together so they cannot drift again. */
-#beauticode-console-page .bc-readability-reset,#beauticode-console-page .bc-page-material-reset,#beauticode-console-page .bc-dim-reset,#beauticode-console-page .bc-blur-reset,#beauticode-console-page .bc-alpha-step-reset,#beauticode-console-page .bc-blur-step-reset,#beauticode-console-page .bc-max-blur-reset,#beauticode-console-page .bc-direction-reset,#beauticode-console-page .bc-page-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
-#beauticode-console-page .bc-readability-reset:hover,#beauticode-console-page .bc-page-material-reset:hover,#beauticode-console-page .bc-dim-reset:hover,#beauticode-console-page .bc-blur-reset:hover,#beauticode-console-page .bc-alpha-step-reset:hover,#beauticode-console-page .bc-blur-step-reset:hover,#beauticode-console-page .bc-max-blur-reset:hover,#beauticode-console-page .bc-direction-reset:hover,#beauticode-console-page .bc-page-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+#beauticode-console-page .bc-readability-reset,#beauticode-console-page .bc-page-material-reset,#beauticode-console-page .bc-dim-reset,#beauticode-console-page .bc-blur-reset,#beauticode-console-page .bc-alpha-step-reset,#beauticode-console-page .bc-blur-step-reset,#beauticode-console-page .bc-max-blur-reset,#beauticode-console-page .bc-page-blur-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
+#beauticode-console-page .bc-readability-reset:hover,#beauticode-console-page .bc-page-material-reset:hover,#beauticode-console-page .bc-dim-reset:hover,#beauticode-console-page .bc-blur-reset:hover,#beauticode-console-page .bc-alpha-step-reset:hover,#beauticode-console-page .bc-blur-step-reset:hover,#beauticode-console-page .bc-max-blur-reset:hover,#beauticode-console-page .bc-page-blur-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
 #beauticode-console-page .bc-page-blur-reset:disabled{opacity:.38;cursor:default}
 /* Title and tabs. The tab row is the one Settings -> 插件 puts above its two
    pages: a hairline rule with the tabs on it, the active one in label-primary
@@ -164,8 +164,8 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
 <span class="bc-row-desc">遮住设置、弹层、消息编辑栏和提问窗口后方的内容，0% 关闭</span>
 </div><div class="bc-control">
 <span class="bc-slider">
-<input type="range" class="bc-range bc-readability-slider" min="0" max="100" step="1" value="100" aria-label="功能面板不透明"/>
-<span class="bc-range-value bc-readability-value">100%</span>
+<input type="range" class="bc-range bc-readability-slider" min="0" max="100" step="1" value="60" aria-label="功能面板不透明"/>
+<span class="bc-range-value bc-readability-value">60%</span>
 </span>
 <button type="button" class="bc-readability-reset" data-act="readability-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
 </div></div>
@@ -226,19 +226,12 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
 </span>
 <button type="button" class="bc-max-blur-reset" data-act="max-blur-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
 </div></div>
-<div class="bc-row" data-row="direction"><div class="bc-row-text">
-<span class="bc-row-title">自动档位方向</span>
-<span class="bc-row-desc">嵌套层越深一档，是越实还是越透</span>
-</div><div class="bc-control">
-<button type="button" class="bc-pill" data-act="direction" aria-pressed="true">越上层越实</button>
-<button type="button" class="bc-direction-reset" data-act="direction-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
-</div></div>
 <div class="bc-row" data-row="page-blur"><div class="bc-row-text">
-<span class="bc-row-title">页面模糊（实验）</span>
-<span class="bc-row-desc">默认关闭；开启后会启用页面背板，可能影响页面内 fixed/absolute/高层浮层；仅建议现场试验</span>
+<span class="bc-row-title">页面模糊</span>
+<span class="bc-row-desc">给页面加模糊；关闭后页面只保留底色</span>
 <span class="bc-row-hint" hidden>需要页面材质 &gt;0</span>
 </div><div class="bc-control">
-<button type="button" class="bc-pill bc-page-blur-toggle" data-act="page-blur" aria-pressed="false">已关</button>
+<button type="button" class="bc-pill bc-page-blur-toggle" data-act="page-blur" aria-pressed="true">已开</button>
 <button type="button" class="bc-page-blur-reset" data-act="page-blur-reset" aria-label="恢复默认" title="恢复默认">${RESET_ICON}</button>
 </div></div>
 </div>
@@ -302,8 +295,6 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   const maxBlurSlider = page.querySelector(".bc-max-blur-slider");
   const maxBlurValue = page.querySelector(".bc-max-blur-value");
   const maxBlurReset = page.querySelector('[data-act="max-blur-reset"]');
-  const directionBtn = page.querySelector('[data-act="direction"]');
-  const directionReset = page.querySelector('[data-act="direction-reset"]');
   const pageBlurBtn = page.querySelector('[data-act="page-blur"]');
   const pageBlurReset = page.querySelector('[data-act="page-blur-reset"]');
   const pageBlurHint = page.querySelector(".bc-row-hint");
@@ -317,13 +308,17 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   const msgEl = page.querySelector(".bc-msg");
   const mediaBtn = page.querySelector('[data-act="media"]');
   const AUTO_DIM_PERCENT = 49;
-  const AUTO_READABILITY_PERCENT = 100;
+  // The field feedback (t17/t18) settled the panel default at 60%: the plate
+  // still hides the transcript, but the wallpaper reads through more. A stored
+  // value (for example 35) is kept as-is; only unset/reset rows land here.
+  const AUTO_READABILITY_PERCENT = 60;
   // Layered material preferences, frozen in docs/adr/0011-dsh-layered-material.md
-  // §3.3. The keys are shared with readability.js: when it is loaded (it always
-  // is in the host) the console writes through its API so the ramp, the stored
-  // value and the repaint stay one transaction; otherwise the console writes
-  // the same keys and the html-level variables itself, which is the ADR's
-  // fallback contract. See materialApi().
+  // §3.3 (the panel and page-blur defaults were revised by the t17/t18 field
+  // feedback). The keys are shared with readability.js: when it is loaded (it
+  // always is in the host) the console writes through its API so the ramp, the
+  // stored value and the repaint stay one transaction; otherwise the console
+  // writes the same keys and the html-level variables itself, which is the
+  // ADR's fallback contract. See materialApi().
   const MATERIAL_DEFAULTS = { page: 30, alphaStep: 8, blurStep: 2, maxBlur: 8 };
   const MATERIAL_LIMITS = {
     page: [0, 100],
@@ -336,22 +331,25 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     alphaStep: "beauticode-material-alpha-step",
     blurStep: "beauticode-material-blur-step",
     maxBlur: "beauticode-material-max-blur",
-    direction: "beauticode-material-direction",
   };
   // The panel channel keeps the key and the helper readability.js already owns.
   const PANEL_KEY = "beauticode-readable-surfaces";
-  // Experimental page blur (ADR 0011 follow-up): default off, never recommended.
-  // It is a boolean, not a step, so it keeps its own key outside MATERIAL_KEYS.
+  // Page blur is on by default (t17/t18): only the literal "false" opts out. It
+  // is a boolean, not a step, so it keeps its own key outside MATERIAL_KEYS.
   const PAGE_BLUR_KEY = "beauticode-page-blur";
+  // The reset arrow and the initial state share this default, so the row can
+  // never say "off" while the material still ships on (or the reverse).
+  const AUTO_PAGE_BLUR = true;
   const MATERIAL_KEY_LIST = [...Object.values(MATERIAL_KEYS), PANEL_KEY, PAGE_BLUR_KEY];
-  const AUTO_MATERIAL_DIRECTION = "up";
+  // The nested-material direction is fixed to "up" (越上层越实) by t21; the key
+  // and the row are gone, and `beauticode-material-direction` is no longer in
+  // the storage whitelist, so an old value is simply ignored.
   const material = {
     page: MATERIAL_DEFAULTS.page,
     alphaStep: MATERIAL_DEFAULTS.alphaStep,
     blurStep: MATERIAL_DEFAULTS.blurStep,
     maxBlur: MATERIAL_DEFAULTS.maxBlur,
-    direction: AUTO_MATERIAL_DIRECTION,
-    pageBlur: false,
+    pageBlur: AUTO_PAGE_BLUR,
   };
   let busy = false;
   let muted = true;
@@ -380,7 +378,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
 
   // The slider is the single source of truth, like the shadow and blur rows:
   // the label always shows the percentage the protection actually paints. 0% is
-  // the old opt-out and 100% the original opaque plate.
+  // the opt-out and 60% the shipped default; a stored value wins over both.
   function renderReadability() {
     const current = globalThis.BeauticodeReadableSurfaces?.get?.();
     const percent = Number.isFinite(current) ? Math.round(current) : AUTO_READABILITY_PERCENT;
@@ -404,16 +402,12 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     renderRange(alphaStepSlider, alphaStepValue, material.alphaStep, "%");
     renderRange(blurStepSlider, blurStepValue, material.blurStep, "px");
     renderRange(maxBlurSlider, maxBlurValue, material.maxBlur, "px");
-    const up = material.direction === AUTO_MATERIAL_DIRECTION;
-    const label = up ? "越上层越实" : "越上层越透";
-    if (directionBtn.textContent !== label) directionBtn.textContent = label;
-    directionBtn.setAttribute("aria-pressed", up ? "true" : "false");
     renderPageBlur();
   }
 
-  // The page blur switch is an experiment on top of the page channel: with no
-  // page plate there is nothing for the backplate to sit on, so the row greys
-  // out and says why instead of silently storing an option with no effect.
+  // The page blur switch is on by default: with no page plate there is nothing
+  // for the backplate to sit on, so the row greys out and says why instead of
+  // silently storing an option with no effect.
   function renderPageBlur() {
     const available = material.page > 0;
     const label = material.pageBlur ? "已开" : "已关";
@@ -442,21 +436,15 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     return Math.min(max, Math.max(min, Math.round(n)));
   }
 
-  function readStoredDirection(key) {
+  // Page blur is on by default: only the literal "false" opts out; a missing
+  // key, a denied read and anything else read as "on" (same rule readability.js
+  // applies). Keep the two implementations in step - the console uses this only
+  // when the live bridge is unavailable.
+  function readStoredPageBlur() {
     try {
-      return globalThis.localStorage?.getItem(key) === "down" ? "down" : AUTO_MATERIAL_DIRECTION;
+      return globalThis.localStorage?.getItem(PAGE_BLUR_KEY) !== "false";
     } catch {
-      return AUTO_MATERIAL_DIRECTION;
-    }
-  }
-
-  // Only the literal "true" enables a boolean preference; a missing key, a
-  // denied read and anything else all mean "off" (ADR follow-up freeze).
-  function readStoredBoolean(key) {
-    try {
-      return globalThis.localStorage?.getItem(key) === "true";
-    } catch {
-      return false;
+      return true;
     }
   }
 
@@ -484,7 +472,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     }
   }
 
-  // The experimental page blur has its own two-method bridge: it exists in the
+  // The page blur has its own two-method bridge: it exists in the
   // layered-material build but not in older plugin versions, and it must keep
   // working even when only one of the two channels is available.
   function pageBlurApi() {
@@ -495,7 +483,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     if (!complete) return null;
     // Probe one read, for the same reason materialApi() does: a bridge that
     // cannot answer is worse than no bridge, because it would silently skip
-    // publishing the html flag the experiment's CSS needs.
+    // publishing the html flag the page blur's CSS needs.
     try {
       return typeof api.getPageBlur() === "boolean" ? api : null;
     } catch {
@@ -513,7 +501,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
         // A half-loaded bridge must not take the settings page down with it.
       }
     }
-    return readStoredBoolean(PAGE_BLUR_KEY);
+    return readStoredPageBlur();
   }
 
   function readMaterial() {
@@ -537,10 +525,6 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
         ? Math.min(max, Math.max(min, Math.round(live)))
         : readStoredNumber(MATERIAL_KEYS[name], MATERIAL_DEFAULTS[name], min, max);
     }
-    material.direction =
-      published?.direction === "down" || published?.direction === "up"
-        ? published.direction
-        : readStoredDirection(MATERIAL_KEYS.direction);
     material.pageBlur = readPageBlur();
   }
 
@@ -578,8 +562,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     root.style?.setProperty?.("--bc-material-alpha-step", String(material.alphaStep));
     root.style?.setProperty?.("--bc-material-blur-step", String(material.blurStep));
     root.style?.setProperty?.("--bc-material-max-blur", String(material.maxBlur));
-    root.style?.setProperty?.("--bc-material-direction", material.direction);
-    // The experiment gates the page backplate CSS: it needs both this html flag
+    // The page blur flag gates the backplate CSS: it needs both this html flag
     // and the page root's own blur marker, and page 0% keeps the stored option
     // while removing the flag (the row stays disabled and says why).
     if (material.pageBlur && material.page > 0) root.dataset.bcPageBlur = "true";
@@ -599,20 +582,6 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
       }
     }
     writeStored(MATERIAL_KEYS[name], value);
-    applyMaterial();
-  }
-
-  function writeMaterialDirection(value) {
-    const api = materialApi();
-    if (api) {
-      try {
-        api.setMaterial({ direction: value });
-        return;
-      } catch {
-        // A broken bridge falls through to the standalone write below.
-      }
-    }
-    writeStored(MATERIAL_KEYS.direction, value);
     applyMaterial();
   }
 
@@ -637,12 +606,6 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     const [min, max] = limits;
     material[name] = Math.min(max, Math.max(min, Math.round(n)));
     writeMaterialValue(name, material[name]);
-    renderMaterial();
-  }
-
-  function setMaterialDirection(value) {
-    material.direction = value === "down" ? "down" : AUTO_MATERIAL_DIRECTION;
-    writeMaterialDirection(material.direction);
     renderMaterial();
   }
 
@@ -1241,14 +1204,6 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     event.stopPropagation();
     setMaterialValue("maxBlur", MATERIAL_DEFAULTS.maxBlur);
   });
-  directionBtn.addEventListener("click", (event) => {
-    event.stopPropagation();
-    setMaterialDirection(material.direction === "up" ? "down" : "up");
-  });
-  directionReset.addEventListener("click", (event) => {
-    event.stopPropagation();
-    setMaterialDirection(AUTO_MATERIAL_DIRECTION);
-  });
   pageBlurBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     // Disabled while the page channel is 0%; the click is then a no-op rather
@@ -1259,7 +1214,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   pageBlurReset.addEventListener("click", (event) => {
     event.stopPropagation();
     if (pageBlurReset.disabled) return;
-    setMaterialPageBlur(false);
+    setMaterialPageBlur(AUTO_PAGE_BLUR);
   });
   // Same-origin windows share the preferences through storage: a change made in
   // one window must reach the other window's labels, variables and material.
@@ -1270,8 +1225,8 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     if (key == null || key !== PANEL_KEY) {
       // readability.js' own storage listener runs first and re-applies; only the
       // standalone path has to publish the variables here. A build that knows
-      // the material API but not the experimental page blur still needs the
-      // html flag written locally, so that combination applies too.
+      // the material API but not the page-blur bridge still needs the html flag
+      // written locally, so that combination applies too.
       readMaterial();
       if (!materialApi() || !pageBlurApi()) applyMaterial();
       renderMaterial();

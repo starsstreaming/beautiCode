@@ -355,7 +355,7 @@ test("the readability control is a strength slider and reflects its value", asyn
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   const { context, tick } = await loadConsole(document);
-  let strength = 100;
+  let strength = 60;
   const calls = [];
   context.BeauticodeReadableSurfaces = {
     get: () => strength,
@@ -371,8 +371,8 @@ test("the readability control is a strength slider and reflects its value", asyn
   const value = page.querySelector(".bc-readability-value");
   assert.equal(slider.getAttribute("min"), "0");
   assert.equal(slider.getAttribute("max"), "100");
-  assert.equal(slider.value, "100");
-  assert.equal(value.textContent, "100%");
+  assert.equal(slider.value, "60");
+  assert.equal(value.textContent, "60%");
 
   slider.value = "40";
   slider.listeners.get("input")[0].handler({ stopPropagation() {} });
@@ -380,19 +380,20 @@ test("the readability control is a strength slider and reflects its value", asyn
   assert.equal(value.textContent, "40%");
 
   page.querySelector('[data-act="readability-reset"]').click();
-  assert.deepEqual(calls, [40, 100], "the arrow writes the 100% default");
-  assert.equal(slider.value, "100");
-  assert.equal(value.textContent, "100%");
+  assert.deepEqual(calls, [40, 60], "the arrow writes the 60% default");
+  assert.equal(slider.value, "60");
+  assert.equal(value.textContent, "60%");
   tick();
 });
 
 /**
- * ADR 0011 §3.2/§3.3 freeze the two channels and the four advanced steps. The
- * values must be live before the settings dialog ever opens — the material
- * covers the whole app — and the rows must show what is applied, not what the
- * markup happened to ship.
+ * The field feedback (t17/t18) revised two defaults: the panel plate is 60%
+ * (not the ADR's 100%) and the page blur is on. The other values are still the
+ * frozen ADR ones, and every row must be live before the settings dialog opens
+ * — the material covers the whole app — showing what is applied rather than
+ * what the markup happened to ship.
  */
-test("the material rows start at the ADR defaults and apply them on load", async () => {
+test("the material rows start at their defaults and apply them on load", async () => {
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   await loadConsole(document);
@@ -403,7 +404,7 @@ test("the material rows start at the ADR defaults and apply them on load", async
   assert.equal(root.style.getPropertyValue("--bc-material-alpha-step"), "8");
   assert.equal(root.style.getPropertyValue("--bc-material-blur-step"), "2");
   assert.equal(root.style.getPropertyValue("--bc-material-max-blur"), "8");
-  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "up");
+  assert.equal(root.dataset.bcPageBlur, "true", "page blur is on by default");
 
   navCell(document).click();
   const page = pageEl(document);
@@ -415,9 +416,11 @@ test("the material rows start at the ADR defaults and apply them on load", async
   assert.match(page.innerHTML, /插件页、技能页/, "the row says which pages it covers");
   assert.equal(
     page.querySelector(".bc-readability-slider").value,
-    "100",
-    "the panel row keeps its own 100% default",
+    "60",
+    "the panel row defaults to 60%",
   );
+  assert.equal(page.querySelector(".bc-readability-value").textContent, "60%");
+  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已开");
 
   for (const [sliderSelector, min, max, value, labelSelector, label] of [
     [".bc-alpha-step-slider", "0", "30", "8", ".bc-alpha-step-value", "8%"],
@@ -431,9 +434,6 @@ test("the material rows start at the ADR defaults and apply them on load", async
     assert.equal(page.querySelector(labelSelector).textContent, label, `${labelSelector} label`);
   }
 
-  const direction = page.querySelector('[data-act="direction"]');
-  assert.equal(direction.textContent, "越上层越实");
-  assert.equal(direction.getAttribute("aria-pressed"), "true");
   assert.match(page.innerHTML, /<h3 class="bc-group-title">高级设置<\/h3>/);
 });
 
@@ -513,7 +513,6 @@ test("the material reset arrows write the ADR defaults", async () => {
   storage.setItem("beauticode-material-alpha-step", "20");
   storage.setItem("beauticode-material-blur-step", "5");
   storage.setItem("beauticode-material-max-blur", "12");
-  storage.setItem("beauticode-material-direction", "down");
   await loadConsole(document, { storage });
   navCell(document).click();
 
@@ -522,7 +521,6 @@ test("the material reset arrows write the ADR defaults", async () => {
   assert.equal(page.querySelector(".bc-alpha-step-value").textContent, "20%");
   assert.equal(page.querySelector(".bc-blur-step-value").textContent, "5px");
   assert.equal(page.querySelector(".bc-max-blur-value").textContent, "12px");
-  assert.equal(page.querySelector('[data-act="direction"]').textContent, "越上层越透");
 
   page.querySelector('[data-act="page-material-reset"]').click();
   assert.equal(storage.getItem("beauticode-page-material"), "30");
@@ -536,39 +534,72 @@ test("the material reset arrows write the ADR defaults", async () => {
   page.querySelector('[data-act="max-blur-reset"]').click();
   assert.equal(storage.getItem("beauticode-material-max-blur"), "8");
   assert.equal(page.querySelector(".bc-max-blur-value").textContent, "8px");
-  page.querySelector('[data-act="direction-reset"]').click();
-  assert.equal(storage.getItem("beauticode-material-direction"), "up");
-  assert.equal(page.querySelector('[data-act="direction"]').textContent, "越上层越实");
-  assert.equal(page.querySelector('[data-act="direction"]').getAttribute("aria-pressed"), "true");
-  assert.equal(rootEl(document).style.getPropertyValue("--bc-material-direction"), "up");
-});
-
-test("the direction toggle flips the nested ramp and stores it", async () => {
-  const document = createConsoleDocument();
-  mountSettingsDialog(document);
-  const runtime = await loadConsole(document);
-  navCell(document).click();
-
-  const page = pageEl(document);
-  const root = rootEl(document);
-  const direction = page.querySelector('[data-act="direction"]');
-  direction.click();
-  assert.equal(runtime.storage.getItem("beauticode-material-direction"), "down");
-  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "down");
-  assert.equal(direction.textContent, "越上层越透");
-  assert.equal(direction.getAttribute("aria-pressed"), "false");
-  direction.click();
-  assert.equal(runtime.storage.getItem("beauticode-material-direction"), "up");
-  assert.equal(direction.textContent, "越上层越实");
-  assert.equal(direction.getAttribute("aria-pressed"), "true");
 });
 
 /**
- * The page blur (and its backplate) is an opt-in experiment with known side
- * effects, so it ships off: the default must stay the alpha-only page material
- * from the ADR follow-up, and the row has to say what turning it on can do.
+ * t21 fixed the nested ramp to "越上层越实" and removed the preference, so the
+ * console has no direction row. An old beauticode-material-direction value must
+ * be ignored: not read, not rendered, not rewritten, and not sent to the API.
  */
-test("the experimental page blur starts off and explains its cost", async () => {
+test("an old material-direction preference is ignored", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem("beauticode-material-direction", "down");
+  const runtime = await loadConsole(document, { storage });
+  navCell(document).click();
+
+  const page = pageEl(document);
+  const root = rootEl(document);
+  assert.equal(page.querySelector('[data-act="direction"]'), null, "the direction row is gone");
+  assert.doesNotMatch(page.innerHTML, /自动档位方向|越上层越实|越上层越透/);
+  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "", "no direction variable");
+
+  dragSlider(page.querySelector(".bc-alpha-step-slider"), 20);
+  assert.equal(storage.getItem("beauticode-material-alpha-step"), "20");
+  assert.equal(
+    storage.getItem("beauticode-material-direction"),
+    "down",
+    "the old key is neither migrated nor rewritten",
+  );
+  runtime.emitStorage("beauticode-material-direction", "up");
+  assert.equal(page.querySelector('[data-act="direction"]'), null, "and a change to it changes nothing");
+  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "");
+});
+
+test("the console never sends a direction to the material API", async () => {
+  const document = createConsoleDocument();
+  mountSettingsDialog(document);
+  const storage = createMemoryStorage();
+  storage.setItem("beauticode-material-direction", "down");
+  let api = null;
+  await loadConsole(document, {
+    storage,
+    prepare(context) {
+      api = installLayeredMaterial(context, storage);
+    },
+  });
+  navCell(document).click();
+
+  const page = pageEl(document);
+  dragSlider(page.querySelector(".bc-alpha-step-slider"), 20);
+  dragSlider(page.querySelector(".bc-blur-step-slider"), 4);
+  dragSlider(page.querySelector(".bc-max-blur-slider"), 10);
+  page.querySelector('[data-act="page-blur"]').click();
+
+  const sentDirection = api.calls.some(
+    ([method, argument]) => method === "setMaterial" && argument && "direction" in argument,
+  );
+  assert.equal(sentDirection, false, "direction is fixed since t21");
+  assert.equal(storage.getItem("beauticode-material-direction"), "down", "the old key stays untouched");
+});
+
+/**
+ * The field feedback (t17/t18) made the page blur a normal, on-by-default
+ * switch: the row no longer advertises an experiment, the copy says what
+ * switching it off leaves behind, and the html flag is published at load.
+ */
+test("the page blur is on by default and explains what it does", async () => {
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   const runtime = await loadConsole(document);
@@ -576,17 +607,18 @@ test("the experimental page blur starts off and explains its cost", async () => 
 
   const page = pageEl(document);
   const root = rootEl(document);
-  assert.match(page.innerHTML, /页面模糊（实验）/);
-  assert.match(page.innerHTML, /默认关闭；开启后会启用页面背板，可能影响页面内 fixed\/absolute\/高层浮层/);
-  assert.match(page.innerHTML, /仅建议现场试验/);
+  assert.match(page.innerHTML, /<span class="bc-row-title">页面模糊<\/span>/);
+  assert.match(page.innerHTML, /给页面加模糊；关闭后页面只保留底色/);
+  assert.doesNotMatch(page.innerHTML, /实验/, "the experiment wording is gone");
+  assert.doesNotMatch(page.innerHTML, /仅建议现场试验/);
 
   const toggle = page.querySelector('[data-act="page-blur"]');
-  assert.equal(toggle.textContent, "已关");
-  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(toggle.textContent, "已开");
+  assert.equal(toggle.getAttribute("aria-pressed"), "true");
   assert.equal(toggle.disabled, false, "the page channel is on by default");
   assert.equal(page.querySelector('[data-act="page-blur-reset"]').disabled, false);
   assert.equal(page.querySelector(".bc-row-hint").hidden, true);
-  assert.equal(root.dataset.bcPageBlur, undefined, "the backplate stays off");
+  assert.equal(root.dataset.bcPageBlur, "true", "the backplate is on by default");
   assert.equal(
     runtime.storage.getItem("beauticode-page-blur"),
     null,
@@ -598,7 +630,7 @@ test("the experimental page blur starts off and explains its cost", async () => 
  * The switch stores only "true"/"false" and publishes the html flag the
  * backplate CSS requires; it never disturbs the page/panel channel keys.
  */
-test("the experimental page blur stores its switch and marks the html root", async () => {
+test("the page blur switch stores its value and marks the html root", async () => {
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   const runtime = await loadConsole(document);
@@ -609,10 +641,10 @@ test("the experimental page blur stores its switch and marks the html root", asy
   const toggle = page.querySelector('[data-act="page-blur"]');
 
   toggle.click();
-  assert.equal(runtime.storage.getItem("beauticode-page-blur"), "true");
-  assert.equal(root.dataset.bcPageBlur, "true");
-  assert.equal(toggle.textContent, "已开");
-  assert.equal(toggle.getAttribute("aria-pressed"), "true");
+  assert.equal(runtime.storage.getItem("beauticode-page-blur"), "false");
+  assert.equal(root.dataset.bcPageBlur, undefined);
+  assert.equal(toggle.textContent, "已关");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
   assert.ok(
     runtime.windowEvents().includes("beauticode-material-change"),
     "readability.js is told to rebuild the page backplate",
@@ -621,38 +653,38 @@ test("the experimental page blur stores its switch and marks the html root", asy
   assert.equal(runtime.storage.getItem("beauticode-material-alpha-step"), null);
 
   toggle.click();
-  assert.equal(runtime.storage.getItem("beauticode-page-blur"), "false");
-  assert.equal(root.dataset.bcPageBlur, undefined);
-  assert.equal(toggle.textContent, "已关");
-  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(runtime.storage.getItem("beauticode-page-blur"), "true");
+  assert.equal(root.dataset.bcPageBlur, "true");
+  assert.equal(toggle.textContent, "已开");
+  assert.equal(toggle.getAttribute("aria-pressed"), "true");
 });
 
-test("the page blur reset arrow writes the off default", async () => {
+test("the page blur reset arrow writes the on default", async () => {
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   const storage = createMemoryStorage();
-  storage.setItem("beauticode-page-blur", "true");
+  storage.setItem("beauticode-page-blur", "false");
   await loadConsole(document, { storage });
   navCell(document).click();
 
   const page = pageEl(document);
   const root = rootEl(document);
-  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已开", "the stored option wins");
-  assert.equal(root.dataset.bcPageBlur, "true");
+  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已关", "the stored option wins");
+  assert.equal(root.dataset.bcPageBlur, undefined);
 
   page.querySelector('[data-act="page-blur-reset"]').click();
-  assert.equal(storage.getItem("beauticode-page-blur"), "false");
-  assert.equal(root.dataset.bcPageBlur, undefined);
-  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已关");
-  assert.equal(page.querySelector('[data-act="page-blur"]').getAttribute("aria-pressed"), "false");
+  assert.equal(storage.getItem("beauticode-page-blur"), "true");
+  assert.equal(root.dataset.bcPageBlur, "true");
+  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已开");
+  assert.equal(page.querySelector('[data-act="page-blur"]').getAttribute("aria-pressed"), "true");
 });
 
 /**
- * Without a page plate the experiment has nothing to blur, so the row greys
- * out and explains itself instead of storing an option with no effect. The
- * stored choice survives: turning the page material back on restores it.
+ * Without a page plate the switch has nothing to blur, so the row greys out and
+ * explains itself instead of storing an option with no effect. The preference
+ * survives: turning the page material back on restores it.
  */
-test("page 0% disables the experimental page blur and says why", async () => {
+test("page 0% disables the page blur and says why", async () => {
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   const runtime = await loadConsole(document);
@@ -662,7 +694,7 @@ test("page 0% disables the experimental page blur and says why", async () => {
   const root = rootEl(document);
   const toggle = page.querySelector('[data-act="page-blur"]');
   const reset = page.querySelector('[data-act="page-blur-reset"]');
-  toggle.click();
+  assert.equal(toggle.textContent, "已开");
   assert.equal(root.dataset.bcPageBlur, "true");
 
   dragSlider(page.querySelector(".bc-page-material-slider"), 0);
@@ -671,28 +703,26 @@ test("page 0% disables the experimental page blur and says why", async () => {
   assert.equal(page.querySelector(".bc-row-hint").hidden, false);
   assert.match(page.innerHTML, /需要页面材质/);
   assert.equal(root.dataset.bcPageBlur, undefined, "no page flag while the page channel is off");
+  toggle.click();
   assert.equal(
     runtime.storage.getItem("beauticode-page-blur"),
-    "true",
-    "the option is remembered, not silently dropped",
+    null,
+    "a disabled switch is a no-op and does not write the default",
   );
-  toggle.click();
-  assert.equal(runtime.storage.getItem("beauticode-page-blur"), "true", "a disabled switch is a no-op");
-  assert.equal(toggle.textContent, "已开", "the row still shows the stored option");
+  assert.equal(toggle.textContent, "已开", "the row still shows the preference");
 
   dragSlider(page.querySelector(".bc-page-material-slider"), 30);
   assert.equal(toggle.disabled, false);
   assert.equal(reset.disabled, false);
   assert.equal(page.querySelector(".bc-row-hint").hidden, true);
-  assert.equal(root.dataset.bcPageBlur, "true", "the remembered option applies again");
+  assert.equal(root.dataset.bcPageBlur, "true", "the preference applies again");
 });
 
-test("the console drives the experimental page blur through readability.js' API", async () => {
+test("the console drives the page blur through readability.js' API", async () => {
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   const storage = createMemoryStorage();
   storage.setItem("beauticode-page-material", "35");
-  storage.setItem("beauticode-page-blur", "true");
   let api = null;
   await loadConsole(document, {
     storage,
@@ -702,7 +732,7 @@ test("the console drives the experimental page blur through readability.js' API"
   });
 
   const root = rootEl(document);
-  assert.equal(root.dataset.bcPageBlur, "true", "the bridge publishes the stored experiment");
+  assert.equal(root.dataset.bcPageBlur, "true", "the bridge publishes the default-on option");
   navCell(document).click();
 
   const page = pageEl(document);
@@ -730,7 +760,6 @@ test("a page-blur bridge that throws falls back to the standalone write", async 
   const document = createConsoleDocument();
   mountSettingsDialog(document);
   const storage = createMemoryStorage();
-  storage.setItem("beauticode-page-blur", "true");
   await loadConsole(document, {
     storage,
     prepare(context) {
@@ -747,7 +776,7 @@ test("a page-blur bridge that throws falls back to the standalone write", async 
   assert.equal(
     root.dataset.bcPageBlur,
     "true",
-    "the stored option still reaches the html flag at load",
+    "the default-on option still reaches the html flag at load",
   );
   navCell(document).click();
   const page = pageEl(document);
@@ -778,9 +807,13 @@ test("a denied storage write still shows and applies the page blur", async () =>
   const page = pageEl(document);
   const toggle = page.querySelector('[data-act="page-blur"]');
   toggle.click();
-  assert.equal(toggle.textContent, "已开", "the row keeps the in-memory value");
-  assert.equal(toggle.getAttribute("aria-pressed"), "true");
-  assert.equal(rootEl(document).dataset.bcPageBlur, "true", "and the flag applies to this window");
+  assert.equal(toggle.textContent, "已关", "the row keeps the in-memory value");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(rootEl(document).dataset.bcPageBlur, undefined, "and the flag follows it");
+
+  toggle.click();
+  assert.equal(toggle.textContent, "已开");
+  assert.equal(rootEl(document).dataset.bcPageBlur, "true");
   assert.equal(storage.getItem("beauticode-page-blur"), null, "nothing persisted, and nothing pretends to");
 });
 
@@ -793,27 +826,30 @@ test("another window's page blur preference re-renders the row", async () => {
 
   const page = pageEl(document);
   const root = rootEl(document);
-  runtime.emitStorage("beauticode-page-blur", "true");
   assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已开");
-  assert.equal(page.querySelector('[data-act="page-blur"]').getAttribute("aria-pressed"), "true");
-  assert.equal(root.dataset.bcPageBlur, "true");
 
   runtime.emitStorage("beauticode-page-blur", "false");
   assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已关");
+  assert.equal(page.querySelector('[data-act="page-blur"]').getAttribute("aria-pressed"), "false");
   assert.equal(root.dataset.bcPageBlur, undefined);
+
+  runtime.emitStorage("beauticode-page-blur", "true");
+  assert.equal(page.querySelector('[data-act="page-blur"]').textContent, "已开");
+  assert.equal(root.dataset.bcPageBlur, "true");
 });
 
 /**
- * Only the literal "true" turns the experiment on. Old builds never wrote this
- * key at all, and a corrupt value must not enable a known-risky mode.
+ * Page blur is on by default; only the literal "false" opts out. Old builds
+ * never wrote this key, and a corrupt value must not silently disable the
+ * shipped default.
  */
-test("invalid or legacy page-blur preferences read as off", async () => {
+test("only the literal false turns the page blur off", async () => {
   for (const [raw, expected] of [
-    [null, "已关"],
-    ["false", "已关"],
+    [null, "已开"],
     ["true", "已开"],
-    ["1", "已关"],
-    ["yes", "已关"],
+    ["false", "已关"],
+    ["1", "已开"],
+    ["yes", "已开"],
   ]) {
     const document = createConsoleDocument();
     mountSettingsDialog(document);
@@ -831,6 +867,11 @@ test("invalid or legacy page-blur preferences read as off", async () => {
     assert.equal(
       page.querySelector('[data-act="page-blur"]').getAttribute("aria-pressed"),
       expected === "已开" ? "true" : "false",
+    );
+    assert.equal(
+      rootEl(document).dataset.bcPageBlur,
+      expected === "已开" ? "true" : undefined,
+      `stored ${raw} publishes the matching flag`,
     );
   }
 });
@@ -853,9 +894,9 @@ test("0% page material drops only the page channel", async () => {
   assert.equal(storage.getItem("beauticode-page-material"), "0");
   assert.equal(root.dataset.bcPageMaterial, undefined, "the page gate is removed, not set to false");
   assert.equal(root.style.getPropertyValue("--bc-page-material-strength"), "");
-  assert.equal(panel.get(), 100, "the panel strength is untouched");
+  assert.equal(panel.get(), 60, "the panel strength is untouched");
   assert.equal(storage.getItem("beauticode-readable-surfaces"), null);
-  assert.equal(page.querySelector(".bc-readability-slider").value, "100");
+  assert.equal(page.querySelector(".bc-readability-slider").value, "60");
 
   dragSlider(page.querySelector(".bc-page-material-slider"), 30);
   assert.equal(root.dataset.bcPageMaterial, "true");
@@ -911,9 +952,6 @@ test("another window's material changes re-render the rows", async () => {
   assert.equal(page.querySelector(".bc-blur-step-value").textContent, "4px");
   runtime.emitStorage("beauticode-material-max-blur", "10");
   assert.equal(page.querySelector(".bc-max-blur-value").textContent, "10px");
-  runtime.emitStorage("beauticode-material-direction", "down");
-  assert.equal(page.querySelector('[data-act="direction"]').textContent, "越上层越透");
-  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "down");
 
   runtime.emitStorage("beauticode-unrelated", "x");
   assert.equal(page.querySelector(".bc-page-material-value").textContent, "55%", "unrelated keys are ignored");
@@ -933,7 +971,6 @@ test("invalid stored material values fall back to the ADR defaults", async () =>
   storage.setItem("beauticode-material-alpha-step", "-4");
   storage.setItem("beauticode-material-blur-step", "99");
   storage.setItem("beauticode-material-max-blur", "oops");
-  storage.setItem("beauticode-material-direction", "sideways");
   await loadConsole(document, { storage });
   navCell(document).click();
 
@@ -942,22 +979,22 @@ test("invalid stored material values fall back to the ADR defaults", async () =>
   assert.equal(page.querySelector(".bc-alpha-step-value").textContent, "0%", "out of range is clamped");
   assert.equal(page.querySelector(".bc-blur-step-value").textContent, "8px", "too large is clamped");
   assert.equal(page.querySelector(".bc-max-blur-value").textContent, "8px", "unparsable falls back");
-  assert.equal(page.querySelector('[data-act="direction"]').textContent, "越上层越实");
-  assert.equal(rootEl(document).style.getPropertyValue("--bc-material-direction"), "up");
 });
 
 /**
  * The panel key predates this work. Old builds stored "true"/"false"; newer
  * ones store 0-100. The row must show what readability.js reports for either
- * spelling and must not migrate the key behind its back.
+ * spelling (missing/"true" = the 60% default) and must not migrate the key
+ * behind its back.
  */
 test("the panel row still reads the legacy beauticode-readable-surfaces value", async () => {
   for (const [raw, expected] of [
-    [null, "100%"],
-    ["true", "100%"],
+    [null, "60%"],
+    ["true", "60%"],
     ["false", "0%"],
     ["40", "40%"],
-    ["oops", "100%"],
+    ["35", "35%"],
+    ["oops", "60%"],
   ]) {
     const document = createConsoleDocument();
     mountSettingsDialog(document);
@@ -1035,11 +1072,6 @@ test("the console drives the layered preferences through readability.js' API", a
   assert.equal(storage.getItem("beauticode-material-blur-step"), "3");
   dragSlider(page.querySelector(".bc-max-blur-slider"), 6);
   assert.equal(storage.getItem("beauticode-material-max-blur"), "6");
-
-  page.querySelector('[data-act="direction"]').click();
-  assert.deepEqual(api.calls.at(-1), ["setMaterial", { direction: "down" }]);
-  assert.equal(storage.getItem("beauticode-material-direction"), "down");
-  assert.equal(root.style.getPropertyValue("--bc-material-direction"), "down");
 
   page.querySelector('[data-act="page-material-reset"]').click();
   assert.deepEqual(api.calls.at(-1), ["setPage", 30]);
@@ -1265,18 +1297,19 @@ const dragSlider = (slider, value) => {
 };
 
 /**
- * Stands in for readability.js, the owner of the panel key. It keeps the old
- * boolean / 0-100 semantics the ADR preserves ("true" = 100, "false" = 0, a
- * number is clamped, anything else falls back to 100) and publishes the value
- * through the same global the console already calls.
+ * Stands in for readability.js, the owner of the panel key. It keeps the
+ * boolean / 0-100 semantics readability applies ("true"/missing = the 60%
+ * default, "false" = 0, a number is preserved and clamped, anything else falls
+ * back to 60) and publishes the value through the same global the console
+ * already calls.
  */
 function installReadableSurfaces(context, storage) {
   const read = () => {
     const raw = storage.getItem("beauticode-readable-surfaces");
-    if (raw == null || raw === "" || raw === "true") return 100;
+    if (raw == null || raw === "" || raw === "true") return 60;
     if (raw === "false") return 0;
     const n = Number(raw);
-    return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 100;
+    return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 60;
   };
   let strength = read();
   context.BeauticodeReadableSurfaces = {
@@ -1309,11 +1342,10 @@ function installReadableSurfaces(context, storage) {
 function installLayeredMaterial(context, storage) {
   const defaults = {
     page: 30,
-    panel: 100,
+    panel: 60,
     alphaStep: 8,
     blurStep: 2,
     maxBlur: 8,
-    direction: "up",
   };
   const num = (value, min, max, fallback) => {
     const n = Number(value);
@@ -1329,22 +1361,22 @@ function installLayeredMaterial(context, storage) {
     alphaStep: readNumber("beauticode-material-alpha-step", 0, 30, defaults.alphaStep),
     blurStep: readNumber("beauticode-material-blur-step", 0, 8, defaults.blurStep),
     maxBlur: readNumber("beauticode-material-max-blur", 0, 16, defaults.maxBlur),
-    direction: storage.getItem("beauticode-material-direction") === "down" ? "down" : "up",
-    pageBlur: storage.getItem("beauticode-page-blur") === "true",
+    // On by default; only the literal "false" opts out, exactly as readability.
+    pageBlur: storage.getItem("beauticode-page-blur") !== "false",
   };
   const calls = [];
   const root = context.document.documentElement;
+  // t21 fixed the ramp to 越上层越实, so getMaterial carries the three steps.
   const snapshot = () => ({
     alphaStep: state.alphaStep,
     blurStep: state.blurStep,
     maxBlur: state.maxBlur,
-    direction: state.direction,
   });
   const emit = (type) => context.dispatchEvent(new context.CustomEvent(type));
   const publish = () => {
     if (state.page > 0) root.dataset.bcPageMaterial = "true";
     else delete root.dataset.bcPageMaterial;
-    // The experiment needs both this html flag and the page root's own blur
+    // The page blur needs both this html flag and the page root's own blur
     // marker; page 0% keeps the stored option but removes the flag.
     if (state.pageBlur && state.page > 0) root.dataset.bcPageBlur = "true";
     else delete root.dataset.bcPageBlur;
@@ -1352,13 +1384,12 @@ function installLayeredMaterial(context, storage) {
     root.style.setProperty("--bc-material-alpha-step", String(state.alphaStep));
     root.style.setProperty("--bc-material-blur-step", String(state.blurStep));
     root.style.setProperty("--bc-material-max-blur", String(state.maxBlur));
-    root.style.setProperty("--bc-material-direction", state.direction);
   };
   context.BeauticodeReadableSurfaces = {
     defaults,
     get: () => state.panel,
     set(value) {
-      const next = typeof value === "boolean" ? (value ? 100 : 0) : num(value, 0, 100, state.panel);
+      const next = typeof value === "boolean" ? (value ? 60 : 0) : num(value, 0, 100, state.panel);
       state.panel = next;
       storage.setItem("beauticode-readable-surfaces", next === 0 ? "false" : String(next));
       emit("beauticode-readability-change");
@@ -1390,16 +1421,13 @@ function installLayeredMaterial(context, storage) {
         state.maxBlur = num(patch.maxBlur, 0, 16, state.maxBlur);
         storage.setItem("beauticode-material-max-blur", String(state.maxBlur));
       }
-      if (patch.direction !== undefined) {
-        state.direction = patch.direction === "down" ? "down" : "up";
-        storage.setItem("beauticode-material-direction", state.direction);
-      }
+      // t21: direction is fixed and any direction field is silently ignored.
       publish();
       emit("beauticode-material-change");
       return snapshot();
     },
-    // Experimental page blur: the option survives page 0% (only the html flag
-    // goes away), exactly like the real readability.js.
+    // Page blur: on by default, and the option survives page 0% (only the html
+    // flag goes away), exactly like the real readability.js.
     getPageBlur: () => state.pageBlur,
     setPageBlur(value) {
       calls.push(["setPageBlur", value]);
@@ -1620,7 +1648,6 @@ test("every reset arrow in the page markup has a rule in the injected sheet", as
       "bc-blur-reset",
       "bc-blur-step-reset",
       "bc-dim-reset",
-      "bc-direction-reset",
       "bc-max-blur-reset",
       "bc-page-blur-reset",
       "bc-page-material-reset",
@@ -1628,8 +1655,8 @@ test("every reset arrow in the page markup has a rule in the injected sheet", as
     ],
     "every row exposes a reset arrow",
   );
-  // The sheet writes the three as one selector list (`.bc-readability-reset,
-  // .bc-dim-reset,.bc-blur-reset{…}`) precisely so they cannot drift, so locate
+  // The sheet writes every reset arrow as one selector list (`.bc-readability-reset,
+  // .bc-dim-reset,.bc-blur-reset,…{…}`) precisely so they cannot drift, so locate
   // the declaration block by finding the class name and then reading forward to
   // its braces: a regex anchored on `\.name\{` would only accept the
   // one-class-per-rule shape.
@@ -1749,15 +1776,15 @@ test("console page follows the settings row recipe", async () => {
     "no other control sits between them",
   );
   // Display preferences (fullscreen, page material, panel material, shadow,
-  // blur, sound) plus the four advanced material rows, the experimental page
-  // blur, import, gallery and clear.
-  assert.equal(page.querySelectorAll(".bc-row-title").length, 14);
-  assert.equal(page.querySelectorAll(".bc-row-desc").length, 14);
+  // blur, sound) plus the three advanced material rows, the page blur, import,
+  // gallery and clear. The direction row was removed with the preference (t21).
+  assert.equal(page.querySelectorAll(".bc-row-title").length, 13);
+  assert.equal(page.querySelectorAll(".bc-row-desc").length, 13);
   assert.ok(page.querySelector('[data-act="sound"]'));
   assert.ok(page.querySelector('[data-act="clear"]'));
   assert.ok(page.querySelector('[data-act="gallery"]'));
-  assert.ok(page.querySelector('[data-act="direction"]'), "the direction toggle is a row");
-  assert.ok(page.querySelector('[data-act="page-blur"]'), "the experimental page blur is a row");
+  assert.equal(page.querySelector('[data-act="direction"]'), null);
+  assert.ok(page.querySelector('[data-act="page-blur"]'), "the page blur is a row");
   assert.ok(page.querySelector(".bc-themes"));
   assert.ok(runtime.source.includes("--dsw-alias-border-l2"), "rows use the shipped tokens");
 });
