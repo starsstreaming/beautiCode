@@ -18,6 +18,7 @@
 
 import { parseColorAlpha } from "./color.js";
 import { DARK_THEME_ROOT } from './theme-selectors.js';
+import { SURFACE_BASE_VAR } from "./contract.js";
 
 /**
  * Surface tokens we want. Kept as a source string so the page-side scan reuses it.
@@ -81,14 +82,48 @@ export const DEFAULT_TOKEN_ALPHA = 0.82;
 export const TOKEN_OVERLAY_STYLE_ID = "beauticode-token-overlay";
 
 /**
+ * Third shadow site, measured 2026-11-14 on WorkBuddy 5.11.3: the shell now
+ * re-declares surface tokens on `.teams-container.is-mac` (and on its
+ * `[data-theme="dark"] .teams-container.is-mac` variant) —
+ * `--wb-home-bg-secondary: #141414` / `#fff`, `--wb-home-bg-primary: #1f1f1f`.
+ * That carrier sits INSIDE body, so the html-level mirror is only inherited
+ * there and the element's own declaration wins outright; result: the right pane
+ * repainted `rgb(20,20,20)` and the wallpaper stopped at the sidebar edge.
+ *
+ * Mirroring the whole overlay on the carrier is safe because for every token the
+ * host does NOT redeclare at that scope our value is identical to the inherited
+ * one — the only behavioural change is on the shadowed tokens.
+ */
+export const TOKEN_SCOPE_MIRROR_SELECTORS: readonly string[] = Object.freeze([
+  ".teams-container",
+]);
+
+const LIGHT_MIRROR_SELECTORS = TOKEN_SCOPE_MIRROR_SELECTORS.map(
+  (selector) => `html:not(.dark):not(.cb-dark) ${selector}`,
+);
+const DARK_MIRROR_SELECTORS = TOKEN_SCOPE_MIRROR_SELECTORS.flatMap((selector) => [
+  `html.dark ${selector}`,
+  `html.cb-dark ${selector}`,
+]);
+
+/**
  * The host injects its theme sheet dynamically, so an override that merely ties
  * on specificity can lose when the theme sheet lands after ours. `html:root`
  * (0,1,1) beats a bare `:root`/`.light` (0,1,0) regardless of order, and
  * `html:root.dark` (0,2,1) beats everything the host uses for dark.
+ * Since 5.11 the host ALSO re-declares surface tokens on `.teams-container`
+ * (`.teams-container.is-mac` and its `[data-theme="dark"]` variant), which
+ * html-level rules can never out-reach — inheritance picks the nearest
+ * declaration, so the element's own declaration wins outright. The same
+ * declarations are therefore mirrored on that carrier too, gated on the html
+ * theme classes we already key everything else to, so light and dark can never
+ * match at the same time.
  */
-const DEFAULT_LIGHT_SELECTOR = "html:root";
-const DEFAULT_DARK_SELECTOR =
-  `html:root.dark,html:root.cb-dark,html.dark,html.cb-dark,body[data-theme="dark"],[data-theme="dark"],${DARK_THEME_ROOT}`;
+const DEFAULT_LIGHT_SELECTOR = ["html:root", ...LIGHT_MIRROR_SELECTORS].join(",");
+const DEFAULT_DARK_SELECTOR = [
+  `html:root.dark,html:root.cb-dark,html.dark,html.cb-dark,body[data-theme="dark"],[data-theme="dark"],${DARK_THEME_ROOT}`,
+  ...DARK_MIRROR_SELECTORS,
+].join(",");
 
 /**
  * Build the overlay CSS from a token scan.
@@ -269,8 +304,17 @@ export const HARDCODED_NEUTRAL_MAX_CHROMA = 24;
 export const HARDCODED_SURFACE_SKIP_SELECTOR =
   "button|btn|logo|qr|avatar|swatch|dot|tag|chip|badge|fab|xterm|terminal|hljs|markdown-preview|brand|primary|danger|error|success|warning|selected|active|hover|focus|overlay|scrim|caret";
 
-/** Base token the neutralised panels are derived from (theme-aware). */
-export const HARDCODED_SURFACE_BASE_TOKEN = "--wb-bg-primary";
+/**
+ * Base token the neutralised panels are derived from (theme-aware).
+ *
+ * It MUST be an opaque colour we own. Deriving from a host surface token
+ * (`--wb-bg-primary`) nests two alphas once the token layer has made that token
+ * translucent: `color-mix(in srgb, color-mix(… 33% …) 33%, transparent)` =
+ * 0.109. Measured 2026-11-14 on 5.11.3 — the composer card carried no visible
+ * fill at all, which only became obvious once the opaque right pane stopped
+ * hiding it. Same reasoning as SURFACE_RULES in contract.ts.
+ */
+export const HARDCODED_SURFACE_BASE_TOKEN = SURFACE_BASE_VAR;
 export const HARDCODED_SURFACE_BASE_FALLBACK = "#ffffff";
 
 export interface HardcodedSurfaceOptions {

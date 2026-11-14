@@ -6,6 +6,7 @@ import {
   TOKEN_EXCLUDE_PATTERN,
   TOKEN_INCLUDE_PATTERN,
   TOKEN_SCAN_EXPRESSION,
+  TOKEN_SCOPE_MIRROR_SELECTORS,
   buildStyleKeeperExpression,
   buildTokenOverlayCss,
   isOpaqueColor,
@@ -99,8 +100,24 @@ test("overlay derives each token from itself and only touches opaque bases", () 
   // … but its opaque dark counterpart is still handled
   assert.match(css, /--cb-bg-primary:color-mix\(in srgb, #101114 82%, transparent\)/);
   // light and dark land in separate, theme-keyed blocks with raised specificity
-  assert.match(css, /^html:root\{/);
+  assert.match(css, /^html:root,/);
   assert.match(css, /html:root\.dark/);
+  // 5.11.3 added a carrier inside body (`.teams-container.is-mac`), so the
+  // html-level mirror is only inherited there and the right pane stayed opaque.
+  for (const scope of TOKEN_SCOPE_MIRROR_SELECTORS) {
+    assert.ok(
+      css.includes(`html.dark ${scope}`),
+      `dark block must mirror the overlay on ${scope}`,
+    );
+    assert.ok(
+      css.includes(`html.cb-dark ${scope}`),
+      `dark block must mirror the overlay on ${scope} (cb-dark)`,
+    );
+    assert.ok(
+      css.includes(`html:not(.dark):not(.cb-dark) ${scope}`),
+      `light block must mirror the overlay on ${scope}`,
+    );
+  }
 });
 
 test("overlay alpha is configurable and defaults are sane", () => {
