@@ -18,6 +18,7 @@
 
 import { parseColorAlpha } from "./color.js";
 import { DARK_THEME_ROOT } from './theme-selectors.js';
+import { SURFACE_BASE_VAR } from "./contract.js";
 
 /**
  * Surface tokens we want. Kept as a source string so the page-side scan reuses it.
@@ -303,8 +304,17 @@ export const HARDCODED_NEUTRAL_MAX_CHROMA = 24;
 export const HARDCODED_SURFACE_SKIP_SELECTOR =
   "button|btn|logo|qr|avatar|swatch|dot|tag|chip|badge|fab|xterm|terminal|hljs|markdown-preview|brand|primary|danger|error|success|warning|selected|active|hover|focus|overlay|scrim|caret";
 
-/** Base token the neutralised panels are derived from (theme-aware). */
-export const HARDCODED_SURFACE_BASE_TOKEN = "--wb-bg-primary";
+/**
+ * Base token the neutralised panels are derived from (theme-aware).
+ *
+ * It MUST be an opaque colour we own. Deriving from a host surface token
+ * (`--wb-bg-primary`) nests two alphas once the token layer has made that token
+ * translucent: `color-mix(in srgb, color-mix(… 33% …) 33%, transparent)` =
+ * 0.109. Measured 2026-11-14 on 5.11.3 — the composer card carried no visible
+ * fill at all, which only became obvious once the opaque right pane stopped
+ * hiding it. Same reasoning as SURFACE_RULES in contract.ts.
+ */
+export const HARDCODED_SURFACE_BASE_TOKEN = SURFACE_BASE_VAR;
 export const HARDCODED_SURFACE_BASE_FALLBACK = "#ffffff";
 
 export interface HardcodedSurfaceOptions {
