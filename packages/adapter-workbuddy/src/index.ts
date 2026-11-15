@@ -92,6 +92,7 @@ export {
   HARDCODED_SURFACE_BASE_TOKEN,
   HARDCODED_SURFACE_BASE_FALLBACK,
   HARDCODED_SURFACE_SCAN_EXPRESSION,
+  TOKEN_SCOPE_MIRROR_SELECTORS,
   buildHardcodedSurfaceCss,
   buildStyleKeeperExpression,
   type HardcodedSurfaceOptions,
