@@ -91,10 +91,21 @@ try {
       }
     }
   }
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(false));
+  const alphaOf = selector => page.evaluate(selector => {
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.fillStyle = getComputedStyle(document.querySelector(selector)).backgroundColor;
+    ctx.fillRect(0, 0, 1, 1);
+    return ctx.getImageData(0, 0, 1, 1).data[3];
+  }, selector);
+  // A mid strength is the new customer-facing knob: the plate is genuinely
+  // translucent, but still hides the transcript behind it in proportion.
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(40));
+  const mid = await alphaOf('[data-composer-card]');
+  assert.ok(mid >= 100 && mid <= 104, `40% strength paints the plate at ~40% alpha: ${mid}`);
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(0));
   const optOut = await page.locator('[data-composer-card]').evaluate(el => getComputedStyle(el).backgroundColor);
-  assert.match(optOut, /(?:0\.36|36%)/, 'opt-out restores the original translucent composer');
-  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(true));
+  assert.match(optOut, /(?:0\.36|36%)/, '0% restores the original translucent composer');
+  await page.evaluate(() => globalThis.BeauticodeReadableSurfaces.set(100));
   await page.evaluate(() => {
     document.documentElement.dataset.bcActive = 'false';
     document.documentElement.dataset.bcGallery = 'false';
