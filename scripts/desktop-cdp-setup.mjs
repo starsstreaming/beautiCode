@@ -40,8 +40,8 @@ function parseArgs(argv) {
     else if (arg === '--host') out.host = String(argv[++i] || '').toLowerCase();
     else if (arg.startsWith('--host=')) out.host = arg.slice(7).toLowerCase();
   }
-  if (out.host !== 'cursor' && out.host !== 'doubao') {
-    throw new Error('用法：node desktop-cdp-setup.mjs --host cursor|doubao install|status|uninstall');
+  if (out.host !== 'cursor' && out.host !== 'doubao' && out.host !== 'doubaowork') {
+    throw new Error('用法：node desktop-cdp-setup.mjs --host cursor|doubao|doubaowork install|status|uninstall');
   }
   return out;
 }
@@ -49,7 +49,7 @@ function parseArgs(argv) {
 const IS_LINUX = process.platform === 'linux';
 if (process.platform !== 'win32' && !IS_LINUX) throw new Error('Cursor/豆包背景守护当前仅支持 Windows 与 Linux。');
 const args = parseArgs(process.argv.slice(2));
-if (IS_LINUX && args.host !== 'cursor') throw new Error('豆包没有官方 Linux 桌面版；Linux 仅支持 Cursor。');
+if (IS_LINUX && args.host !== 'cursor') throw new Error('Linux 桌面版仅支持 Cursor；豆包和豆包工作会自动跳过。');
 const dataDir = path.join(beautiCodeLocalRoot(process.env, os.homedir()), 'hosts', args.host);
 const pidFile = path.join(dataDir, 'runner.pid');
 const logFile = path.join(dataDir, 'runner.log');
@@ -81,6 +81,57 @@ function desktopRuntimeFilter(relative, entry) {
     ? DESKTOP_RUNTIME_PREFIXES.some((prefix) => prefix.startsWith(normalized) || normalized.startsWith(prefix))
     : DESKTOP_RUNTIME_PREFIXES.some((prefix) => prefix.endsWith('/') ? normalized.startsWith(prefix) : normalized === prefix);
 }
+// The packaged aggregate rewrites workspace specifiers while staging. A source
+// install copies dist/ verbatim, but the stable runtime has no node_modules, so
+// a bare `@beauticode/*` import would crash the guardian before its first
+// process snapshot. Apply the same rewrite here.
+function rewriteWorkspaceImports(root) {
+  const targets = {
+    '@beauticode/core': path.join(root, 'packages', 'core', 'dist', 'index.js'),
+    '@beauticode/adapter-desktop-cdp': path.join(root, 'packages', 'adapter-desktop-cdp', 'dist', 'index.js'),
+  };
+  const rewriteFile = (file) => {
+    const source = fs.readFileSync(file, 'utf8');
+    let next = source;
+    for (const [specifier, target] of Object.entries(targets)) {
+      let relative = path.relative(path.dirname(file), target).replaceAll('\\', '/');
+      if (!relative.startsWith('.')) relative = `./${relative}`;
+      next = next
+        .replaceAll(`from "${specifier}"`, `from "${relative}"`)
+        .replaceAll(`from '${specifier}'`, `from '${relative}'`);
+    }
+    if (next !== source) fs.writeFileSync(file, next, 'utf8');
+  };
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules') walk(file);
+      } else if (entry.name.endsWith('.js')) {
+        rewriteFile(file);
+      }
+    }
+  };
+  walk(path.join(root, 'packages'));
+}
+
+// Fail the install instead of shipping a guardian that dies on its first import.
+function assertRuntimeImports(root) {
+  for (const entry of [
+    path.join(root, 'packages', 'adapter-desktop-cdp', 'dist', 'index.js'),
+    path.join(root, 'packages', `adapter-${args.host}`, 'dist', 'index.js'),
+  ]) {
+    const result = spawnSync(process.execPath, [
+      '--input-type=module',
+      '-e',
+      `import(${JSON.stringify(pathToFileURL(entry).href)}).then(() => {}, (error) => { console.error(error?.message || String(error)); process.exit(1); })`,
+    ], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 15_000 });
+    if (result.status !== 0) {
+      throw new Error(`稳定运行时导入自检失败：${entry}${result.stderr ? `\n${String(result.stderr).trim()}` : ''}`);
+    }
+  }
+}
+
 async function prepareStableRuntime() {
   const runtime = await syncStableRuntime({
     sourceRoot: REPO,
@@ -91,6 +142,8 @@ async function prepareStableRuntime() {
     activate: false,
   });
   try {
+    rewriteWorkspaceImports(runtime.activeRoot);
+    assertRuntimeImports(runtime.activeRoot);
     await resolveNodeExecutable({ stableRoot: runtime.hostRoot });
     return runtime;
   } catch (error) {
@@ -208,7 +261,8 @@ async function readCdpStatus() {
   try {
     const shared = await import(pathToFileURL(path.join(REPO, 'packages', 'adapter-desktop-cdp', 'dist', 'index.js')).href);
     const adapter = await import(pathToFileURL(path.join(REPO, 'packages', `adapter-${args.host}`, 'dist', 'index.js')).href);
-    const spec = args.host === 'cursor' ? adapter.CURSOR_CDP_SPEC : adapter.DOUBAO_CDP_SPEC;
+    const spec = args.host === 'cursor' ? adapter.CURSOR_CDP_SPEC
+      : args.host === 'doubaowork' ? adapter.DOUBAOWORK_CDP_SPEC : adapter.DOUBAO_CDP_SPEC;
     const processes = await shared.listDesktopProcesses(spec);
     const diagnosis = await shared.inspectDesktopUiHealth(spec);
     let executableFingerprint = null;

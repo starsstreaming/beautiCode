@@ -32,10 +32,18 @@ async function load(relative) {
   return import(pathToFileURL(path.join(runtimeRoot, relative)).href);
 }
 
+const DESKTOP_SPEC_EXPORT = Object.freeze({
+  cursor: 'CURSOR_CDP_SPEC',
+  doubao: 'DOUBAO_CDP_SPEC',
+  doubaowork: 'DOUBAOWORK_CDP_SPEC',
+});
+
 async function launchDesktop(host) {
+  const specName = DESKTOP_SPEC_EXPORT[host];
+  if (!specName) throw new Error('unsupported-host');
   const shared = await load('packages/adapter-desktop-cdp/dist/index.js');
   const adapter = await load(`packages/adapter-${host}/dist/index.js`);
-  const spec = host === 'cursor' ? adapter.CURSOR_CDP_SPEC : adapter.DOUBAO_CDP_SPEC;
+  const spec = adapter[specName];
   const processes = await shared.listDesktopProcesses(spec);
   const decision = decideDesktopQuickLaunch(processes);
   if (decision === 'ambiguous') throw new Error('multiple-main-processes');
@@ -56,7 +64,7 @@ async function launchDesktop(host) {
 
 export async function runQuickLaunch(host) {
   if (process.platform !== 'win32' && process.platform !== 'linux') throw new Error('unsupported-platform');
-  if (process.platform === 'linux' && host === 'doubao') throw new Error('unsupported-host');
+  if (process.platform === 'linux' && (host === 'doubao' || host === 'doubaowork')) throw new Error('unsupported-host');
   if (host === 'codex-plugin') {
     const packed = path.join(runtimeRoot, 'vendor', 'adapter-codex', 'index.js');
     const { ensureCodexCdp } = await load(fs.existsSync(packed)
@@ -70,7 +78,7 @@ export async function runQuickLaunch(host) {
     const ready = await ensureWorkBuddyCdp({ restartIfBlind: false, timeoutMs: 20_000 });
     return ready.launched ? 'connected' : 'already-connected';
   }
-  if (host === 'cursor' || host === 'doubao') return launchDesktop(host);
+  if (DESKTOP_SPEC_EXPORT[host]) return launchDesktop(host);
   throw new Error('unsupported-host');
 }
 

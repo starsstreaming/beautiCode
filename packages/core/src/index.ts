@@ -22,3 +22,6 @@ export * from "./process-liveness.js";
 export * from "./startup-repair-chain.js";
 export * from "./skin-catalog.js";
 export * from "./linux-process.js";
+export * from "./scene-project.js";
+export * from "./wallpaper-library.js";
+export * from "./scene-server.js";

@@ -27,7 +27,7 @@ export function defaultDataRoot(): string {
   return path.join(xdg, "beautiCode");
 }
 
-export type HostDataNamespace = "codex" | "dsh" | "workbuddy" | "cursor" | "doubao";
+export type HostDataNamespace = "codex" | "dsh" | "workbuddy" | "cursor" | "doubao" | "doubaowork";
 
 /** Keep host state separate while retaining one user-visible beautiCode root. */
 export function hostDataRoot(

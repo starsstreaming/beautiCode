@@ -1,13 +1,9 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
-import readline from "node:readline";
-import { promisify } from "node:util";
 import { StartupRepairChain, signalLinuxProcess } from "@beauticode/core";
-import { discoverDesktopCdp, parseRemoteDebuggingFlags } from "./cdp.js";
-import { buildWindowsDesktopProcessStartScript, isDesktopMainProcess, launchDesktopWithCdp, listDesktopProcesses, originalDesktopArguments, pickAvailableDesktopPort } from "./launch.js";
+import { discoverDesktopCdp } from "./cdp.js";
+import { launchDesktopWithCdp, listDesktopProcesses, originalDesktopArguments, pickAvailableDesktopPort } from "./launch.js";
 import type { DesktopCdpEndpoint, DesktopCdpHostSpec, DesktopEnsureLog, DesktopProcess } from "./types.js";
-
-const execFileAsync = promisify(execFile);
+import { stopWindowsDesktopProcess } from "./windows-process-stop.js";
 
 export const DEFAULT_DESKTOP_REPAIR_WINDOW_MS = 10_000;
 export const DEFAULT_DESKTOP_CDP_POLL_INTERVAL_MS = 150;
@@ -211,41 +207,8 @@ function processIdentity(processInfo: DesktopProcess): string {
 
 function defaultRepairOperations(
   spec: DesktopCdpHostSpec,
+  log?: DesktopEnsureLog,
 ): DesktopRepairOperations {
-  const runPowerShellForProcess = async (
-    processInfo: DesktopProcess,
-    action: "close" | "force",
-  ): Promise<boolean> => {
-    const pid = Math.trunc(processInfo.pid);
-    const createdAtMs = Math.trunc(processInfo.createdAtMs ?? 0);
-    if (pid < 1 || createdAtMs < 1) return false;
-    const script = [
-      "$ErrorActionPreference='SilentlyContinue';",
-      `$p=Get-CimInstance Win32_Process -Filter \"ProcessId=${pid}\";`,
-      `if(-not $p){exit 1};$created=0;try{$created=([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds()}catch{};`,
-      `if($created -ne ${createdAtMs}){exit 2};`,
-      action === "close"
-        ? "$proc=Get-Process -Id " + pid + " -ErrorAction SilentlyContinue;if($proc -and $proc.MainWindowHandle -ne 0){[void]$proc.CloseMainWindow();exit 0};exit 3;"
-        : `taskkill.exe /PID ${pid} /T /F | Out-Null;if($LASTEXITCODE -eq 0){exit 0};exit 4;`,
-    ].join("");
-    try {
-      await execFileAsync(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-EncodedCommand",
-          Buffer.from(script, "utf16le").toString("base64"),
-        ],
-        { windowsHide: true, timeout: action === "close" ? 2_000 : 3_000 },
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  };
   // Linux: SIGTERM is Electron's graceful quit; SIGKILL is the force path.
   // Both re-check the creation time so a recycled PID is never signalled.
   const signalForProcess = async (
@@ -258,7 +221,9 @@ function defaultRepairOperations(
       action === "close" ? "SIGTERM" : "SIGKILL",
       processInfo.createdAtMs,
     );
-  const stop = process.platform === "linux" ? signalForProcess : runPowerShellForProcess;
+  const stop = process.platform === "linux"
+    ? signalForProcess
+    : (processInfo: DesktopProcess, action: "close" | "force") => stopWindowsDesktopProcess(processInfo, action, spec, log);
   return {
     listProcesses: () => listDesktopProcesses(spec),
     terminate: (processInfo) => stop(processInfo, "close"),
@@ -286,7 +251,7 @@ export async function repairDesktopProcess(
   log?: DesktopEnsureLog,
   injected?: Partial<DesktopRepairOperations>,
 ): Promise<DesktopRepairResult> {
-  const operations = { ...defaultRepairOperations(spec), ...injected };
+  const operations = { ...defaultRepairOperations(spec, log), ...injected };
   const startedAt = operations.now();
   const reportElapsed = (stage: string, result: string) => {
     log?.info(`${spec.displayName} 启动诊断 stage=${stage} elapsedMs=${Math.max(0, operations.now() - startedAt)} result=${result}`);
@@ -296,7 +261,7 @@ export async function repairDesktopProcess(
   if (!exact || processIdentity(exact) !== processIdentity(observed)) {
     return "deferred";
   }
-  if (classifyDesktopStartupProcess(exact, operations.now()) !== "repair-now") {
+  if (classifyDesktopStartupProcess(exact, operations.now(), spec.repairWindowMs) !== "repair-now") {
     return "deferred";
   }
   if (live.some((row) => processIdentity(row) !== processIdentity(exact))) {
@@ -314,20 +279,31 @@ export async function repairDesktopProcess(
   const gracefulAt = new Map<string, number>();
   const forceAttempted = new Set<string>();
   let current = exact;
-  const deadline = operations.now() + 10_000;
+  const deadline = operations.now() + (spec.repairTransactionTimeoutMs ?? 10_000);
   let emptySnapshots = 0;
   while (operations.now() < deadline) {
     const currentKey = processIdentity(current);
     if (!killed.has(currentKey)) {
-      await operations.terminate(current);
+      const closed = await operations.terminate(current);
+      reportElapsed("graceful-close", closed ? "sent" : "failed");
       killed.add(currentKey);
       gracefulAt.set(currentKey, operations.now());
     }
     const rows = await operations.listProcesses();
+    if (operations.now() >= deadline) {
+      reportElapsed("teardown", "timeout");
+      return "failed";
+    }
     const replacement = rows.find(
       (row) => row.port == null && !killed.has(processIdentity(row)),
     );
     if (replacement) {
+      // Doubao Work replaces itself and drops the debug port. Closing that
+      // second process is the window the user just saw disappear.
+      if (spec.chaseReplacements === false) {
+        reportElapsed("replacement-kept", "deferred");
+        return "deferred";
+      }
       current = replacement;
       emptySnapshots = 0;
       continue;
@@ -344,9 +320,9 @@ export async function repairDesktopProcess(
         operations.now() - closedAt >= 500 &&
         !forceAttempted.has(currentKey)
       ) {
-        await operations.forceTerminate(sameGeneration);
+        const stopped = await operations.forceTerminate(sameGeneration);
         forceAttempted.add(currentKey);
-        reportElapsed("force-terminate", "attempted");
+        reportElapsed("force-terminate", stopped ? "sent" : "failed");
       }
       await operations.sleep(50);
       continue;
@@ -378,174 +354,6 @@ export async function repairDesktopProcess(
     return "launched";
   }
   return "failed";
-}
-
-export function startDesktopStartupRepairMonitor(
-  spec: DesktopCdpHostSpec,
-  log?: DesktopEnsureLog,
-): DesktopRepairMonitor {
-  if (process.platform === "linux") return startLinuxDesktopStartupRepairMonitor(spec, log);
-  if (process.platform !== "win32") return { close() {} };
-  let closed = false;
-  let child: ChildProcess | null = null;
-  let restartTimer: ReturnType<typeof setTimeout> | null = null;
-  const controller = new DesktopStartupRepairController((row) =>
-    repairDesktopProcess(spec, row, log, {
-      onVerification: (endpoint) => {
-        if (endpoint) controller.markVerified();
-      },
-    }),
-    Date.now,
-    DEFAULT_DESKTOP_REPAIR_WINDOW_MS,
-    spec.repairSuppressionMs ?? 0,
-  );
-
-  const tracker = new DesktopStartupSnapshotTracker(async (row) => {
-    const result = await controller.observe(row);
-    if (result === "repair-suppressed") {
-      log?.info(`${spec.displayName} 本次启动已在已验证的 CDP 修复窗口内，跳过重复修复。`);
-    } else if (result === "repair-failed") {
-      log?.warn(`${spec.displayName} CDP 修复未通过端口和目标页验证；本次进程不再自动重启。`);
-    }
-  }, { minStableSamples: 1 });
-  const start = () => {
-    if (closed) return;
-    const monitor = spawn(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        buildWindowsDesktopProcessStartScript(spec, process.pid),
-      ],
-      { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    child = monitor;
-    const lines = readline.createInterface({ input: monitor.stdout! });
-    lines.on("line", (line) => {
-      let raw: Record<string, unknown>;
-      try {
-        raw = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        return;
-      }
-      if (raw.snapshot === true && Array.isArray(raw.rows)) {
-        const rows = raw.rows.flatMap((value) => {
-          if (!value || typeof value !== "object") return [];
-          const row = value as Record<string, unknown>;
-          const commandLine = typeof row.cmd === "string" ? row.cmd : "";
-          const name = typeof row.name === "string" ? row.name : "";
-          const executablePath = typeof row.exe === "string" ? row.exe : "";
-          if (!isDesktopMainProcess(spec, commandLine, name, executablePath)) return [];
-          const flags = parseRemoteDebuggingFlags(commandLine);
-          return [{
-            pid: Number(row.pid) || 0,
-            name,
-            executablePath,
-            commandLine,
-            port: flags.safe ? flags.port : null,
-            createdAtMs: Number(row.created) || null,
-          } satisfies DesktopProcess];
-        });
-        controller.observeSnapshot(rows);
-        void tracker.observeSnapshot(rows).catch((error) => {
-          log?.warn(`${spec.displayName} 启动修复失败：${String(error)}`);
-        });
-        return;
-      }
-    });
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      lines.close();
-      if (child === monitor) child = null;
-      if (!closed) restartTimer = setTimeout(start, 1_000);
-    };
-    monitor.once("error", finish);
-    monitor.once("exit", finish);
-    void listDesktopProcesses(spec).then((rows) => {
-      controller.observeSnapshot(rows);
-      return tracker.observeSnapshot(rows);
-    }).catch((error) => {
-      log?.warn(`${spec.displayName} 快照扫描失败：${String(error)}`);
-    });
-  };
-  start();
-  return {
-    close() {
-      closed = true;
-      if (restartTimer) clearTimeout(restartTimer);
-      child?.kill();
-      child = null;
-    },
-  };
-}
-
-function createStartupRepairPipeline(
-  spec: DesktopCdpHostSpec,
-  log?: DesktopEnsureLog,
-): (rows: DesktopProcess[]) => Promise<void> {
-  const controller = new DesktopStartupRepairController((row) =>
-    repairDesktopProcess(spec, row, log, {
-      onVerification: (endpoint) => {
-        if (endpoint) controller.markVerified();
-      },
-    }),
-    Date.now,
-    DEFAULT_DESKTOP_REPAIR_WINDOW_MS,
-    spec.repairSuppressionMs ?? 0,
-  );
-  const tracker = new DesktopStartupSnapshotTracker(async (row) => {
-    const result = await controller.observe(row);
-    if (result === "repair-suppressed") {
-      log?.info(`${spec.displayName} 本次启动已在已验证的 CDP 修复窗口内，跳过重复修复。`);
-    } else if (result === "repair-failed") {
-      log?.warn(`${spec.displayName} CDP 修复未通过端口和目标页验证；本次进程不再自动重启。`);
-    }
-  }, { minStableSamples: 1 });
-  return async (rows) => {
-    controller.observeSnapshot(rows);
-    await tracker.observeSnapshot(rows);
-  };
-}
-
-/**
- * Linux has no process-start event without privileges; a 500 ms /proc
- * snapshot matches the Windows monitor's sampling interval and feeds the same
- * controller, so the one-repair-per-fresh-process invariant is shared.
- */
-function startLinuxDesktopStartupRepairMonitor(
-  spec: DesktopCdpHostSpec,
-  log?: DesktopEnsureLog,
-): DesktopRepairMonitor {
-  if (!spec.linux?.executableCandidates.length) return { close() {} };
-  const observe = createStartupRepairPipeline(spec, log);
-  let closed = false;
-  let busy = false;
-  const tick = () => {
-    if (closed || busy) return;
-    busy = true;
-    void listDesktopProcesses(spec)
-      .then((rows) => {
-        // Like the Windows monitor, a repair transaction must not block sampling.
-        void observe(rows).catch((error) => {
-          log?.warn(`${spec.displayName} 启动修复失败：${String(error)}`);
-        });
-      })
-      .catch((error) => log?.warn(`${spec.displayName} 快照扫描失败：${String(error)}`))
-      .finally(() => { busy = false; });
-  };
-  const timer = setInterval(tick, 500);
-  tick();
-  return {
-    close() {
-      closed = true;
-      clearInterval(timer);
-    },
-  };
 }
 
 export async function waitForDesktopCdp(

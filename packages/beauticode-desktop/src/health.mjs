@@ -47,7 +47,7 @@ export function createHealthRunner(deps) {
         ...(conflict ? { reason: conflict } : {}),
       };
     }
-    if (resolved.platform !== "win32" && !(resolved.platform === "linux" && host !== "doubao")) {
+    if (resolved.platform !== "win32" && !(resolved.platform === "linux" && host !== "doubao" && host !== "doubaowork")) {
       return { host, installation: "unsupported-platform", state: "not-checked" };
     }
     const runtimeRoot = options.runtimeRoot || deps.defaultRuntimeRoot;

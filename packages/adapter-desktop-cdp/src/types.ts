@@ -1,6 +1,6 @@
 import type { HostKind } from "@beauticode/core";
 
-export type DesktopCdpHostKind = Extract<HostKind, "cursor" | "doubao">;
+export type DesktopCdpHostKind = Extract<HostKind, "cursor" | "doubao" | "doubaowork">;
 
 export interface DesktopHostStrings {
   entry: string;
@@ -28,6 +28,9 @@ export interface DesktopHostStrings {
   close: string;
   image: string;
   video: string;
+  scene?: string;
+  wallpaperLibrary?: string;
+  appliedScene?: string;
   missingFile: string;
   unsupportedFile: string;
   importFailed: string;
@@ -46,6 +49,38 @@ export interface DesktopBackgroundContract {
   readingSelectors?: readonly string[];
   /** Sticky input surfaces must hide the transcript behind them. */
   opaqueSelectors?: readonly string[];
+  /**
+   * Plates that keep the host's own fill until the user turns transparency on.
+   * Missing or corrupt preferences stay opaque.
+   */
+  readabilitySelectors?: readonly string[];
+  /** Children of a readability plate. They must not add a second alpha layer. */
+  readabilityFlattenSelectors?: readonly string[];
+}
+
+/** Mount background controls inside the host settings route instead of a sidebar popup. */
+export interface DesktopSettingsContract {
+  /** The section mounts only while location.pathname includes this substring. */
+  routeIncludes: string;
+  /** Chat shell. Injection returns no-anchor when this node is missing. */
+  layoutSelector: string;
+  /** The section is parked off the chat page until this node exists on the settings route. */
+  containerSelector: string;
+  /** Wallpaper canvas that becomes one solid plate on the settings route. Empty skips that plate. */
+  canvasSelector: string;
+  /** Settings dialog. When set, the section mounts in this dialog instead of a route. */
+  modalSelector?: string;
+  /** Visible only on the nested page that should receive the section. */
+  backSelector?: string;
+  /** Exact title of that nested page. */
+  pageTitle?: string;
+  /** Exact row used to find the nested page's own group. */
+  pageMarker?: string;
+  title: string;
+  intro: string;
+  readability: string;
+  readabilityOn: string;
+  readabilityOff: string;
 }
 
 /** Exact host markers used to resolve the rendered theme without text matching. */
@@ -87,19 +122,49 @@ export interface DesktopCdpHostSpec {
   candidatePorts: readonly number[];
   /** Suppress a second repair when this host replaces its launcher and drops CDP flags. */
   repairSuppressionMs?: number;
+  /**
+   * When false, startup must not close or relaunch the host. Doubao Work
+   * drops the debug flags and restarts; chasing that restart closes the window.
+   */
+  startupRepair?: boolean;
   /** Host-specific delay after the old process tree exits and before relaunch. */
   restartDelayMs?: number;
+  /** How long a just-started process without a debug port may still be repaired. */
+  repairWindowMs?: number;
+  /** Maximum time to stop the original process and confirm its tree has exited. */
+  repairTransactionTimeoutMs?: number;
+  /** Maximum time for a Windows close or termination command. */
+  windowsProcessStopTimeoutMs?: number;
+  /**
+   * When false, a second main process stops the repair. The default still
+   * closes port-less replacements before the controlled relaunch.
+   */
+  chaseReplacements?: boolean;
   /** Minimum distance between the popup and the host window's top chrome. */
   popupTopInset: number;
   targetUrl: string;
   targetRuntimeUrl: string;
+  /**
+   * Extra hostnames that render the same shell as targetUrl. The path must
+   * still match. When several pages match, the visible one is the largest.
+   */
+  targetHostnames?: readonly string[];
   targetIdentity?: DesktopTargetIdentity;
-  mount: "cursor" | "doubao";
+  mount: "cursor" | "doubao" | "doubaowork";
   anchorSelector: string;
   anchorText: string;
   strings: DesktopHostStrings;
   contract: DesktopBackgroundContract;
   theme: DesktopThemeContract;
+  /** Present only for hosts that keep background controls in their own settings page. */
+  settings?: DesktopSettingsContract;
+  /** Host plate token, for example `--dbx-bg-base-web`. Absent hosts keep the shared fallbacks. */
+  surfaceBaseVariable?: string;
+  /**
+   * Play video in a same-origin document. Set this only when the host page's
+   * own HTMLVideoElement never finishes loading.
+   */
+  videoFrame?: boolean;
 }
 
 /** Structured identity for hosts whose renderer URL contains an install path. */

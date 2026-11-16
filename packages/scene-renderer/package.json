@@ -1,0 +1,13 @@
+{
+  "name": "@beauticode/scene-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "webwallgl": "3.0.0"
+  }
+}

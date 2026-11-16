@@ -56,7 +56,8 @@ function rewriteDesktopRunner(text) {
     .replaceAll("loadModule('@beauticode/adapter-desktop-cdp', '../packages/adapter-desktop-cdp/dist/index.js')", "loadModule('../packages/adapter-desktop-cdp/dist/index.js', '../packages/adapter-desktop-cdp/dist/index.js')")
     .replaceAll("loadModule('@beauticode/core', '../packages/core/dist/index.js')", "loadModule('../packages/core/dist/index.js', '../packages/core/dist/index.js')")
     .replaceAll("loadModule('@beauticode/adapter-cursor', '../packages/adapter-cursor/dist/index.js')", "loadModule('../packages/adapter-cursor/dist/index.js', '../packages/adapter-cursor/dist/index.js')")
-    .replaceAll("loadModule('@beauticode/adapter-doubao', '../packages/adapter-doubao/dist/index.js')", "loadModule('../packages/adapter-doubao/dist/index.js', '../packages/adapter-doubao/dist/index.js')");
+    .replaceAll("loadModule('@beauticode/adapter-doubao', '../packages/adapter-doubao/dist/index.js')", "loadModule('../packages/adapter-doubao/dist/index.js', '../packages/adapter-doubao/dist/index.js')")
+    .replaceAll("loadModule('@beauticode/adapter-doubaowork', '../packages/adapter-doubaowork/dist/index.js')", "loadModule('../packages/adapter-doubaowork/dist/index.js', '../packages/adapter-doubaowork/dist/index.js')");
 }
 
 function rewriteWorkbuddyRunner(text) {
@@ -138,7 +139,8 @@ async function copyDesktopRuntime(destRoot) {
   await rewriteJsTree(path.join(desktop, "packages", "adapter-desktop-cdp", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-cursor", "dist"), path.join(desktop, "packages", "adapter-cursor", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-doubao", "dist"), path.join(desktop, "packages", "adapter-doubao", "dist"));
-  for (const name of ["adapter-cursor", "adapter-doubao"]) {
+  await copyJsTree(path.join(repoRoot, "packages", "adapter-doubaowork", "dist"), path.join(desktop, "packages", "adapter-doubaowork", "dist"));
+  for (const name of ["adapter-cursor", "adapter-doubao", "adapter-doubaowork"]) {
     const entry = path.join(desktop, "packages", name, "dist", "index.js");
     await fsp.writeFile(entry, rewriteDesktopAdapter(await fsp.readFile(entry, "utf8")), "utf8");
   }

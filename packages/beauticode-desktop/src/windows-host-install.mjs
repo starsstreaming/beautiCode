@@ -13,14 +13,15 @@ const REGISTRY_PATHS = [
 const HOSTS = Object.freeze({
   cursor: { executable: "Cursor.exe", names: new Set(["Cursor", "Cursor (User)"]) },
   doubao: { executable: "Doubao.exe", names: new Set(["豆包", "Doubao"]) },
+  doubaowork: { executable: "DoubaoWork.exe", names: new Set(["豆包工作"]) },
 });
 
 /** Read only the display fields needed for install discovery. No user data is logged. */
-export function queryWindowsInstallRecords() {
-  if (process.platform !== "win32") return [];
+export function queryWindowsInstallRecords({ platform = process.platform, spawn = spawnSync } = {}) {
+  if (platform !== "win32") return [];
   const quoted = REGISTRY_PATHS.map((entry) => `'${entry.replaceAll("'", "''")}'`).join(",");
-  const script = `Get-ItemProperty ${quoted} -ErrorAction SilentlyContinue | Select-Object DisplayName,InstallLocation,DisplayIcon | ConvertTo-Json -Compress -Depth 3`;
-  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+  const script = `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); Get-ItemProperty ${quoted} -ErrorAction SilentlyContinue | Select-Object DisplayName,InstallLocation,DisplayIcon | ConvertTo-Json -Compress -Depth 3`;
+  const result = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf8", windowsHide: true, timeout: 8_000, maxBuffer: 256 * 1024,
   });
   if (result.status !== 0 || !String(result.stdout || "").trim()) return [];
@@ -47,10 +48,27 @@ export function resolveRegisteredExecutable(host, options = {}) {
   for (const row of query()) {
     if (!row || !config.names.has(String(row.DisplayName || "").trim())) continue;
     const candidates = [];
-    if (row.InstallLocation && path.win32.isAbsolute(String(row.InstallLocation))) {
-      candidates.push(path.win32.join(String(row.InstallLocation), config.executable));
+    if (host === "doubaowork") {
+      // Doubao Work registers an .ico beside its launcher, while its main
+      // process runs from app/. Prefer that process when both files exist.
+      const icon = displayIconExecutable(row.DisplayIcon);
+      const roots = [String(row.InstallLocation || "")];
+      if (["icon.ico", config.executable.toLowerCase()].includes(path.win32.basename(icon).toLowerCase())) {
+        roots.push(path.win32.dirname(icon));
+      }
+      for (const root of roots) {
+        // Registry entries are untrusted; do not probe UNC/network paths.
+        if (!/^[a-z]:[\\/]/i.test(root)) continue;
+        const nested = path.win32.join(root, "app", config.executable);
+        const direct = path.win32.join(root, config.executable);
+        candidates.push(exists(nested) ? nested : direct);
+      }
+    } else {
+      if (row.InstallLocation && path.win32.isAbsolute(String(row.InstallLocation))) {
+        candidates.push(path.win32.join(String(row.InstallLocation), config.executable));
+      }
+      candidates.push(displayIconExecutable(row.DisplayIcon));
     }
-    candidates.push(displayIconExecutable(row.DisplayIcon));
     for (const candidate of candidates) {
       if (!path.win32.isAbsolute(candidate) || path.win32.basename(candidate).toLowerCase() !== config.executable.toLowerCase()) continue;
       if (!exists(candidate)) continue;

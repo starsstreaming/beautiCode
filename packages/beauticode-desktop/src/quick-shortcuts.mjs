@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const NAMES = Object.freeze({ codex: 'Codex', workbuddy: 'WorkBuddy', cursor: 'Cursor', doubao: 'Doubao' });
+const NAMES = Object.freeze({ codex: 'Codex', workbuddy: 'WorkBuddy', cursor: 'Cursor', doubao: 'Doubao', doubaowork: 'DoubaoWork' });
 
 function psLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -118,7 +118,7 @@ function desktopExecQuote(value) {
 
 /** XDG application entry; an existing same-named entry we do not own is a conflict. */
 function installLinuxQuickShortcut(host, options) {
-  if (!NAMES[host] || host === 'doubao') throw new Error('unsupported-quick-launch-host');
+  if (!NAMES[host] || host === 'doubao' || host === 'doubaowork') throw new Error('unsupported-quick-launch-host');
   const launcher = options.launcher || stableQuickLauncher(host, { ...options, platform: 'linux' });
   if (!path.isAbsolute(launcher) || !fs.existsSync(launcher)) throw new Error('stable-launcher-missing');
   const applicationsDir = options.programsDir || path.join(linuxDataHome(options), 'applications');

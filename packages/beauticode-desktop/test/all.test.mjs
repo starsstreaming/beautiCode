@@ -49,6 +49,7 @@ test("all install skips missing hosts and updates detected hosts without launchi
     ["workbuddy", "skipped"],
     ["cursor", "installed"],
     ["doubao", "skipped"],
+    ["doubaowork", "skipped"],
   ]);
   assert.equal(result.ok, true);
   assert.equal(invocations.length, 2);
@@ -83,7 +84,7 @@ test("all status and detection are read-only", () => {
   const options = fakeOptions([], () => { throw new Error("must not spawn"); });
   assert.equal(detectHostAvailability("cursor", options).available, false);
   const result = getAllStatus(options);
-  assert.equal(result.hosts.length, 5);
+  assert.equal(result.hosts.length, 6);
   assert.ok(result.hosts.every((host) => host.runtimeReady && !host.installed));
   assert.equal(runAllInstall(options).ok, false);
 });
@@ -109,6 +110,15 @@ test("Linux detection uses Linux install paths and skips Doubao", () => {
   assert.equal(detectHostAvailability("codex", options).available, true);
   assert.equal(detectHostAvailability("workbuddy", options).reason, "host-not-found");
   assert.equal(detectHostAvailability("doubao", { ...options, exists: () => true }).reason, "unsupported-platform");
+  assert.equal(detectHostAvailability("doubaowork", { ...options, exists: () => true }).reason, "unsupported-platform");
+});
+
+test("Doubao Work is detected from its default nested executable", () => {
+  const options = fakeOptions([
+    "C:/Users/test/AppData/Local/DoubaoWork/Application/app/DoubaoWork.exe",
+  ], () => { throw new Error("must not spawn"); });
+  assert.equal(detectHostAvailability("doubaowork", options).available, true);
+  assert.equal(detectHostAvailability("doubaowork", fakeOptions([], () => { throw new Error("must not spawn"); })).reason, "host-not-found");
 });
 
 test("registered Cursor in a non-default directory is detected only after executable verification", () => {

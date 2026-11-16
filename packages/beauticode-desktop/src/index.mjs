@@ -13,7 +13,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Platforms with a supported install path. Linux skips Doubao (no Linux client). */
 const SUPPORTED_PLATFORMS = Object.freeze(["win32", "linux"]);
-const LINUX_UNSUPPORTED_HOSTS = Object.freeze(["doubao"]);
+const LINUX_UNSUPPORTED_HOSTS = Object.freeze(["doubao", "doubaowork"]);
 
 function xdgDir(env, key, home, fallback) {
   const value = env[key];
@@ -31,6 +31,7 @@ export const HOSTS = Object.freeze([
   "workbuddy",
   "cursor",
   "doubao",
+  "doubaowork",
 ]);
 
 export const COMMANDS = Object.freeze(["install", "status", "uninstall"]);
@@ -109,6 +110,21 @@ export const HOST_RUNTIME = Object.freeze({
       "desktop/packages/adapter-desktop-cdp/dist/runtime.js",
     ]),
   }),
+  doubaowork: Object.freeze({
+    required: Object.freeze([
+      "desktop/scripts/desktop-cdp-runner.mjs",
+      "desktop/scripts/quick-launch.mjs",
+      "desktop/scripts/desktop-cdp-setup.mjs",
+      "desktop/scripts/desktop-runner-identity.mjs",
+      "desktop/packages/beauticode-desktop/src/windows-host-install.mjs",
+      "desktop/scripts/portable-runtime.mjs",
+      "desktop/packages/core/dist/index.js",
+      "desktop/packages/core/dist/skin-catalog.js",
+      "desktop/packages/adapter-desktop-cdp/dist/index.js",
+      "desktop/packages/adapter-doubaowork/dist/index.js",
+      "desktop/packages/adapter-desktop-cdp/dist/runtime.js",
+    ]),
+  }),
 });
 
 export function parseCommand(argv) {
@@ -132,16 +148,16 @@ export function parseCommand(argv) {
 
 export function helpText(cliName = "beauticode-desktop", platform = process.platform) {
   const lines = [
-    `用法：${cliName} <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall|health>`,
+    `用法：${cliName} <dsh|codex|workbuddy|cursor|doubao|doubaowork> <install|status|uninstall|health>`,
     `      ${cliName} all <install|status|health>`,
     "",
-    "宿主：dsh、codex、workbuddy、cursor、doubao",
+    "宿主：dsh、codex、workbuddy、cursor、doubao、doubaowork",
     "命令：install 安装后台接线；status 检查守护；health 检查宿主、CDP 与背景入口；uninstall 卸载后台接线",
     "提示：各宿主的 install/uninstall 只调用包内运行时；不会依赖源码 workspace。",
-    "all install 安装守护并创建四个背景版开始菜单快捷方式；安装时不启动客户端。原图标仍由守护兜底。",
+    "all install 安装守护并创建五个背景版开始菜单快捷方式；安装时不启动客户端。原图标仍由守护兜底。",
   ];
   if (platform === "linux") {
-    lines.push("Linux：支持 codex、workbuddy、cursor（以及已安装的 dsh）；守护写入 ~/.config/autostart，背景版启动项写入 ~/.local/share/applications；doubao 无 Linux 客户端，自动跳过。");
+    lines.push("Linux：支持 codex、workbuddy、cursor（以及已安装的 dsh）；守护写入 ~/.config/autostart，背景版启动项写入 ~/.local/share/applications；doubao 与 doubaowork 无 Linux 客户端，自动跳过。");
   }
   return lines.join("\n");
 }
@@ -244,6 +260,9 @@ function windowsExecutableCandidates(host, env, home) {
     path.join(programFiles, "Doubao", "Doubao.exe"),
     "D:\\Doubao\\app\\Doubao.exe",
   ];
+  if (host === "doubaowork") return [
+    path.join(local, "DoubaoWork", "Application", "app", "DoubaoWork.exe"),
+  ];
   return [];
 }
 
@@ -317,7 +336,7 @@ export function detectHostAvailability(host, options = {}) {
   } else {
     const installed = getHostStatus(host, resolved).installed;
     if (installed || windowsExecutableCandidates(host, resolved.env, resolved.home).some(resolved.exists) ||
-      ((host === "cursor" || host === "doubao") && resolveRegisteredExecutable(host, {
+      ((host === "cursor" || host === "doubao" || host === "doubaowork") && resolveRegisteredExecutable(host, {
         query: resolved.queryRegistered, exists: resolved.exists, realpath: resolved.realpath,
       })) ||
       (host === "codex" && resolved.probeAppxCodex(resolved))) {

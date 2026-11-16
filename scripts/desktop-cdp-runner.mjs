@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createServer } from 'node:http';
@@ -31,8 +31,8 @@ function parseArgs(argv) {
     else if (arg === '--no-repair') out.noRepair = true;
     else if (arg === '--pid-file') out.pidFile = String(argv[++i] || '');
   }
-  if (out.host !== 'cursor' && out.host !== 'doubao') {
-    throw new Error('用法：node desktop-cdp-runner.mjs --host cursor|doubao [--once|--clean|--watchdog|--no-repair]');
+  if (out.host !== 'cursor' && out.host !== 'doubao' && out.host !== 'doubaowork') {
+    throw new Error('用法：node desktop-cdp-runner.mjs --host cursor|doubao|doubaowork [--once|--clean|--watchdog|--no-repair]');
   }
   return out;
 }
@@ -59,17 +59,22 @@ if (args.watchdog) {
   const stopSignals = new Set(['SIGINT', 'SIGTERM']);
   let stopping = false;
   let child = null;
+  let delay = 1000;
   const start = () => {
     if (stopping) return;
     child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...childArgs], {
       stdio: 'inherit', windowsHide: true,
     });
     let ended = false;
+    const startedAt = Date.now();
     const restart = () => {
       if (ended) return;
       ended = true;
       child = null;
-      if (!stopping) setTimeout(start, 1000);
+      if (!stopping) {
+        delay = Date.now() - startedAt > 30_000 ? 1000 : Math.min(30_000, delay * 2);
+        setTimeout(start, delay);
+      }
     };
     child.once('exit', restart);
     child.once('error', restart);
@@ -95,13 +100,17 @@ const shared = await loadModule('@beauticode/adapter-desktop-cdp', '../packages/
 const core = await loadModule('@beauticode/core', '../packages/core/dist/index.js');
 const adapter = args.host === 'cursor'
   ? await loadModule('@beauticode/adapter-cursor', '../packages/adapter-cursor/dist/index.js')
-  : await loadModule('@beauticode/adapter-doubao', '../packages/adapter-doubao/dist/index.js');
-const spec = args.host === 'cursor' ? adapter.CURSOR_CDP_SPEC : adapter.DOUBAO_CDP_SPEC;
-const buildInjection = args.host === 'cursor'
-  ? adapter.buildCursorBackgroundInjection
+  : args.host === 'doubaowork'
+    ? await loadModule('@beauticode/adapter-doubaowork', '../packages/adapter-doubaowork/dist/index.js')
+    : await loadModule('@beauticode/adapter-doubao', '../packages/adapter-doubao/dist/index.js');
+const spec = args.host === 'cursor' ? adapter.CURSOR_CDP_SPEC
+  : args.host === 'doubaowork' ? adapter.DOUBAOWORK_CDP_SPEC
+  : adapter.DOUBAO_CDP_SPEC;
+const buildInjection = args.host === 'cursor' ? adapter.buildCursorBackgroundInjection
+  : args.host === 'doubaowork' ? adapter.buildDoubaoWorkBackgroundInjection
   : adapter.buildDoubaoBackgroundInjection;
-const buildCleanup = args.host === 'cursor'
-  ? adapter.buildCursorBackgroundCleanup
+const buildCleanup = args.host === 'cursor' ? adapter.buildCursorBackgroundCleanup
+  : args.host === 'doubaowork' ? adapter.buildDoubaoWorkBackgroundCleanup
   : adapter.buildDoubaoBackgroundCleanup;
 
 const ts = () => new Date().toISOString().slice(11, 23);
@@ -116,7 +125,17 @@ const dataRoot = process.platform === 'linux'
   ? path.join(process.env.LOCALAPPDATA || (process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME) ? process.env.XDG_DATA_HOME : path.join(os.homedir(), '.local', 'share')), 'beautiCode', 'hosts', args.host)
   : path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'hosts', args.host);
 const stateFile = path.join(dataRoot, 'state.json');
+const runnerLog = path.join(dataRoot, 'runner.log');
 fs.mkdirSync(dataRoot, { recursive: true });
+function writeRunnerLog(line) {
+  process.stderr.write(line);
+  try {
+    if (fs.existsSync(runnerLog) && fs.statSync(runnerLog).size > 1_048_576) fs.renameSync(runnerLog, `${runnerLog}.previous`);
+    fs.appendFileSync(runnerLog, line);
+  } catch { /* A locked log must not stop injection. */ }
+}
+log.info = (...parts) => writeRunnerLog(`[${ts()}] [${args.host}] ${parts.join(' ')}\n`);
+log.warn = (...parts) => writeRunnerLog(`[${ts()}] [${args.host}:warn] ${parts.join(' ')}\n`);
 
 function readState() {
   try {
@@ -257,7 +276,7 @@ async function pickFileNative() {
     '$owner.Opacity=0.01',
     '$owner.TopMost=$true',
     '$dialog=New-Object System.Windows.Forms.OpenFileDialog',
-    "$dialog.Filter='媒体|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp;*.avif;*.mp4;*.mov;*.webm;*.m4v'",
+    `$dialog.Filter='媒体|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp;*.avif;*.mp4;*.mov;*.webm;*.m4v${args.host === 'doubaowork' ? ';*.json' : ''}'`,
     '$dialog.Multiselect=$false', '$dialog.CheckFileExists=$true', '$dialog.RestoreDirectory=$true',
     "$dialog.Title='选择背景图片或视频'",
     'try{[void]$owner.Show();[void]$owner.Activate();[void]$owner.BringToFront();[System.Windows.Forms.Application]::DoEvents();$result=$dialog.ShowDialog($owner);if($result -eq [System.Windows.Forms.DialogResult]::OK){[Console]::WriteLine($dialog.FileName)}}finally{$dialog.Dispose();$owner.Close();$owner.Dispose()}',
@@ -303,12 +322,25 @@ async function validateMedia(file) {
   return { path: stable.path, identity: stable.identity };
 }
 
+function resolveProjectSelection(file, meta) {
+  if (path.extname(file).toLowerCase() !== '.json' || typeof adapter.readWorkshopItem !== 'function') return { file, meta };
+  const item = adapter.readWorkshopItem(file, (target) => fs.readFileSync(target, 'utf8'), (target) => fs.existsSync(target));
+  if (!item) throw new Error('不支持的场景。');
+  return {
+    file: item.mediaPath,
+    meta: { ...meta, themePath: item.projectPath, themeType: item.themeType, suggestedName: meta.suggestedName || meta.name || item.title },
+  };
+}
+
 async function setFileInput(connection, file, meta) {
+  const selected = resolveProjectSelection(file, meta);
+  file = selected.file;
+  meta = selected.meta;
   const checked = await validateMedia(file);
   const resolved = checked.path;
   assertStableMedia(resolved, checked.identity);
   const requestId = meta.requestId || `runner-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-  const prepared = { ...meta, path: resolved, requestId };
+  const prepared = { ...meta, path: resolved, themePath: meta.themePath || resolved, requestId };
   await evaluate(connection, `window.__bcDesktopPrepareFile(${JSON.stringify(prepared)})`);
   await connection.send('DOM.enable');
   const document = await connection.send('DOM.getDocument', { depth: 1 });
@@ -498,12 +530,14 @@ async function runSession(endpoint) {
   let lastPick = 0;
   let lastApply = '';
   let lastSkin = 0;
+  let lastLibrary = 0;
   let lastDirty = 0;
+  let pageChecks = 0;
   const tick = async () => {
     if (busy) return;
     busy = true;
     try {
-      const snapshot = await evaluate(connection, `(() => { const a=document.querySelector(${JSON.stringify(spec.anchorSelector)}); const t=a?String(a.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase():''; return {pick:window.__bcDesktopPickRequest||0,apply:window.__bcDesktopApplyRequest||null,skin:window.__bcDesktopSkinCenterRequest||0,dirty:window.__bcDesktopPersistDirty||0,entry:!!document.getElementById('beauticode-${args.host}-background-entry'),style:!!document.getElementById('beauticode-${args.host}-background-style'),stage:!!document.getElementById('beauticode-bg-stage'),anchor:!!a,anchorTextMatches:!!a&&t.includes(${JSON.stringify(spec.anchorText.toLowerCase())})}; })()`);
+      const snapshot = await evaluate(connection, `(() => { const a=document.querySelector(${JSON.stringify(spec.anchorSelector)}); const t=a?String(a.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase():''; return {pick:window.__bcDesktopPickRequest||0,apply:window.__bcDesktopApplyRequest||null,skin:window.__bcDesktopSkinCenterRequest||0,library:window.__bcDesktopLibraryRequest||0,dirty:window.__bcDesktopPersistDirty||0,entry:!!document.getElementById('beauticode-${args.host}-background-entry'),style:!!document.getElementById('beauticode-${args.host}-background-style'),stage:!!document.getElementById('beauticode-bg-stage'),anchor:!!a,anchorTextMatches:!!a&&t.includes(${JSON.stringify(spec.anchorText.toLowerCase())})}; })()`);
       if (!snapshot.anchor || !snapshot.anchorTextMatches) {
         reportRuntimeDiagnosis('host-ui-updated');
         await evaluate(connection, buildCleanup());
@@ -534,6 +568,36 @@ async function runSession(endpoint) {
         await evaluate(connection, 'window.__bcDesktopApplyRequest=null');
         try { await setFileInput(connection, snapshot.apply.path, snapshot.apply); }
         catch { await evaluate(connection, `window.__bcDesktopMessage(${JSON.stringify(spec.strings.missingFile)})`); }
+      }
+      if (snapshot.library && snapshot.library !== lastLibrary && typeof adapter.catalogWorkshop === 'function') {
+        lastLibrary = snapshot.library;
+        await evaluate(connection, 'window.__bcDesktopLibraryRequest=0');
+        let steamPath = '';
+        try {
+          const queried = execFileSync('reg', ['query', 'HKCU\\Software\\Valve\\Steam', '/v', 'SteamPath'], { encoding: 'utf8', windowsHide: true });
+          steamPath = (queried.match(/SteamPath\s+REG_SZ\s+(\S.*)/i) || [])[1]?.trim() || '';
+        } catch { /* Steam is not registered for this user. */ }
+        const record = adapter.loadWallpaperLibrary(path.join(process.env.LOCALAPPDATA || '', 'beautiCode', 'wallpaper-library.json'), steamPath ? [steamPath] : []);
+        const catalog = adapter.catalogWorkshop(record).map((item) => ({
+          title: item.title, themeType: item.themeType, projectPath: item.projectPath,
+        }));
+        await evaluate(connection, `window.__bcDesktopShowLibrary&&window.__bcDesktopShowLibrary(${JSON.stringify(catalog)})`);
+      }
+      if (args.host === 'doubaowork' && ++pageChecks % 11 === 0 && typeof shared.pageArea === 'function') {
+        try {
+          const listed = await (await fetch(`http://127.0.0.1:${endpoint.port}/json/list`)).json();
+          const matches = listed.filter((target) => target && target.type === 'page' && shared.isDesktopTarget(spec, target));
+          if (matches.length > 1) {
+            const areas = await Promise.all(matches.map((target) => shared.pageArea(target, endpoint.port)));
+            let best = 0;
+            for (let index = 1; index < matches.length; index += 1) if ((areas[index] || 0) > (areas[best] || 0)) best = index;
+            if (matches[best].id && matches[best].id !== endpoint.target.id && (areas[best] || 0) > 0) {
+              log.info('可见页面更大，改挂到当前窗口。');
+              connection.close();
+              return;
+            }
+          }
+        } catch (error) { log.debug(error.message); }
       }
       if (snapshot.skin && snapshot.skin !== lastSkin) {
         lastSkin = snapshot.skin;
