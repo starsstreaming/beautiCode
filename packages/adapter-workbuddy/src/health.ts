@@ -3,6 +3,7 @@ import path from "node:path";
 import { discoverWorkBuddyCdp, readBoundedJson, DEFAULT_WORKBUDDY_CDP_PORTS } from "./discovery.js";
 import { listWorkBuddyProcesses } from "./launch.js";
 import { assertLoopbackDebuggerUrl, pickWorkBuddyTarget, type WorkBuddyTarget } from "./target.js";
+import { BACKDROP_SELECTORS } from "./contract.js";
 
 export interface WorkBuddyUiHealthSnapshot {
   host: "workbuddy";
@@ -16,13 +17,21 @@ export interface WorkBuddyUiHealthSnapshot {
   entry: boolean | null;
   style: boolean | null;
   stage: boolean | null;
-  state: "ready" | "waiting-for-launch" | "cdp-missing" | "host-ui-updated" | "entry-missing" | "partial-injection" | "probe-failed";
+  /** Stage holds a mounted image, video or scene frame. Informational: a
+   * deliberately cleared background is not an error. */
+  media: boolean | null;
+  /** A backdrop or layout container still paints an opaque layer over the
+   * viewport, so an injected wallpaper cannot be seen. */
+  occluded: boolean | null;
+  opaqueSelectors: string[] | null;
+  state: "ready" | "waiting-for-launch" | "cdp-missing" | "host-ui-updated" | "entry-missing" | "partial-injection" | "injected-but-occluded" | "probe-failed";
 }
 
-type WorkBuddyUiProbe = Pick<WorkBuddyUiHealthSnapshot, "anchor" | "entry" | "style" | "stage">;
+type WorkBuddyUiProbe = Pick<WorkBuddyUiHealthSnapshot, "anchor" | "entry" | "style" | "stage" | "media" | "occluded" | "opaqueSelectors">;
 
 async function evaluatePage(target: WorkBuddyTarget, port: number): Promise<WorkBuddyUiProbe> {
   if (!target.webSocketDebuggerUrl) throw new Error("WorkBuddy target omitted its debugger socket.");
+  const backdropSelectors = JSON.stringify([...BACKDROP_SELECTORS]);
   const ws = new WebSocket(assertLoopbackDebuggerUrl(target.webSocketDebuggerUrl, port));
   try {
     await new Promise<void>((resolve, reject) => {
@@ -72,11 +81,22 @@ async function evaluatePage(target: WorkBuddyTarget, port: number): Promise<Work
           return;
         }
         const fields = value as Record<string, unknown>;
-        if (["anchor", "entry", "style", "stage"].some((key) => typeof fields[key] !== "boolean")) {
+        if (["anchor", "entry", "style", "stage", "media", "occluded"].some((key) => typeof fields[key] !== "boolean")) {
           reject(new Error("Invalid runtime probe fields."));
           return;
         }
-        resolve({ anchor: fields.anchor as boolean, entry: fields.entry as boolean, style: fields.style as boolean, stage: fields.stage as boolean });
+        const opaqueSelectors = Array.isArray(fields.opaqueSelectors)
+          ? fields.opaqueSelectors.filter((entry): entry is string => typeof entry === "string").slice(0, 4)
+          : [];
+        resolve({
+          anchor: fields.anchor as boolean,
+          entry: fields.entry as boolean,
+          style: fields.style as boolean,
+          stage: fields.stage as boolean,
+          media: fields.media as boolean,
+          occluded: fields.occluded as boolean,
+          opaqueSelectors,
+        });
       };
       timer = setTimeout(() => { cleanup(); reject(new Error("Runtime probe timeout.")); }, 1_200);
       ws.addEventListener("message", onMessage);
@@ -88,7 +108,41 @@ async function evaluatePage(target: WorkBuddyTarget, port: number): Promise<Work
           method: "Runtime.evaluate",
           params: {
             returnByValue: true,
-            expression: `(() => ({anchor:!!document.querySelector('.conversation-list .conversation-list-tabs'),entry:!!document.getElementById('beauticode-workbuddy-bg-entry'),style:!!document.getElementById('beauticode-workbuddy-bg-style'),stage:!!document.getElementById('beauticode-bg-stage')}))()`,
+            expression: `(() => {
+              const stage = document.getElementById('beauticode-bg-stage');
+              const mediaNode = stage && stage.querySelector('img.bc-media,video.bc-media,iframe.bc-media');
+              const media = !!mediaNode && (mediaNode.tagName === 'IFRAME'
+                || (mediaNode.tagName === 'IMG'
+                  ? mediaNode.complete && mediaNode.naturalWidth > 0
+                  : mediaNode.readyState >= 1));
+              const alphaOf = (value) => {
+                if (!value || value === 'transparent') return 0;
+                const slash = value.lastIndexOf('/');
+                if (slash >= 0) {
+                  const alpha = Number(value.slice(slash + 1).trim());
+                  return Number.isFinite(alpha) ? alpha : 1;
+                }
+                const match = value.match(/rgba\\([^)]*,\\s*([\\d.]+)\\)$/);
+                return match ? Number(match[1]) : 1;
+              };
+              const viewport = Math.max(1, innerWidth * innerHeight);
+              const covers = (el) => {
+                const rect = el.getBoundingClientRect();
+                return rect.width * rect.height >= viewport * 0.2;
+              };
+              const opaqueSelectors = ${backdropSelectors}.filter((selector) =>
+                [...document.querySelectorAll(selector)].some((el) =>
+                  covers(el) && alphaOf(getComputedStyle(el).backgroundColor) >= 0.95));
+              return {
+                anchor: !!document.querySelector('.conversation-list .conversation-list-tabs'),
+                entry: !!document.getElementById('beauticode-workbuddy-bg-entry'),
+                style: !!document.getElementById('beauticode-workbuddy-bg-style'),
+                stage: !!stage,
+                media,
+                occluded: opaqueSelectors.length > 0,
+                opaqueSelectors: opaqueSelectors.slice(0, 4)
+              };
+            })()`,
           },
         }));
       } catch {
@@ -126,6 +180,7 @@ export async function inspectWorkBuddyUiHealth(): Promise<WorkBuddyUiHealthSnaps
   if (!endpoint) return {
     ...identity,
     cdp: "missing", port: null, anchor: null, entry: null, style: null, stage: null,
+    media: null, occluded: null, opaqueSelectors: null,
     state: client === "closed" ? "waiting-for-launch" : "cdp-missing",
   };
   try {
@@ -145,14 +200,19 @@ export async function inspectWorkBuddyUiHealth(): Promise<WorkBuddyUiHealthSnaps
     const target = pickWorkBuddyTarget(targets);
     if (!target) throw new Error("WorkBuddy target missing.");
     const ui = await evaluatePage(target, endpoint.port);
-    const state = !ui.anchor ? "host-ui-updated" : !ui.entry ? "entry-missing" : !ui.style || !ui.stage ? "partial-injection" : "ready";
+    const state = !ui.anchor ? "host-ui-updated"
+      : !ui.entry ? "entry-missing"
+      : !ui.style || !ui.stage ? "partial-injection"
+      : ui.occluded ? "injected-but-occluded"
+      : "ready";
     return { ...identity, client: client === "closed" ? "unknown" : client, cdp: "connected", port: endpoint.port, ...ui, state };
   } catch {
     return {
       ...identity,
       client: client === "closed" ? "unknown" : client,
       cdp: "connected", port: endpoint.port,
-      anchor: null, entry: null, style: null, stage: null, state: "probe-failed",
+      anchor: null, entry: null, style: null, stage: null, media: null, occluded: null, opaqueSelectors: null,
+      state: "probe-failed",
     };
   }
 }

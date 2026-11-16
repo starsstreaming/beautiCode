@@ -149,7 +149,7 @@ WORKBUDDY_REMOTE_DEBUGGING_PORT=9335 \
 
 | 层类 | 处理 | 选择器 |
 |---|---|---|
-| **壁纸区**（外壳、会话主区、中央视图、侧栏列表体） | **透明** | `BACKDROP_SELECTORS`（10 个） |
+| **壁纸区**（外壳、会话主区、中央视图、侧栏列表体） | **透明** | `BACKDROP_SELECTORS`（12 个，含 5.11.3 的 `.layout-window-frame__body`） |
 | **浮层**（侧栏面板、输入区、代码块、工具卡、组件卡、气泡、右侧产出卡片） | **统一半透 α** | `SURFACE_RULES`（7 条，各自带 token） |
 | **浮层内部子面**（卡片 header/body/diff 容器、输入区工具栏与模型选项、右侧面板内部） | **透明**（压平） | `FLATTEN_SELECTORS` + `SIDEBAR_FLATTEN_SELECTORS` |
 | **语义色**（diff 增删行） | **保持实心** | `SEMANTIC_TINT_SELECTORS`（故意不压平） |
@@ -484,6 +484,7 @@ WorkBuddy 有真实回读通道（CDP + 页面内状态），所以**保留 `hos
 | 2026-09-18 | **修"深色切换白底白字"与"功能页仍实心"**：(1) 主题相关值改为**浅/深两套同时生成**（只烘一套会导致切深色后背景不变、文字变白）；(2) 新增**样式看门狗**把我们的样式钉在 `<head>` 末尾（实测 head 有 328 子节点、97 个在我们之后含外部样式表，同权重后者胜 → 这是功能页仍实心的真因）；(3) 扫描**忽略自己的样式表**，消除重复应用的漂移（深色块解析数曾在 814/561 间跳），现两次应用幂等。面 token 861、覆盖层 ~88 KB、深色切换已实测通过。单测 **25/25**。 |
 | 2026-09-18 | **侧栏背景栏功能落地（M1 末尾，demo 级）**：新增 §14 与 `src/background-bar.ts`。在 `.conversation-list-tabs` 末尾追加「自定义背景」条目 + 「背景清单」面板（方向 C 媒体清单），含 4 个动作（导入图片 / 导入视频 / 视频声音 / 透明度 LOCKED）+ 清除/收起。**透明度不是开关**——常开、不可关，理由是关掉它背景就被自己的界面盖住。**选择器是 CDP 探查的实际 DOM（`.conversation-list-tabs` / `.conversation-list-tab-button`），不是 asar 推断的 `cb-sidebar-nav`**——asar 里那个组件当前视图不渲染，用它做选择器会一直 no-nav-found。改用真实类名，跨版本稳定。暴露 `BACKGROUND_BAR_INJECTION` / `BACKGROUND_BAR_CLEANUP` / `BACKGROUND_BAR_STYLE_ID` 三个导出。`tsc --noEmit` 通过；适配器 25/25 单测不变；CDP 实跑注入 `'ok'`、tabsChildren 从 7 增到 8。**不持久化、不接 CDN、不接受管素材策略**（M3 才做）。 |
 | 2026-09-18 | **CDP runner 守护版落地**：`scripts/wb-cdp-runner.mjs`（约 230 行），从 `@beauticode/adapter-workbuddy` import 同一份 `BACKGROUND_BAR_INJECTION` 载荷，常驻：注入后挂着、1.5 s 轮询守护（SPA 切路由自动重发）、订阅 `Page.loadEventFired` 整页 reload 立即重发、SIGINT/SIGTERM 触发 `BACKGROUND_BAR_CLEANUP` 后退 0。支持 `--once` / `--clean` / `--port` / `--verbose` / `--help`。import 双路径兜底（workspace 名优先，fallback 到相对 `../packages/adapter-workbuddy/dist/index.js`）。URL 脱敏、错误码齐全、JSON-RPC 标准。**已实跑验证**：tsc 干净、25/25 单测不变、payload / cleanup 用 `new Function()` 解析均合法、在你的 WorkBuddy 5.5.6 上 CDP 实跑注入返回 `'ok'`、tabsChildren 从 7 增到 8、守护跑起来后 SPA 切路由自动重发。 |
+| 2026-11-16 | **5.11.3 右侧布局体遮挡修复**：新增 `.layout-window-frame__body` 到 `BACKDROP_SELECTORS`（浅色 `rgb(248,253,255)` / 深色 `rgb(20,20,20)`，约占视口 77%，且不是 token 派生，只能由透明规则清除）。`health` 探针新增 `media` / `occluded` / `opaqueSelectors`，检测到不透明 backdrop 时返回 `injected-but-occluded`，不再误报 `ready`。 |
 
 ## 14. 侧栏背景栏功能（背景清单面板）
 

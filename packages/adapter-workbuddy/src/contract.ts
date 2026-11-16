@@ -60,6 +60,10 @@ export const BACKDROP_SELECTORS = Object.freeze([
   ".teams-main-content",
   ".teams-grid-scroll-content",
   ".conversation-page-chrome",
+  // WorkBuddy 5.11.3 wraps the right pane in a new layout body that paints an
+  // opaque rgb(248,253,255) (light) / rgb(20,20,20) (dark) over ~77% of the
+  // viewport. It is not token-derived, so the token overlay cannot reach it.
+  ".layout-window-frame__body",
   // WorkBuddy 5.5.6 home/new-task route paints an opaque rgb(20,20,20)
   // surface over the entire right pane. It is not token-derived, so neither
   // the token overlay nor the generic hard-coded sweep reaches it reliably.
