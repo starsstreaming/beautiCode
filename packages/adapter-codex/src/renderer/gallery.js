@@ -223,7 +223,7 @@
     busy = true;
     msg.textContent = "开始安装…";
     rememberOperation(crypto.randomUUID());
-    operation("start",{id,operationId}).then(state=>{rememberOperation(state.id);if(host.hidden){void operation("cancel",{operationId});return;}return watchOperation()})
+    operation("start",{id,operationId}).then(state=>{rememberOperation(state.id);if(host.hidden)return operation("cancel",{operationId});return watchOperation()})
       .catch(error=>{msg.textContent=error.message;})
       .finally(()=>{if(!polling)busy=false;});
   });

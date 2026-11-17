@@ -9,7 +9,8 @@ test('operation receipt survives disconnect, cancel stops downloads, atomic appl
  await wait();assert.equal(ops.cancel(first.id).cancellable,true);await wait();assert.equal(ops.status(first.id).phase,'cancelled');assert.equal(applied,false);
  let finish;const gate=new Promise(r=>{finish=r});
  const second=ops.start('b',async({beginApply})=>{beginApply();await gate;return{ok:true,message:'done'}});
- await wait();assert.equal(ops.cancel(second.id).cancellable,false);assert.equal(ops.status(second.id).phase,'apply');
+ await wait();assert.equal(ops.start('b', async () => ({ok:true}), 'second-client-operation').ok, false);
+ assert.equal(ops.cancel(second.id).cancellable,false);assert.equal(ops.status(second.id).phase,'apply');
  assert.equal(ops.start('other',async()=>({ok:true})).ok,false);
  finish();await wait();assert.equal(ops.status(second.id).result.ok,true);assert.equal(ops.status('not-there').code,'operation_unknown');
 });

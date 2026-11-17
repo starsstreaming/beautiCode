@@ -15,7 +15,7 @@ export function createGalleryOperations({timeoutMs=30*60*1000,ttlMs=15*60*1000,m
       if(requestedId && !/^[a-zA-Z0-9-]{16,80}$/.test(requestedId))return {ok:false,error:'无效的操作编号。'};
       if(requestedId && entries.has(requestedId)){const existing=entries.get(requestedId)!;return existing.skinId===skinId?status(requestedId):{ok:false,error:'操作编号已用于其他皮肤。'};}
       const active=[...entries.values()].find(e=>!e.result);
-      if(active)return active.skinId===skinId?status(active.id):{ok:false,error:'已有皮肤操作正在进行，请等待或取消。'};
+      if(active)return !requestedId && active.skinId===skinId?status(active.id):{ok:false,error:'已有皮肤操作正在进行，请等待或取消。'};
       while(entries.size>=maxEntries)entries.delete(entries.keys().next().value!);
       const entry:Entry={id:requestedId||randomUUID(),skinId,phase:'download',updatedAt:Date.now(),controller:new AbortController()};
       entries.set(entry.id,entry);
