@@ -1,0 +1,72 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { getHostStatus, getAllStatus } from '../src/index.mjs';
+import { stageDshPlugin } from '../../../scripts/pack-dsh-plugin.mjs';
+
+test('DSH status requires an actual plugin entry and active wiring, without claiming live readiness', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-dsh-status-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const opts = { home: root, env: { DSH_HOME: root }, platform: 'linux', runtimeRoot: root };
+  const patch = path.join(root, 'cordis.patch.yml');
+  fs.writeFileSync(patch, '[]');
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  const plugin = path.join(root, 'plugins', 'beauticode-dsh');
+  fs.mkdirSync(plugin, { recursive: true });
+  fs.writeFileSync(path.join(plugin, 'package.json'), JSON.stringify({ name: 'beauticode-dsh', version: 'fixture' }));
+  fs.writeFileSync(path.join(plugin, 'index.mjs'), '');
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  const wire = `- insert:\n    - id: beauticode-bridge\n      name: '${pathToFileURL(path.join(plugin, 'index.mjs')).href}'\n      inject: [webServer]\n`;
+  fs.writeFileSync(patch, wire);
+  assert.equal(getHostStatus('dsh', opts).installed, true);
+  assert.equal(getAllStatus(opts).hosts.find(h => h.host === 'dsh').readiness, 'plugin-wired');
+  fs.writeFileSync(patch, wire.replace('- insert:', '- remove:'));
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  fs.writeFileSync(patch, wire + '      disabled: true\n');
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  fs.writeFileSync(patch, wire);
+  fs.unlinkSync(path.join(plugin, 'index.mjs'));
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+});
+
+test('DSH status follows the profile dependency to the bundled bridge patch', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-dsh-bundle-status-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const profile = path.join(root, 'profiles', 'web');
+  const plugin = path.join(profile, 'node_modules', 'beauticode-dsh');
+  fs.mkdirSync(plugin, { recursive: true });
+  fs.writeFileSync(path.join(plugin, 'package.json'), JSON.stringify({ name: 'beauticode-dsh', version: 'fixture' }));
+  fs.writeFileSync(path.join(plugin, 'index.mjs'), '');
+  fs.writeFileSync(path.join(plugin, 'cordis.patch.yml'), '- insert:\n    - id: beauticode-bridge\n      name: beauticode-dsh\n      inject: [webServer]\n');
+  const manifest = path.join(profile, 'package.json');
+  fs.writeFileSync(manifest, JSON.stringify({ dependencies: { 'beauticode-dsh': `link:${plugin.replaceAll('\\', '/')}` } }));
+  const opts = { home: root, env: { DSH_HOME: root }, platform: 'linux', runtimeRoot: root };
+  assert.equal(getHostStatus('dsh', opts).installed, true);
+  assert.equal(getAllStatus(opts).hosts.find(h => h.host === 'dsh').readiness, 'plugin-wired');
+  fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), '- remove:\n    - id: beauticode-bridge\n');
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  fs.unlinkSync(path.join(profile, 'cordis.patch.yml'));
+  fs.writeFileSync(manifest, JSON.stringify({ dependencies: { 'beauticode-dsh': 'link:./foreign' } }));
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  fs.writeFileSync(manifest, '{}');
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+});
+
+test('a staged DSH CLI install into an existing temporary profile is recognized', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-dsh-installed-status-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const plugin = path.join(root, 'plugin');
+  await stageDshPlugin(plugin, { build: false });
+  const home = path.join(root, 'home');
+  const profile = path.join(home, 'profiles', 'web');
+  fs.mkdirSync(profile, { recursive: true });
+  fs.writeFileSync(path.join(profile, 'package.json'), '{"private":true}');
+  const { runCli } = await import(pathToFileURL(path.join(plugin, 'cli.js')).href);
+  await runCli(['--dsh-home', home, '--plugin-home', path.join(root, 'installed-plugin')]);
+  const status = getHostStatus('dsh', { home: root, env: { DSH_HOME: home }, platform: process.platform, runtimeRoot: root });
+  assert.equal(status.installed, true);
+  assert.equal(fs.existsSync(path.join(profile, 'cordis.patch.yml')), false);
+});
