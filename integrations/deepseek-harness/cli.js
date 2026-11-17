@@ -600,6 +600,31 @@ async function uninstall(opts) {
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
+  // Validate the entire command before resolving paths or installing anything.
+  const actions = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--dsh-home' || arg === '--plugin-home') {
+      if (!argv[i + 1] || argv[i + 1].startsWith('-')) throw new Error(`Missing value for ${arg}`);
+      i += 1;
+    } else if (['--help', '-h', '--version', '-v', '--remove'].includes(arg)) {
+      actions.push(arg === '-h' ? '--help' : arg === '-v' ? '--version' : arg);
+    } else {
+      throw new Error(`Unknown argument: ${arg}. Use --help.`);
+    }
+  }
+  if (new Set(actions).size > 1) throw new Error('Conflicting actions. Use --help.');
+  const action = actions[0] || 'install';
+  if (action === '--help') {
+    const help = 'Usage: beauticode-dsh [--remove] [--dsh-home PATH] [--plugin-home PATH]\nNo action: install. --help: show help. --version: show version.\nInstallation does not launch DeepSeek Harness.';
+    console.log(help);
+    return { help };
+  }
+  if (action === '--version') {
+    const { version } = JSON.parse(await fsp.readFile(path.join(here, 'package.json'), 'utf8'));
+    console.log(version);
+    return { version };
+  }
   const dshHome = argValue(argv, "--dsh-home") || defaultDshHome();
   const requestedPluginHome = argValue(argv, "--plugin-home");
   const pluginHome = requestedPluginHome || defaultPluginHome(dshHome);
@@ -608,7 +633,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     pluginHome,
     legacyPluginHome: requestedPluginHome ? null : legacyDefaultPluginHome(),
   };
-  if (argv.includes("--remove")) return uninstall(opts);
+  if (action === '--remove') return uninstall(opts);
   return install(opts);
 }
 
