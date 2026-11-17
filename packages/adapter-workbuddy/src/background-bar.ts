@@ -29,6 +29,8 @@ import { ensureBackgroundStage } from './background-stage.js';
 import { LIGHT_THEME_ROOT } from './theme-selectors.js';
 
 /** 注入节点共用的 data-bc-injected 值。 */
+import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@beauticode/core";
+
 export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
 
 /**
@@ -280,7 +282,7 @@ pop.appendChild(menuItem(ICONS.clear, '清除背景', pill('清除', 'clear'), t
 var fileInput = document.createElement('input');
 fileInput.type = 'file';
 fileInput.setAttribute('data-id', 'fileInput');
-fileInput.accept = 'image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif,video/mp4,video/quicktime,video/webm';
+fileInput.accept = ${JSON.stringify([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS].join(','))};
 fileInput.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
 pop.appendChild(fileInput);
 fileInput.addEventListener('change', function (ev) {
@@ -786,7 +788,25 @@ function applyGalleryPath(p, meta) {
   if (kind === 'video') { el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto'; }
   return new Promise(function (resolve, reject) {
     var done = false, timer = setTimeout(function () { if (!done) { done = true; el.remove(); reject(new Error('皮肤媒体加载超时。')); } }, 30000);
-    var ok = function () { if (done) return; done = true; clearTimeout(timer); st.appendChild(el); old.forEach(function (n) { var u = n.dataset.blobUrl; if (u) URL.revokeObjectURL(u); n.remove(); }); currentUrl = url; markMedia(kind); if (kind === 'video') { markVideoReady(el); el.play().catch(function () {}); } var name = String(meta && meta.themeName || '皮肤主题').trim().slice(0, 80); rememberImportedTheme(name, p, kind, meta && meta.provenance); persistMark(p, PERSIST.activeThemeId); persist(); resolve(true); };
+    var ok = function () {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        st.appendChild(el);
+        old.forEach(function (n) { var u = n.dataset.blobUrl; if (u) URL.revokeObjectURL(u); n.remove(); });
+        currentUrl = url;
+        markMedia(kind);
+        if (kind === 'video') { markVideoReady(el); el.play().catch(function () {}); }
+        var name = String(meta && meta.themeName || '皮肤主题').trim().slice(0, 80);
+        rememberImportedTheme(name, p, kind, meta && meta.provenance);
+        // PERSIST is read and saved by the guardian; there is no renderer persist().
+        persistMark(p, PERSIST.activeThemeId);
+        resolve(true);
+      } catch (error) {
+        reject(error);
+      }
+    };
     var bad = function () { if (done) return; done = true; clearTimeout(timer); el.remove(); reject(new Error('皮肤媒体加载失败。')); };
     if (kind === 'video') { el.addEventListener('loadeddata', ok, { once: true }); el.addEventListener('error', bad, { once: true }); } else { el.addEventListener('load', ok, { once: true }); el.addEventListener('error', bad, { once: true }); }
   });
@@ -801,8 +821,8 @@ function applyPath(p, themeId) {
   else if (isVideo(p)) { applyMediaUrl(filePathToUrl(p), 'video'); persistMark(p, themeId); }
   else msg('不认识的扩展名：支持 png/jpg/webp/gif/bmp/avif 和 mp4/mov/webm/m4v。');
 }
-function isImage(p) { return /\\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(p); }
-function isVideo(p) { return /\\.(mp4|mov|webm|m4v)$/i.test(p); }
+function isImage(p) { return ${JSON.stringify(IMAGE_EXTENSIONS)}.indexOf('.'+String(p).split('.').pop().toLowerCase())!==-1; }
+function isVideo(p) { return ${JSON.stringify(VIDEO_EXTENSIONS)}.indexOf('.'+String(p).split('.').pop().toLowerCase())!==-1; }
 
 document.documentElement.setAttribute('data-bc-workbuddy-bg', 'installed');
 document.documentElement.setAttribute('data-bc-bg-ver', BUILD);
