@@ -50,6 +50,30 @@
   const typeSelect = host.querySelector(".bcg-type");
   let centerUrl = "";
   let busy = false;
+  let loadGeneration = 0;
+
+  let returnFocus = null;
+  const focusables = () => [...host.querySelectorAll('button, input, select, a[href], [tabindex]')]
+    .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length);
+  function focusInside() { (focusables()[0] || host).focus(); }
+  host.tabIndex = -1;
+  document.addEventListener("focusin", (event) => {
+    if (!host.hidden && !host.contains(event.target)) focusInside();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (host.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopImmediatePropagation(); close(); return;
+    }
+    if (event.key === "Tab") {
+      const nodes = focusables(), current = nodes.indexOf(document.activeElement);
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (!nodes.length) { host.focus(); return; }
+      const next = (current + (event.shiftKey ? -1 : 1) + nodes.length) % nodes.length;
+      nodes[next].focus();
+    }
+  }, true);
+
 
   // Mirrors gallery-host.mjs::isSafeSkinId — catalog ids are only safe to
   // render when they match the skin-<hex> shape the backend already validates.
@@ -113,12 +137,14 @@
   }
 
   async function load() {
+    const generation = ++loadGeneration;
     msg.textContent = "正在读取目录…";
     try {
       const params = new URLSearchParams();
       if (queryInput.value.trim()) params.set("q", queryInput.value.trim());
       if (typeSelect.value) params.set("type", typeSelect.value);
       const data = await request(`/__beauticode/ui/gallery/catalog?${params}`);
+      if (generation !== loadGeneration || host.hidden) return;
       centerUrl = data.url || centerUrl;
       grid.innerHTML = (data.skins || [])
         .filter((skin) => SKIN_ID.test(String(skin.id ?? "")))
@@ -134,13 +160,16 @@
         ? `上传与审核在 <a href="${escapeAttr(centerUrl)}" target="_blank" rel="noreferrer">皮肤中心网站</a>。安装会下载到本机后再应用。`
         : "未配置皮肤中心地址。在插件的 skin-center.json 或环境变量 BEAUTICODE_SKIN_CENTER 里填入你的域名。";
     } catch (error) {
+      if (generation !== loadGeneration || host.hidden) return;
       grid.innerHTML = "";
       msg.textContent = error instanceof Error ? error.message : String(error);
     }
   }
 
   async function open() {
+    if (host.hidden) returnFocus = document.activeElement;
     host.hidden = false;
+    focusInside();
     try {
       const config = await request("/__beauticode/ui/gallery/config");
       centerUrl = config.url || "";
@@ -160,6 +189,9 @@
 
   function close() {
     host.hidden = true;
+    loadGeneration += 1;
+    if (returnFocus?.isConnected) returnFocus.focus();
+    returnFocus = null;
   }
 
   host.querySelector(".bcg-close").addEventListener("click", close);

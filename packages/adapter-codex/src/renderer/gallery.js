@@ -53,6 +53,30 @@
   const SKIN_ID = /^skin-[a-z0-9]{8,40}$/;
   let centerUrl = "";
   let busy = false;
+  let loadGeneration = 0;
+
+  let returnFocus = null;
+  const focusables = () => [...host.querySelectorAll('button, input, select, a[href], [tabindex]')]
+    .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length);
+  function focusInside() { (focusables()[0] || host).focus(); }
+  host.tabIndex = -1;
+  document.addEventListener("focusin", (event) => {
+    if (!host.hidden && !host.contains(event.target)) focusInside();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (host.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopImmediatePropagation(); close(); return;
+    }
+    if (event.key === "Tab") {
+      const nodes = focusables(), current = nodes.indexOf(document.activeElement);
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (!nodes.length) { host.focus(); return; }
+      const next = (current + (event.shiftKey ? -1 : 1) + nodes.length) % nodes.length;
+      nodes[next].focus();
+    }
+  }, true);
+
 
   function escapeText(value) {
     return String(value ?? "")
@@ -119,12 +143,14 @@
   }
 
   async function load() {
+    const generation = ++loadGeneration;
     msg.textContent = "正在读取目录…";
     try {
       const params = new URLSearchParams();
       if (queryInput.value.trim()) params.set("q", queryInput.value.trim());
       if (typeSelect.value) params.set("type", typeSelect.value);
       const data = await request(`/__beauticode/ui/gallery/catalog?${params}`);
+      if (generation !== loadGeneration || host.hidden) return;
       centerUrl = data.url || centerUrl;
       grid.innerHTML = (data.skins || [])
         .filter((skin) => SKIN_ID.test(String(skin.id ?? "")))
@@ -139,13 +165,16 @@
         ? `来源 ${centerUrl}。安装会下载到本机后再应用。`
         : "未配置皮肤中心地址。";
     } catch (error) {
+      if (generation !== loadGeneration || host.hidden) return;
       grid.innerHTML = "";
       msg.textContent = error instanceof Error ? error.message : String(error);
     }
   }
 
   async function open() {
+    if (host.hidden) returnFocus = document.activeElement;
     host.hidden = false;
+    focusInside();
     const config = await request("/__beauticode/ui/gallery/config");
     centerUrl = config.url || "";
     if (!config.enabled) {
@@ -159,6 +188,9 @@
 
   function close() {
     host.hidden = true;
+    loadGeneration += 1;
+    if (returnFocus?.isConnected) returnFocus.focus();
+    returnFocus = null;
   }
 
   host.querySelector(".bcg-close").addEventListener("click", close);
