@@ -786,7 +786,25 @@ function applyGalleryPath(p, meta) {
   if (kind === 'video') { el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto'; }
   return new Promise(function (resolve, reject) {
     var done = false, timer = setTimeout(function () { if (!done) { done = true; el.remove(); reject(new Error('皮肤媒体加载超时。')); } }, 30000);
-    var ok = function () { if (done) return; done = true; clearTimeout(timer); st.appendChild(el); old.forEach(function (n) { var u = n.dataset.blobUrl; if (u) URL.revokeObjectURL(u); n.remove(); }); currentUrl = url; markMedia(kind); if (kind === 'video') { markVideoReady(el); el.play().catch(function () {}); } var name = String(meta && meta.themeName || '皮肤主题').trim().slice(0, 80); rememberImportedTheme(name, p, kind, meta && meta.provenance); persistMark(p, PERSIST.activeThemeId); persist(); resolve(true); };
+    var ok = function () {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        st.appendChild(el);
+        old.forEach(function (n) { var u = n.dataset.blobUrl; if (u) URL.revokeObjectURL(u); n.remove(); });
+        currentUrl = url;
+        markMedia(kind);
+        if (kind === 'video') { markVideoReady(el); el.play().catch(function () {}); }
+        var name = String(meta && meta.themeName || '皮肤主题').trim().slice(0, 80);
+        rememberImportedTheme(name, p, kind, meta && meta.provenance);
+        // PERSIST is read and saved by the guardian; there is no renderer persist().
+        persistMark(p, PERSIST.activeThemeId);
+        resolve(true);
+      } catch (error) {
+        reject(error);
+      }
+    };
     var bad = function () { if (done) return; done = true; clearTimeout(timer); el.remove(); reject(new Error('皮肤媒体加载失败。')); };
     if (kind === 'video') { el.addEventListener('loadeddata', ok, { once: true }); el.addEventListener('error', bad, { once: true }); } else { el.addEventListener('load', ok, { once: true }); el.addEventListener('error', bad, { once: true }); }
   });

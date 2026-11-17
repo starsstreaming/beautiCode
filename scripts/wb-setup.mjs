@@ -27,6 +27,7 @@
 import { spawn, spawnSync, execSync } from 'node:child_process';
 import { isManagedWorkBuddyRunner, readGuardianProcess } from './guardian-process.mjs';
 import fs from 'node:fs';
+import { updateOwnedPort } from './windows-owned-env.mjs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -281,9 +282,8 @@ function statusMac() {
 }
 
 async function installWin(runtime) {
-  const r = spawnSync('setx', [ENV_KEY, port], { encoding: 'utf8' });
-  log(r.status === 0 ? '  ✓ setx 已持久化用户环境变量（点图标启动的 WorkBuddy 自带 CDP）'
-                     : `  ✗ setx 失败：${r.stderr}`);
+  updateOwnedPort({ journal: path.join(DATA_DIR, 'workbuddy-env-ownership.json'), port });
+  log('  ✓ 用户端口配置已备份、写入并回读验证');
   broadcastWindowsEnvironment();
   log('  ✓ 已广播环境变更（无需注销即可让后续原图标启动继承端口）');
   fs.mkdirSync(path.dirname(STARTUP_VBS), { recursive: true });
@@ -303,8 +303,9 @@ async function installWin(runtime) {
 function uninstallWin() {
   fs.rmSync(STARTUP_VBS, { force: true });
   fs.rmSync(LEGACY_STARTUP_VBS, { force: true });
-  run(`reg delete "HKCU\\Environment" /v ${ENV_KEY} /f`);
-  log('  ✓ 已拆除启动项并删除用户环境变量');
+  const restored = updateOwnedPort({ journal: path.join(DATA_DIR, 'workbuddy-env-ownership.json'), remove: true });
+  broadcastWindowsEnvironment();
+  log(restored === 'restored' ? '  ✓ 已拆除启动项并恢复原用户环境变量' : '  ✓ 已拆除启动项；未受本次安装管理或后来修改的环境变量已保留');
 }
 function statusWin() {
   log(`  用户 env：${run('reg query "HKCU\\Environment" /v ' + ENV_KEY).out.includes(ENV_KEY) ? '已设置' : '未设置'}`);
