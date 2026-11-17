@@ -611,6 +611,7 @@ export class CodexHostApplier implements HostApplier {
     if (this.sessions.size === 0) {
       // Preference remembered for the next inject even with no live page.
       return {
+        outcomes: [], partial: false, actualMuted: null,
         ok: true,
         muted: this.videoMuted,
         blocked: false,
@@ -632,9 +633,6 @@ export class CodexHostApplier implements HostApplier {
         if (result && result.ok) {
           okCount += 1;
           if (result.blocked) anyBlocked = true;
-        } else if (result) {
-          // Runtime present but no video yet — still count as accepted preference.
-          okCount += 1;
         } else {
           errors.push(`${id}: runtime rejected mute toggle`);
         }
