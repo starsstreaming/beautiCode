@@ -7,8 +7,26 @@ export function inspectDshInstallation({ home, env, exists = fs.existsSync, read
   const root = env.DSH_HOME || path.join(home, '.dsh');
   const profiles = [root, path.join(root, 'profiles', 'web')];
   for (const profile of profiles) {
-    try {
-      const patch = readFile(path.join(profile, 'cordis.patch.yml'), 'utf8');
+    let profilePatch = '';
+    try { profilePatch = readFile(path.join(profile, 'cordis.patch.yml'), 'utf8'); }
+    catch (error) { if (error.code !== 'ENOENT') continue; }
+    const patches = [profilePatch];
+    // The installer removes a duplicate profile bridge when the linked package
+    // ships its own patch. Require the actual dependency and matching link target.
+    if (!/\bbeauticode-bridge\b/.test(profilePatch)) {
+      try {
+        const manifest = JSON.parse(readFile(path.join(profile, 'package.json'), 'utf8'));
+        const dependency = manifest.dependencies?.['beauticode-dsh'];
+        const plugin = path.join(profile, 'node_modules', 'beauticode-dsh');
+        if (typeof dependency === 'string' && dependency.startsWith('link:') && dependency.length > 5) {
+          const target = path.resolve(profile, dependency.slice(5));
+          if (fs.realpathSync.native(plugin) === fs.realpathSync.native(target)) {
+            patches.push(readFile(path.join(plugin, 'cordis.patch.yml'), 'utf8'));
+          }
+        }
+      } catch { /* Unknown dependency layouts are not proof of active wiring. */ }
+    }
+    for (const patch of patches) try {
       // Only recognize the installer's active insert record. Unknown wiring is not proof.
       const inserts = [...patch.matchAll(/^- insert:\s*\r?\n((?:[ \t]+[^\r\n]*(?:\r?\n|$)|\r?\n)*)/gm)];
       const records = inserts.flatMap(match => match[1].split(/(?=^[ \t]*-[ \t]*id:)/m));
