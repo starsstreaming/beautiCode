@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { inspectDshInstallation } from "./dsh-installation.mjs";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -153,6 +154,7 @@ function defaultOptions(options = {}) {
     env: options.env || process.env,
     platform: options.platform || process.platform,
     exists: options.exists || fs.existsSync,
+    readFile: options.readFile || fs.readFileSync,
     probeAppxCodex: options.probeAppxCodex || packagedCodexPresent,
     queryRegistered: options.queryRegistered || queryWindowsInstallRecords,
     realpath: options.realpath || fs.realpathSync.native,
@@ -198,7 +200,7 @@ export function getHostStatus(host, options = {}) {
   const resolved = defaultOptions(options);
   const required = HOST_RUNTIME[host].required;
   const missingRuntime = required.filter((relative) => !resolved.exists(path.join(resolved.runtimeRoot, relative)));
-  const installed = installationMarkers(host, resolved).some((marker) => resolved.exists(marker));
+  const installed = host === "dsh" ? inspectDshInstallation(resolved).installed : installationMarkers(host, resolved).some((marker) => resolved.exists(marker));
   return {
     host,
     runtimeReady: missingRuntime.length === 0,
@@ -393,7 +395,10 @@ function inspectDshLinkConflict(options) {
 }
 
 function verifyHostInstall(host, options, waitForGuardian = false) {
-  if (host === "dsh") return { ready: true, state: "plugin-ready" };
+  if (host === "dsh") {
+    const result = inspectDshInstallation(options);
+    return { ready: result.installed, state: result.state, liveVerified: false };
+  }
   const deadline = Date.now() + (waitForGuardian && (host === "codex" || host === "workbuddy") ? 15_000 : 0);
   let verification;
   do {
@@ -441,7 +446,7 @@ export function getAllStatus(options = {}) {
       return {
         ...status,
         guardian: "not-applicable",
-        readiness: conflict ? "conflict" : status.installed ? "plugin-ready" : "not-installed",
+        readiness: conflict ? "conflict" : status.installed ? "plugin-wired" : "not-installed",
         ...(conflict ? { reason: conflict } : {}),
       };
     }

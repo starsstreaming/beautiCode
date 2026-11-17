@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { getHostStatus, getAllStatus } from '../src/index.mjs';
+
+test('DSH status requires an actual plugin entry and active wiring, without claiming live readiness', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-dsh-status-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const opts = { home: root, env: { DSH_HOME: root }, platform: 'linux', runtimeRoot: root };
+  const patch = path.join(root, 'cordis.patch.yml');
+  fs.writeFileSync(patch, '[]');
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  const plugin = path.join(root, 'plugins', 'beauticode-dsh');
+  fs.mkdirSync(plugin, { recursive: true });
+  fs.writeFileSync(path.join(plugin, 'package.json'), JSON.stringify({ name: 'beauticode-dsh', version: 'fixture' }));
+  fs.writeFileSync(path.join(plugin, 'index.mjs'), '');
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  const wire = `- insert:\n    - id: beauticode-bridge\n      name: '${pathToFileURL(path.join(plugin, 'index.mjs')).href}'\n      inject: [webServer]\n`;
+  fs.writeFileSync(patch, wire);
+  assert.equal(getHostStatus('dsh', opts).installed, true);
+  assert.equal(getAllStatus(opts).hosts.find(h => h.host === 'dsh').readiness, 'plugin-wired');
+  fs.writeFileSync(patch, wire.replace('- insert:', '- remove:'));
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  fs.writeFileSync(patch, wire + '      disabled: true\n');
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  fs.writeFileSync(patch, wire);
+  fs.unlinkSync(path.join(plugin, 'index.mjs'));
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+});
