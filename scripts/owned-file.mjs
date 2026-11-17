@@ -24,6 +24,12 @@ export function replaceOwnedFile(file, before, after, mode) {
     }
   } finally {fs.rmSync(temporary,{force:true});}
 }
+// Register compensation before publication. A write can succeed before temp cleanup throws.
+export function undoFileChange(file, before, published, mode) {
+  const current = readOwnedFile(file);
+  if (current === before) return;
+  replaceOwnedFile(file, published, before, mode);
+}
 export function rollbackSteps(undos, original) {
   const errors=[];
   for(const undo of undos.reverse())try{undo();}catch(error){errors.push(error);}

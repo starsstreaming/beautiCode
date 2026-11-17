@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { renderWindowsStartupVbs, startupDirectory } from './portable-runtime.mjs';
 import { updateOwnedPort, windowsPortRegistry } from './windows-owned-env.mjs';
-import { readOwnedFile, replaceOwnedFile, rollbackSteps } from './owned-file.mjs';
+import { readOwnedFile, replaceOwnedFile, undoFileChange, rollbackSteps } from './owned-file.mjs';
 
 export function workbuddyWindowsPaths(env, home) {
   const appData=env.APPDATA || path.join(home,'AppData','Roaming');
@@ -29,8 +29,8 @@ export function workbuddyWindowsWiring({env,home,launcher,journal,registry=windo
           if(currentJournal!==oldJournal){const saved=JSON.parse(currentJournal);if(JSON.stringify(saved.written)!==JSON.stringify(target))throw new Error('Ownership journal changed; preserved.');replaceOwnedFile(journal,currentJournal,oldJournal);}
         });
         updateOwnedPort({journal,port,registry});
-        if(before.startup!==content){replace(paths.startup,before.startup,content);undos.push(()=>replaceOwnedFile(paths.startup,content,before.startup));}
-        if(paths.legacy!==paths.startup&&before.legacy===content){replace(paths.legacy,content,null);undos.push(()=>replaceOwnedFile(paths.legacy,null,content));}
+        if(before.startup!==content){undos.push(()=>undoFileChange(paths.startup,before.startup,content));replace(paths.startup,before.startup,content);}
+        if(paths.legacy!==paths.startup&&before.legacy===content){undos.push(()=>undoFileChange(paths.legacy,content,null));replace(paths.legacy,content,null);}
         return {rollback(){rollbackSteps(undos);}};
       } catch(error){rollbackSteps(undos,error);}
     },

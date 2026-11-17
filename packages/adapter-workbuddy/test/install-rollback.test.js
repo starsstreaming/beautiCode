@@ -9,6 +9,37 @@ import {commitWorkbuddyInstall} from '../../../scripts/workbuddy-install-transac
 import {renderWindowsStartupVbs} from '../../../scripts/portable-runtime.mjs';
 
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'bc-install-tx-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
+test('late startup publication failure restores files and registry', t => {
+  const root = fixture(t), env = { APPDATA: root };
+  const paths = workbuddyWindowsPaths(env, root);
+  let registryValue = null;
+  const wiring = workbuddyWindowsWiring({
+    env, home: root, launcher: path.join(root, 'launcher.ps1'), journal: path.join(root, 'journal'),
+    registry: { read: () => registryValue, write: value => { registryValue = value; } },
+    replace(file, _before, value) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, value);
+      throw new Error('temporary cleanup failed');
+    },
+  });
+  assert.throws(() => wiring.install('9335'), /cleanup failed/);
+  assert.equal(fs.existsSync(paths.startup), false);
+  assert.equal(registryValue, null);
+});
+
+test('identical launcher contents still restore original POSIX permissions', { skip: process.platform === 'win32' }, async t => {
+  const root = fixture(t);
+  const runtime = { pointerPath: path.join(root, 'pointer'), launcher: path.join(root, 'launcher.sh') };
+  fs.writeFileSync(runtime.launcher, 'unchanged', { mode: 0o751 });
+  fs.chmodSync(runtime.launcher, 0o751);
+  await assert.rejects(commitWorkbuddyInstall({
+    runtime, expectedLauncher: 'unchanged', portFile: path.join(root, 'port'), portText: '9335',
+    install: () => ({ rollback() {} }), discard() {},
+    activate() { fs.chmodSync(runtime.launcher, 0o755); throw new Error('activation failed'); },
+  }), /activation failed/);
+  assert.equal(fs.statSync(runtime.launcher).mode & 0o777, 0o751);
+});
+
 test('preflight failures discard the candidate before any wiring', async t => {
   const root = fixture(t);
   let discarded = 0;

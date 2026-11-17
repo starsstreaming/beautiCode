@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { xdgConfigHome, xdgAutostartPath, renderXdgDesktopEntry } from './portable-runtime.mjs';
 import { createXdgAutostartAdapter } from './xdg-autostart.mjs';
-import { readOwnedFile, replaceOwnedFile, rollbackSteps } from './owned-file.mjs';
+import { readOwnedFile, replaceOwnedFile, undoFileChange, rollbackSteps } from './owned-file.mjs';
 
 export function workbuddyLinuxPaths(env, home) {
   return {
@@ -25,8 +25,10 @@ export function workbuddyLinuxWiring({ env, home, launcher, replace = replaceOwn
       const nextDesktop=renderXdgDesktopEntry({ name: 'beautiCode WorkBuddy runner', launcher, args: ['--watchdog'] });
       const nextEnv=`${marker}\nWORKBUDDY_REMOTE_DEBUGGING_PORT=${value}\n`,undos=[];
       try {
-        desktop.write(nextDesktop);undos.push(()=>replaceOwnedFile(paths.desktop,nextDesktop,beforeDesktop));
-        replace(paths.environment,beforeEnv,nextEnv);undos.push(()=>replaceOwnedFile(paths.environment,nextEnv,beforeEnv));
+        undos.push(()=>undoFileChange(paths.desktop,beforeDesktop,nextDesktop));
+        desktop.write(nextDesktop);
+        undos.push(()=>undoFileChange(paths.environment,beforeEnv,nextEnv));
+        replace(paths.environment,beforeEnv,nextEnv);
         return {rollback(){rollbackSteps(undos);}};
       } catch(error){rollbackSteps(undos,error);}
     },
