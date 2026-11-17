@@ -111,6 +111,33 @@ export function installHostQuickShortcut(host, options = {}) {
 
 const LINUX_ICONS = Object.freeze({ codex: 'chatgpt', workbuddy: 'workbuddy', cursor: 'co.anysphere.cursor', doubao: 'doubao' });
 
+/** Match the same three ownership fields used at creation, including the launcher path. */
+export function removeWindowsQuickShortcut(host, options = {}) {
+  if (!NAMES[host]) throw new Error('unsupported-quick-launch-host');
+  const launcher = options.launcher || stableQuickLauncher(host, options);
+  const appData = options.appData || process.env.APPDATA || path.join(options.home || os.homedir(), 'AppData', 'Roaming');
+  const programs = options.programsDir || path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'beautiCode');
+  const file = path.join(programs, `beautiCode ${NAMES[host]} (背景).lnk`);
+  if (!fs.existsSync(file)) return false;
+  const temporary = path.join(programs, `.beauticode-${randomUUID()}.lnk`);
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    `$file=${psLiteral(file)};$tmp=${psLiteral(temporary)};$launcher=${psLiteral(launcher)}`,
+    "try{[IO.File]::Copy($file,$tmp);$shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut($tmp)",
+    "$target=Join-Path $env:WINDIR 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'",
+    `$description=${psLiteral(`beautiCode quick launch for ${host}`)}`,
+    "$arguments='-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"'+$launcher+'\" --quick-launch'",
+    "if($link.Description -ne $description -or $link.TargetPath -ine $target -or $link.Arguments -ne $arguments){throw 'shortcut-conflict'}",
+    "if([Convert]::ToBase64String([IO.File]::ReadAllBytes($file)) -cne [Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp))){throw 'shortcut-changed'}",
+    "[IO.File]::Delete($file)}finally{[IO.File]::Delete($tmp)}",
+  ].join('\n');
+  try {
+    const result = (options.spawnSync || spawnSync)('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, timeout: 8000 });
+    if (result.error || result.status !== 0) throw new Error('shortcut-remove-failed: ownership or runtime check failed');
+    return true;
+  } finally { fs.rmSync(temporary, { force: true }); }
+}
+
 function desktopExecQuote(value) {
   // Same rules as portable-runtime desktopExecQuote (Desktop Entry spec).
   return `"${String(value).replace(/["`$\\]/g, (char) => `\\${char}`).replaceAll('%', '%%')}"`;

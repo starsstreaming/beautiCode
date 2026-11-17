@@ -292,6 +292,8 @@ export function renderCodexStarter({ launcher }) {
 
 export async function activateStableRuntime(runtime, options = {}) {
   const { host, entrypoint, version, pointerPath, launcher } = runtime;
+  let previous = null;
+  try { previous = JSON.parse(await fsp.readFile(pointerPath, 'utf8')); } catch {}
   if (launcher.endsWith(".sh")) {
     const node = options.nodePath ? { path: options.nodePath } : await resolveNodeExecutable({ stableRoot: runtime.hostRoot });
     await atomicWrite(launcher, renderRuntimeLauncherSh({ host, startupLogPath: options.startupLogPath, nodePath: node.path }));
@@ -299,8 +301,47 @@ export async function activateStableRuntime(runtime, options = {}) {
   } else {
     await atomicWrite(launcher, renderRuntimeLauncherPs1({ host, startupLogPath: options.startupLogPath }));
   }
+  await atomicWrite(path.join(runtime.activeRoot, '.beauticode-owned-runtime.json'), JSON.stringify({ schema: RUNTIME_SCHEMA, host, version }));
   await atomicWrite(pointerPath, `${JSON.stringify({ schema: RUNTIME_SCHEMA, host: String(host).toLowerCase(), version, entrypoint }, null, 2)}\n`);
+  await pruneStableRuntime(runtime, { previousVersion: previous?.version, ...options }).catch(() => {});
   return runtime;
+}
+
+/** Return null on incomplete process discovery: unknown liveness means no deletion. */
+function runningRuntimeCommands() {
+  if (process.platform === 'win32') {
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);@(Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(node|powershell|pwsh)(\\.exe)?$' } | Select-Object -ExpandProperty CommandLine) | ConvertTo-Json -Compress"], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+    if (result.status !== 0 || result.error) return null;
+    try { const rows = JSON.parse(result.stdout); const values = Array.isArray(rows) ? rows : [rows]; return values.every(v => typeof v === 'string' && v) ? values : null; } catch { return null; }
+  }
+  const result = spawnSync('ps', ['-axo', 'command='], { encoding: 'utf8', timeout: 5000 });
+  return result.status === 0 ? result.stdout.split('\n') : null;
+}
+
+/** Retain current, previous and every observed running version; ignore unowned directories. */
+export async function pruneStableRuntime(runtime, { previousVersion, runningCommands = runningRuntimeCommands } = {}) {
+  const commands = runningCommands();
+  if (!Array.isArray(commands)) return { removed: [], reason: 'process-discovery-unavailable' };
+  const versions = path.resolve(runtime.hostRoot, 'versions');
+  const keep = new Set([runtime.version, previousVersion].filter(Boolean));
+  const normalized = commands.map(s => String(s).replaceAll('\\', '/').toLowerCase());
+  const removed = [];
+  const candidates = await fsp.readdir(versions, { withFileTypes: true });
+  for (const entry of candidates) {
+    if (!entry.isDirectory() || entry.isSymbolicLink() || keep.has(entry.name)) continue;
+    if (Number(entry.name.split('-')[1]) >= Number(runtime.version.split('-')[1])) continue;
+    const target = path.resolve(versions, entry.name);
+    if (path.dirname(target) !== versions || normalized.some(cmd => cmd.includes(target.replaceAll('\\', '/').toLowerCase()))) continue;
+    let owner;
+    try { owner = JSON.parse(await fsp.readFile(path.join(target, '.beauticode-owned-runtime.json'), 'utf8')); } catch { continue; }
+    if (owner.schema !== RUNTIME_SCHEMA || owner.host !== runtime.host || owner.version !== entry.name) continue;
+    // A concurrent activation invalidates this collector's view. Stop, do not guess.
+    const current = JSON.parse(await fsp.readFile(runtime.pointerPath, 'utf8'));
+    if (current.version !== runtime.version) break;
+    await fsp.rm(target, { recursive: true, force: true });
+    removed.push(entry.name);
+  }
+  return { removed };
 }
 
 export async function discardStableRuntime(runtime) {
