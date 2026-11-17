@@ -13,9 +13,22 @@ test('new selection, clear and disposal invalidate all old WorkBuddy gallery cal
   });
   vm.runInContext(source.slice(source.indexOf('function cancelPendingMedia()'),source.indexOf('function clearMedia()')),ctx);
   vm.runInContext(source.slice(source.indexOf('function applyGalleryPath(p, meta)'),source.indexOf('window.__bcApplyBackgroundPath')),ctx);
+  const revoked = [];
+  ctx.URL.revokeObjectURL = url => revoked.push(url);
+  ctx.media = () => {
+    const element = ctx.document.createElement();
+    nodes.push(element);
+    return element;
+  };
+  ctx.clearMedia = () => nodes.slice().forEach(ctx.releaseMedia);
+  ctx.msg = () => {};
+  vm.runInContext(source.slice(source.indexOf('function applyMediaUrl('), source.indexOf('function newThemeId()')), ctx);
+  vm.runInContext("applyMediaUrl('blob:previous', 'image')", ctx);
+  elements.length = 0;
   const a=vm.runInContext("applyGalleryPath('a.png',{})",ctx);const failed=assert.rejects(a,/取消|过期/);
   const b=vm.runInContext("applyGalleryPath('b.png',{})",ctx);const late=elements[0].events.load;
   elements[1].events.load();await b;late();await failed;
+  assert.deepEqual(revoked, ['blob:previous']);
   assert.equal(wallpaper,'b.png');assert.equal(nodes.length,1);
   const c=vm.runInContext("applyGalleryPath('c.png',{})",ctx);const cancelled=assert.rejects(c,/取消|过期/);
   vm.runInContext('cancelPendingMedia()',ctx);nodes.splice(0);wallpaper=null;elements[2].events.load();await cancelled;

@@ -37,7 +37,7 @@ export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
  * payload 世代戳：每次改 payload 内容时递增。守卫用它判断页面上的注入
  * 是否为「当前代」——旧代按钮的闭包攥着已分离的节点引用，必须全拆重建。
  */
-export const BACKGROUND_BAR_VERSION = 'v10.4';
+export const BACKGROUND_BAR_VERSION = 'v10.5';
 
 /** 注入 IIFE 字符串；幂等（守卫同时校验 entry 是否仍在 DOM，侧栏收起/重挂后可重建）。 */
 export const BACKGROUND_BAR_INJECTION: string = (function () {
@@ -562,7 +562,7 @@ function markVideoReady(el) {
   }
 }
 
-var currentUrl = null;
+
 var muted = true;
 // 用户要求：所有注释性小文字（状态条）一律不展示 —— 守护回填也静默
 function msg() {}
@@ -581,10 +581,11 @@ function applyBlurVar() {
 }
 function applyMediaUrl(url, kind) {
   clearMedia();
-  if (currentUrl && currentUrl.indexOf('blob:') === 0) { URL.revokeObjectURL(currentUrl); currentUrl = null; }
+
   markMedia(kind);
   if (kind === 'video') {
     var v = media('video');
+    if (url.startsWith('blob:')) v.dataset.blobUrl = url;
     v.muted = true; v.loop = true; v.playsInline = true; v.src = url;
     markVideoReady(v);
     var pr = v.play();
@@ -595,7 +596,9 @@ function applyMediaUrl(url, kind) {
     }
     msg('已应用视频背景（' + (muted ? '静音' : '有声') + '）。');
   } else {
-    media('img').src = url;
+    var img = media('img');
+    if (url.startsWith('blob:')) img.dataset.blobUrl = url;
+    img.src = url;
     msg('已应用图片背景。');
   }
 }
@@ -621,7 +624,7 @@ function applyBlob(file, themeName, realPath) {
   if (!kind) { msg('不支持的格式：' + ${JSON.stringify([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS].join(' / '))}); return; }
   var u = URL.createObjectURL(file);
   applyMediaUrl(u, kind);
-  currentUrl = u;
+
   // 路径记忆：守护选择文件后会把真实路径放到 __bcPendingPickPath——媒体显示用
   // blob URL（100% 可靠），但状态记真实路径（blob 跨重启失效，重启后靠路径恢复）
   var real = String(realPath || window.__bcPendingPickPath || '');
@@ -779,8 +782,7 @@ pop.addEventListener('click', function (ev) {
   }
   else if (act === 'clear') {
     clearMedia();
-    if (currentUrl && currentUrl.indexOf('blob:') === 0) { URL.revokeObjectURL(currentUrl); }
-    currentUrl = null;
+
     persistMark(null);
     PERSIST.blob = false;
     msg('已清除背景。');
@@ -813,7 +815,7 @@ function applyGalleryPath(p, meta) {
       try {
         st.appendChild(el);
 
-        currentUrl = url;
+
         markMedia(kind);
         if (kind === 'video') { markVideoReady(el); el.play().catch(function () {}); }
         var name = String(meta && meta.themeName || '皮肤主题').trim().slice(0, 80);
