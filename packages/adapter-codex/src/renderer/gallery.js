@@ -222,7 +222,8 @@
     const id = card.getAttribute("data-id");
     busy = true;
     msg.textContent = "开始安装…";
-    operation("start",{id}).then(state=>{rememberOperation(state.id);if(host.hidden){void operation("cancel",{operationId});return;}return watchOperation()})
+    rememberOperation(crypto.randomUUID());
+    operation("start",{id,operationId}).then(state=>{rememberOperation(state.id);if(host.hidden){void operation("cancel",{operationId});return;}return watchOperation()})
       .catch(error=>{msg.textContent=error.message;})
       .finally(()=>{if(!polling)busy=false;});
   });

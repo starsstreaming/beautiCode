@@ -20,3 +20,11 @@ test('download deadline and receipt capacity are bounded',async()=>{
  const second=ops.start('b',async()=>({ok:true}));await wait();ops.start('c',async()=>({ok:true}));await wait();
  assert.equal(ops.status(first.id).ok,false);assert.equal(ops.status(second.id).result.ok,true);
 });
+
+test('client operation ID recovers a lost start response and prevents duplicate apply',async()=>{
+ const ops=createGalleryOperations();let calls=0;const id='client-operation-12345';
+ ops.start('a',async()=>{calls++;return{ok:true}},id);await wait();
+ assert.equal(ops.status(id).result.ok,true);
+ assert.equal(ops.start('a',async()=>{calls++;return{ok:true}},id).result.ok,true);
+ assert.equal(calls,1);assert.equal(ops.start('other',async()=>({ok:true}),id).ok,false);
+});

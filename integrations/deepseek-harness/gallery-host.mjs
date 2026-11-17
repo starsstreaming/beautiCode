@@ -226,7 +226,7 @@ export function createGalleryHandlers({ dataRoot, actions }) {
       if(req.method!=="POST"){res.writeHead(405).end();return;}
       if(!isSameOrigin(req)){res.writeHead(403).end();return;}
       const body=await readJson(req);
-      if(body.action==="start") {const id=String(body.id||"");if(!isSafeSkinId(id)){sendJson(res,400,{ok:false,error:"皮肤 ID 无效。"});return;}sendJson(res,200,operations.start(id,ctx=>performInstall(id,ctx)));return;}
+      if(body.action==="start") {const id=String(body.id||"");if(!isSafeSkinId(id)){sendJson(res,400,{ok:false,error:"皮肤 ID 无效。"});return;}sendJson(res,200,operations.start(id,ctx=>performInstall(id,ctx),body.operationId));return;}
       sendJson(res,200,body.action==="cancel"?operations.cancel(String(body.operationId)):operations.status(String(body.operationId)));
     },
     async config(req, res, sendJson, isSameOrigin) {

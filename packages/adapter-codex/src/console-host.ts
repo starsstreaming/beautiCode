@@ -74,7 +74,7 @@ export function createConsoleHost(session: BeautiSession) {
     if (route === "/__beauticode/ui/gallery/cancel-request") { queries.get(String(body.requestId))?.abort(); return {ok:true}; }
     if (route === "/__beauticode/ui/gallery/operation") {
       const action=String(body.action||"status");
-      if(action==="start") { const id=String(body.id||"");if(!isSafeSkinId(id))return fail("皮肤 ID 无效。");return galleryOperations.start(id, context=>installSkinFromCenter(session,id,context)); }
+      if(action==="start") { const id=String(body.id||"");if(!isSafeSkinId(id))return fail("皮肤 ID 无效。");return galleryOperations.start(id, context=>installSkinFromCenter(session,id,context), typeof body.operationId==='string'?body.operationId:undefined); }
       return action==="cancel"?galleryOperations.cancel(String(body.operationId)):galleryOperations.status(String(body.operationId));
     }
     if (route === "/__beauticode/ui/status") return status();

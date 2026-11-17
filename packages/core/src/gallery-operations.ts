@@ -10,12 +10,14 @@ export function createGalleryOperations({timeoutMs=30*60*1000,ttlMs=15*60*1000,m
   function status(id:string){prune();const entry=entries.get(id);return entry?{ok:true,id,skinId:entry.skinId,phase:entry.phase,...(entry.result?{result:entry.result}:{})}:{ok:false,error:'操作记录不存在或已过期，请检查当前背景后重试。',code:'operation_unknown'};}
   return {
     status,
-    start(skinId:string,task:(context:{signal:AbortSignal;progress(phase:string):void;beginApply():void})=>Promise<Result>) {
+    start(skinId:string,task:(context:{signal:AbortSignal;progress(phase:string):void;beginApply():void})=>Promise<Result>, requestedId?: string) {
       prune();
+      if(requestedId && !/^[a-zA-Z0-9-]{16,80}$/.test(requestedId))return {ok:false,error:'无效的操作编号。'};
+      if(requestedId && entries.has(requestedId)){const existing=entries.get(requestedId)!;return existing.skinId===skinId?status(requestedId):{ok:false,error:'操作编号已用于其他皮肤。'};}
       const active=[...entries.values()].find(e=>!e.result);
       if(active)return active.skinId===skinId?status(active.id):{ok:false,error:'已有皮肤操作正在进行，请等待或取消。'};
       while(entries.size>=maxEntries)entries.delete(entries.keys().next().value!);
-      const entry:Entry={id:randomUUID(),skinId,phase:'download',updatedAt:Date.now(),controller:new AbortController()};
+      const entry:Entry={id:requestedId||randomUUID(),skinId,phase:'download',updatedAt:Date.now(),controller:new AbortController()};
       entries.set(entry.id,entry);
       const timer=setTimeout(()=>{if(entry.phase!=='apply')entry.controller.abort();},timeoutMs);
       timer.unref?.();
