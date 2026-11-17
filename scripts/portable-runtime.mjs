@@ -428,7 +428,11 @@ export async function resolveNodeExecutable(options = {}) {
   for (const candidate of [...new Set(candidates)]) {
     if (!exists(candidate)) continue;
     let version;
-    try { version = await probeVersion(candidate); } catch(error) { probeFailures.push(error.probeCode || error.code || 'unknown'); version = null; }
+    try { version = await probeVersion(candidate); } catch (error) {
+      const code = error?.probeCode ?? error?.code;
+      probeFailures.push(typeof code === 'string' && /^[A-Z][A-Z_0-9]{0,39}$/.test(code) ? code : 'unknown');
+      version = null;
+    }
     if (!version || version.major < MIN_NODE_MAJOR) continue;
     (isSandboxNode(candidate) ? sandbox : valid).push({ path: candidate, ...version });
   }

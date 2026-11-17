@@ -26,6 +26,18 @@ const execFileAsync = promisify(execFile);
       return match?{major:Number(match[1]),version:match.slice(1).join('.')}:null;
     };
 
+test('probe diagnostics retain system codes and omit arbitrary thrown data', async () => {
+  const failures = [{code:'ETIMEDOUT'}, {code:'private location'}, null];
+  await assert.rejects(resolveNodeExecutable({
+    stableRoot: os.tmpdir(), candidates: ['a','b','c'], exists: () => true,
+    probeVersion: () => { throw failures.shift(); },
+  }), error => {
+    assert.equal(error.code, 'node_probe_failed');
+    assert.deepEqual(error.probeFailures, ['ETIMEDOUT','unknown','unknown']);
+    return true;
+  });
+});
+
 test("startup command renders only the stable runtime launcher", () => {
   const stableRoot = "C:/Users/test/AppData/Local/beautiCode/runtime";
   const launcher = path.join(stableRoot, "cursor", "launcher.mjs");
