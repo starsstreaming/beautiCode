@@ -6,11 +6,19 @@ export function buildMediaHealthProbe(backdropSelectors: readonly string[]): str
     const selected=!!node;
     const media=!!node&&(node.tagName==='IMG'?node.complete&&node.naturalWidth>0:node.tagName==='VIDEO'?node.readyState>=2&&node.videoWidth>0:false);
     const visible=(el)=>{const s=getComputedStyle(el),r=el.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity)>0&&r.width>0&&r.height>0};
-    const alpha=(value)=>{if(value==='transparent')return 0;const parts=value.match(/rgba?\\(([^)]+)\\)/);if(!parts)return 1;const p=parts[1].split(/[,/]/).map(x=>x.trim());return p.length===4?Number(p[3]):1};
+    const alpha=(value)=>{
+      if(value==='transparent')return 0;
+      const slash=value.match(/\\/\\s*([\\d.]+)(%)?\\s*\\)$/);
+      if(slash)return Number(slash[1])/(slash[2]?100:1);
+      const legacy=value.match(/^rgba?\\(([^)]+)\\)$/);
+      if(legacy){const p=legacy[1].split(',').map(x=>x.trim());return p.length===4?parseFloat(p[3])/(p[3].endsWith('%')?100:1):1}
+      return /^(?:color|hsl|hsla|lab|lch|oklab|oklch)\\(/.test(value)?1:null;
+    };
     const opaqueSelectors=${JSON.stringify(backdropSelectors)}.filter(selector=>[...document.querySelectorAll(selector)].some(el=>{
       if(!visible(el))return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);
       const area=Math.max(0,Math.min(innerWidth,r.right)-Math.max(0,r.left))*Math.max(0,Math.min(innerHeight,r.bottom)-Math.max(0,r.top));
-      return area>=innerWidth*innerHeight*.2&&Number(s.opacity)>=.95&&(alpha(s.backgroundColor)>=.95||s.backgroundImage!=='none');
+      // Images and gradients alone do not establish opacity. Unknown paint stays unverified.
+      return area>=innerWidth*innerHeight*.2&&Number(s.opacity)>=.95&&alpha(s.backgroundColor)>=.95;
     }));
     return {selected,media,unverifiable:!!node&&node.tagName==='IFRAME',mediaVisible:!!node&&visible(node),occluded:opaqueSelectors.length>0,opaqueSelectors:opaqueSelectors.slice(0,8)};
   })()`;

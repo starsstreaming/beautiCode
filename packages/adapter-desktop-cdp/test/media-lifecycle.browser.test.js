@@ -65,6 +65,10 @@ browserTest('media health distinguishes empty, broken, hidden, and known occlude
   assert.equal(mediaHealthState(await page.evaluate(probe)),'presentation-unverified');
   await page.evaluate(()=>{const cover=document.createElement('div');cover.className='layout-window-frame__body';cover.style.cssText='position:fixed;inset:0;background:rgb(248,253,255)';document.body.append(cover)});
   assert.equal(mediaHealthState(await page.evaluate(probe)),'injected-but-occluded');
+  for (const background of ['color(srgb 1 1 1 / 0.4)', 'color-mix(in srgb, white 40%, transparent)', 'linear-gradient(transparent, transparent)']) {
+    await page.locator('.layout-window-frame__body').evaluate((n, background) => n.style.background = background, background);
+    assert.equal(mediaHealthState(await page.evaluate(probe)), 'presentation-unverified', background);
+  }
   await page.locator('.layout-window-frame__body').evaluate(n=>n.style.display='none');
   assert.equal(mediaHealthState(await page.evaluate(probe)),'presentation-unverified');
   await page.locator('.bc-media').evaluate(n=>n.style.visibility='hidden');

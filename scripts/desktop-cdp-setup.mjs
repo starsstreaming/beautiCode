@@ -234,6 +234,12 @@ async function readCdpStatus() {
       entry: diagnosis.entry,
       style: diagnosis.style,
       stage: diagnosis.stage,
+      selected: diagnosis.selected ?? null,
+      unverifiable: diagnosis.unverifiable ?? null,
+      media: diagnosis.media ?? null,
+      mediaVisible: diagnosis.mediaVisible ?? null,
+      occluded: diagnosis.occluded ?? null,
+      opaqueSelectors: diagnosis.opaqueSelectors ?? null,
     };
   } catch {
     return { connected: false, port: null, state: 'probe-failed', anchor: null, anchorTextMatches: null, entry: null, style: null, stage: null };

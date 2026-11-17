@@ -81,6 +81,8 @@ export function createHealthRunner(deps) {
       entry: health?.entry ?? status.cdp?.entry ?? null,
       style: health?.style ?? status.cdp?.style ?? null,
       stage: health?.stage ?? status.cdp?.stage ?? null,
+      selected: health?.selected ?? null,
+      unverifiable: health?.unverifiable ?? null,
       media: health?.media ?? null,
       mediaVisible: health?.mediaVisible ?? null,
       occluded: health?.occluded ?? null,
