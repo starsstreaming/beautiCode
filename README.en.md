@@ -85,13 +85,15 @@ beauticode-desktop all install
 
 `all install` detects clients installed on your computer, sets up their background integration one by one, and creates Start menu shortcuts with background support for detected clients. It does not start the clients for you. For a client enabling CDP for the first time, launch it once using the new shortcut.
 
-### Linux (x64, separate package `beauticode-linux`)
+### Linux (x64, source preview)
+
+The public npm installation path is not verified. These commands build a local candidate only; they do not install a guardian or launch a client. Linux installation and autostart require separate validation.
 
 ```sh
 sudo apt install zenity          # file picker (or kdialog on KDE)
-npm install -g beauticode-linux --foreground-scripts
-beauticode-linux all install
-beauticode-linux all status
+npm ci --ignore-scripts
+npm run build
+node scripts/pack-desktop-aggregate.mjs --linux
 ```
 
 Supports Codex (ChatGPT desktop app), Cursor and WorkBuddy; requires Node.js 22+. Guardians go to `~/.config/autostart` and the "(背景)" launchers to `~/.local/share/applications`; no root needed. There is no tray on Linux, so built-in animated ambience themes (e.g. the rainy window) are not available. See [packages/beauticode-linux/README.md](packages/beauticode-linux/README.md).

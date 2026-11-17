@@ -8,6 +8,26 @@ permissions:
   contents: read
 
 jobs:
+  browser:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Install isolated browser test dependency
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP/bc-browser" --ignore-scripts --no-audit --no-fund playwright@1.65.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Require browser regressions without skipped tests
+        shell: pwsh
+        run: |
+          $env:BEAUTICODE_PLAYWRIGHT_MODULE = ([System.Uri]::new("$env:RUNNER_TEMP/bc-browser/node_modules/playwright/index.mjs")).AbsoluteUri
+          node scripts/test-browser.mjs
   validate:
     strategy:
       fail-fast: false
