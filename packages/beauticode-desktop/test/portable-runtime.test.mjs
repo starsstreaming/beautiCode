@@ -17,6 +17,14 @@ import {
 } from "../../../scripts/portable-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
+    // A newly copied executable may wait on an OS scanner. Probe errors are
+    // diagnostics, not evidence the binary is an old/unsafe Node. Keep the
+    // product's short probe policy in unit coverage and use an async probe here.
+    const fixtureProbe = async (candidate) => {
+      const { stdout } = await execFileAsync(candidate, ['--version'], {windowsHide:true,timeout:10_000});
+      const match=/^v(\d+)\.(\d+)\.(\d+)/.exec(stdout.trim());
+      return match?{major:Number(match[1]),version:match.slice(1).join('.')}:null;
+    };
 
 test("startup command renders only the stable runtime launcher", () => {
   const stableRoot = "C:/Users/test/AppData/Local/beautiCode/runtime";
@@ -69,14 +77,7 @@ test("node resolver rejects old or sandbox-only candidates and copies a verified
     const stable = path.join(profile, "stable-runtime");
     await fs.mkdir(path.dirname(sandbox), { recursive: true });
     await fs.copyFile(process.execPath, sandbox);
-    // A newly copied executable may wait on an OS scanner. Probe errors are
-    // diagnostics, not evidence the binary is an old/unsafe Node. Keep the
-    // product's short probe policy in unit coverage and use an async probe here.
-    const fixtureProbe = async (candidate) => {
-      const { stdout } = await execFileAsync(candidate, ['--version'], {windowsHide:true,timeout:10_000});
-      const match=/^v(\d+)\.(\d+)\.(\d+)/.exec(stdout.trim());
-      return match?{major:Number(match[1]),version:match.slice(1).join('.')}:null;
-    };
+
     const resolved = await resolveNodeExecutable({
       stableRoot: stable,
       candidates: [sandbox],
