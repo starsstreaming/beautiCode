@@ -383,6 +383,7 @@ function parseNodeVersion(raw) {
 
 function defaultProbeVersion(candidate) {
   const result = spawnSync(candidate, ["--version"], { encoding: "utf8", windowsHide: true, timeout: 3_000 });
+  if(result.error)throw Object.assign(new Error(`Node version probe failed: ${result.error.code || 'unknown'}`),{code:'node_probe_failed',probeCode:result.error.code});
   if (result.status !== 0) return null;
   return parseNodeVersion(result.stdout || result.stderr);
 }
@@ -423,15 +424,16 @@ export async function resolveNodeExecutable(options = {}) {
   const exists = options.exists || ((candidate) => fs.existsSync(candidate));
   const valid = [];
   const sandbox = [];
+  const probeFailures = [];
   for (const candidate of [...new Set(candidates)]) {
     if (!exists(candidate)) continue;
     let version;
-    try { version = await probeVersion(candidate); } catch { version = null; }
+    try { version = await probeVersion(candidate); } catch(error) { probeFailures.push(error.probeCode || error.code || 'unknown'); version = null; }
     if (!version || version.major < MIN_NODE_MAJOR) continue;
     (isSandboxNode(candidate) ? sandbox : valid).push({ path: candidate, ...version });
   }
   if (valid.length) return { ...valid[0], source: "absolute", sourceRecord: path.join(stableRoot, "node-source.json") };
-  if (!sandbox.length) throw new Error(`找不到安全的 Node.js >=${MIN_NODE_MAJOR}。`);
+  if (!sandbox.length) throw Object.assign(new Error(`找不到安全的 Node.js >=${MIN_NODE_MAJOR}。${probeFailures.length?' 探测失败：'+[...new Set(probeFailures)].join(', '):''}`),{code:probeFailures.length?'node_probe_failed':'node_unavailable',probeFailures});
   const source = sandbox[0];
   await fsp.mkdir(stableRoot, { recursive: true });
   const target = path.join(stableRoot, `node-v${source.version}.exe`);

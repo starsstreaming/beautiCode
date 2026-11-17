@@ -69,6 +69,14 @@ test("node resolver rejects old or sandbox-only candidates and copies a verified
     const stable = path.join(profile, "stable-runtime");
     await fs.mkdir(path.dirname(sandbox), { recursive: true });
     await fs.copyFile(process.execPath, sandbox);
+    // A newly copied executable may wait on an OS scanner. Probe errors are
+    // diagnostics, not evidence the binary is an old/unsafe Node. Keep the
+    // product's short probe policy in unit coverage and use an async probe here.
+    const fixtureProbe = async (candidate) => {
+      const { stdout } = await execFileAsync(candidate, ['--version'], {windowsHide:true,timeout:10_000});
+      const match=/^v(\d+)\.(\d+)\.(\d+)/.exec(stdout.trim());
+      return match?{major:Number(match[1]),version:match.slice(1).join('.')}:null;
+    };
     const resolved = await resolveNodeExecutable({
       stableRoot: stable,
       candidates: [sandbox],
@@ -184,7 +192,7 @@ test("copied sandbox Node executes a stable runner after the package moves", { s
     await fs.writeFile(path.join(source, "runner.mjs"), "import './vendor/adapter.mjs'; console.log('stable-runner-ok');\n");
     await fs.writeFile(path.join(source, "vendor", "adapter.mjs"), "export const loaded = true;\n");
     const runtime = await syncStableRuntime({ sourceRoot: source, stableRoot: stable, host: "workbuddy" });
-    await resolveNodeExecutable({ stableRoot: runtime.hostRoot, candidates: [sandbox] });
+    await resolveNodeExecutable({ stableRoot: runtime.hostRoot, candidates: [sandbox], probeVersion: fixtureProbe });
     await fs.rm(source, { recursive: true, force: true });
     const { stdout } = await execFileAsync("powershell.exe", [
       "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runtime.launcher, "--probe",
