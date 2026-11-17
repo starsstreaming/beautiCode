@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import { queryWindowsInstallRecords, resolveRegisteredExecutable } from "./windows-host-install.mjs";
 import { createHealthRunner } from "./health.mjs";
-import { installHostQuickShortcut, removeLinuxQuickShortcut } from "./quick-shortcuts.mjs";
+import { installHostQuickShortcut, removeLinuxQuickShortcut, removeWindowsQuickShortcut } from "./quick-shortcuts.mjs";
 
 export { resolveRegisteredExecutable, writeVerifiedExecutableRecord } from "./windows-host-install.mjs";
 
@@ -184,7 +184,7 @@ function installationMarkers(host, options) {
   if (host === "workbuddy") {
     if (platform === "win32") return [canonicalStartupMarker("wb", env, home)];
     if (platform === "darwin") return [path.join(home, "Library", "LaunchAgents", "com.beauticode.wb-runner.plist")];
-    return [path.join(home, ".config", "autostart", "beauticode-beauticode-wb-runner.desktop")];
+    return [path.join(xdgDir(env, "XDG_CONFIG_HOME", home, [".config"]), "autostart", "beauticode-beauticode-wb-runner.desktop")];
   }
   if (platform === "win32") return [canonicalStartupMarker(host, env, home)];
   if (platform === "linux") {
@@ -508,6 +508,9 @@ export function runHostCommand(host, command, options = {}) {
   if (command === "uninstall" && host !== "dsh" && (options.platform || process.platform) === "linux") {
     // Linux clean uninstall also drops our own "(背景)" application entry.
     (options.removeShortcut || removeLinuxQuickShortcut)(host, { home: options.home, xdgDataHome: options.env?.XDG_DATA_HOME });
+  }
+  if (command === "uninstall" && host !== "dsh" && (options.platform || process.platform) === "win32") {
+    (options.removeShortcut || removeWindowsQuickShortcut)(host, { home: options.home, localAppData: options.env?.LOCALAPPDATA, appData: options.env?.APPDATA });
   }
   return { host, command, ok: true };
 }

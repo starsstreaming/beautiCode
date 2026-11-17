@@ -153,7 +153,7 @@ async function copyWorkbuddyRuntime(destRoot) {
     rewriteWorkbuddyRunner,
   );
   await copyText(path.join(repoRoot, "scripts", "quick-launch.mjs"), path.join(workbuddy, "scripts", "quick-launch.mjs"));
-  for (const name of ["wb-startup-media.mjs", "wb-runner-log.mjs", "wb-theme-name-diagnostic.mjs"]) {
+  for (const name of ["wb-startup-media.mjs", "wb-runner-log.mjs", "wb-theme-name-diagnostic.mjs", "windows-owned-env.mjs", "workbuddy-linux-wiring.mjs", "xdg-autostart.mjs"]) {
     await copyText(path.join(repoRoot, "scripts", name), path.join(workbuddy, "scripts", name));
   }
   await copyText(

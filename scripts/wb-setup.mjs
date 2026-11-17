@@ -27,6 +27,8 @@
 import { spawn, spawnSync, execSync } from 'node:child_process';
 import { isManagedWorkBuddyRunner, readGuardianProcess } from './guardian-process.mjs';
 import fs from 'node:fs';
+import { workbuddyLinuxPaths, workbuddyLinuxWiring } from './workbuddy-linux-wiring.mjs';
+import { updateOwnedPort } from './windows-owned-env.mjs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -214,8 +216,9 @@ const WIN_LOG = path.join(
   process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'),
   'beauticode', 'logs', 'wb-runner.log',
 );
-const LINUX_ENV = path.join(home, '.config/environment.d/beauticode-wb.conf');
-const LINUX_DESKTOP = path.join(home, '.config/autostart/beauticode-beauticode-wb-runner.desktop');
+const linuxPaths = workbuddyLinuxPaths(process.env, home);
+const LINUX_ENV = linuxPaths.environment;
+const LINUX_DESKTOP = linuxPaths.desktop;
 const LINUX_LOG = path.join(beautiCodeLocalRoot(process.env, home), 'logs', 'wb-launcher.log');
 // Linux uses the owner record that wb-cdp-runner --watchdog writes itself.
 const PID_FILE = PLAT === 'win32'
@@ -281,9 +284,8 @@ function statusMac() {
 }
 
 async function installWin(runtime) {
-  const r = spawnSync('setx', [ENV_KEY, port], { encoding: 'utf8' });
-  log(r.status === 0 ? '  ✓ setx 已持久化用户环境变量（点图标启动的 WorkBuddy 自带 CDP）'
-                     : `  ✗ setx 失败：${r.stderr}`);
+  updateOwnedPort({ journal: path.join(DATA_DIR, 'workbuddy-env-ownership.json'), port });
+  log('  ✓ 用户端口配置已备份、写入并回读验证');
   broadcastWindowsEnvironment();
   log('  ✓ 已广播环境变更（无需注销即可让后续原图标启动继承端口）');
   fs.mkdirSync(path.dirname(STARTUP_VBS), { recursive: true });
@@ -303,8 +305,9 @@ async function installWin(runtime) {
 function uninstallWin() {
   fs.rmSync(STARTUP_VBS, { force: true });
   fs.rmSync(LEGACY_STARTUP_VBS, { force: true });
-  run(`reg delete "HKCU\\Environment" /v ${ENV_KEY} /f`);
-  log('  ✓ 已拆除启动项并删除用户环境变量');
+  const restored = updateOwnedPort({ journal: path.join(DATA_DIR, 'workbuddy-env-ownership.json'), remove: true });
+  broadcastWindowsEnvironment();
+  log(restored === 'restored' ? '  ✓ 已拆除启动项并恢复原用户环境变量' : '  ✓ 已拆除启动项；未受本次安装管理或后来修改的环境变量已保留');
 }
 function statusWin() {
   log(`  用户 env：${run('reg query "HKCU\\Environment" /v ' + ENV_KEY).out.includes(ENV_KEY) ? '已设置' : '未设置'}`);
@@ -319,22 +322,12 @@ function statusWin() {
 }
 
 function installLinux(runtime) {
-  fs.mkdirSync(path.dirname(LINUX_ENV), { recursive: true });
-  fs.mkdirSync(path.dirname(LINUX_DESKTOP), { recursive: true });
-  fs.writeFileSync(LINUX_ENV, `${ENV_KEY}=${port}\n`);
-  fs.writeFileSync(LINUX_DESKTOP, runtime
-    ? renderXdgDesktopEntry({
-      name: 'beautiCode WorkBuddy runner',
-      comment: '注入 WorkBuddy 自定义背景（CDP）',
-      launcher: runtime.launcher,
-      args: ['--watchdog'],
-    })
-    : linuxDesktop());
+  if (!runtime) throw new Error('Stable WorkBuddy runtime required.');
+  workbuddyLinuxWiring({ env: process.env, home, launcher: runtime.launcher }).install(port);
   log('  ✓ environment.d + autostart 已写入（下次登录生效；当前会话可手动 export）');
 }
 function uninstallLinux() {
-  fs.rmSync(LINUX_ENV, { force: true });
-  fs.rmSync(LINUX_DESKTOP, { force: true });
+  workbuddyLinuxWiring({ env: process.env, home, launcher: path.join(STABLE_HOST_ROOT, 'launcher.sh') }).remove();
   log('  ✓ 已拆除 environment.d 与 autostart');
 }
 function statusLinux() {
