@@ -42,7 +42,7 @@ for (const family of ['desktop', 'workbuddy']) test(`${family} gallery serialize
     },
   });
   await vm.runInContext(source.slice(start, end) + `\n${name}(applyFn)`, context);
-  t.after(() => new Promise(resolve => server.close(resolve)));
+  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
   const preview = await fetch(`http://127.0.0.1:${port}/media?id=${skin.id}`, { headers: { 'x-beauticode-media-token': 'fixture' } });
   await preview.arrayBuffer();
   assert.equal(lastPart, 'image', 'video catalog preview must request only its image');
@@ -54,9 +54,13 @@ for (const family of ['desktop', 'workbuddy']) test(`${family} gallery serialize
   const first = request();
   await firstStarted;
   const second = request();
-  await new Promise(r => setTimeout(r, 30));
-  assert.equal(downloads, 1, 'second transaction must wait for rollback');
-  rejectFirst(new Error('fixture render failed'));
+  try {
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(downloads, 1, 'second transaction must wait for rollback');
+  } finally {
+    rejectFirst(new Error('fixture render failed'));
+    await Promise.allSettled([first, second]);
+  }
   assert.equal((await first).ok, false);
   assert.equal((await second).ok, true);
   assert.equal(await fsp.readFile(file, 'utf8'), 'new-2');

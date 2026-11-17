@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
+import { once } from 'node:events';
 
 /** Own every asynchronous failure at the HTTP boundary, including event callbacks. */
 export function guardHttpHandler(handler: (req: IncomingMessage, res: ServerResponse) => unknown) {
@@ -18,8 +19,10 @@ export function guardHttpHandler(handler: (req: IncomingMessage, res: ServerResp
 
 export function parseLocalRequestUrl(req: IncomingMessage, res: ServerResponse): URL | null {
   try {
-    if (!req.url?.startsWith('/') || req.url.startsWith('//')) throw new Error('Invalid request target');
-    return new URL(req.url, 'http://127.0.0.1');
+    if (!req.url?.startsWith('/') || req.url.startsWith('//') || req.url.startsWith('/\\')) throw new Error('Invalid request target');
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (url.origin !== 'http://127.0.0.1') throw new Error('Invalid request target');
+    return url;
   } catch {
     res.writeHead(400).end(JSON.stringify({ ok: false, error: 'Invalid request target.' }));
     return null;
@@ -27,7 +30,10 @@ export function parseLocalRequestUrl(req: IncomingMessage, res: ServerResponse):
 }
 
 export async function streamLocalFile(file: string, res: ServerResponse): Promise<void> {
-  await pipeline(createReadStream(file), res);
+  const source = createReadStream(file);
+  // Preserve a writable response for open failures; pipeline owns later errors.
+  await once(source, 'open');
+  await pipeline(source, res);
 }
 
 export function responseAbortSignal(res: ServerResponse): AbortSignal {
