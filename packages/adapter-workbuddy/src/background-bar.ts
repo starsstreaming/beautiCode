@@ -37,7 +37,7 @@ export const BACKGROUND_BAR_STYLE_ID = 'beauticode-workbuddy-bg';
  * payload 世代戳：每次改 payload 内容时递增。守卫用它判断页面上的注入
  * 是否为「当前代」——旧代按钮的闭包攥着已分离的节点引用，必须全拆重建。
  */
-export const BACKGROUND_BAR_VERSION = 'v10.3';
+export const BACKGROUND_BAR_VERSION = 'v10.4';
 
 /** 注入 IIFE 字符串；幂等（守卫同时校验 entry 是否仍在 DOM，侧栏收起/重挂后可重建）。 */
 export const BACKGROUND_BAR_INJECTION: string = (function () {
@@ -60,6 +60,7 @@ var panelAlive = document.getElementById(BC + '-panel');
 if (window.__bcBackgroundDemoInstalled && verAlive === BUILD && entryAlive && panelAlive) {
   return 'already-installed';
 }
+if (window.__bcCancelPendingMedia) window.__bcCancelPendingMedia();
 window.__bcBackgroundDemoInstalled = true;
 
 // 全拆：入口/面板/样式（含重复安装产生的多份同 id 节点）；舞台与媒体保留
@@ -528,11 +529,20 @@ function media(tag) {
   }
   return el;
 }
+var mediaGeneration = 0, pendingMedia = new Set();
+function cancelPendingMedia() { mediaGeneration++; pendingMedia.forEach(function(cancel) { cancel(); }); pendingMedia.clear(); }
+window.__bcCancelPendingMedia = cancelPendingMedia;
+function releaseMedia(el) {
+  if (el.tagName === 'VIDEO') { el.pause(); el.removeAttribute('src'); el.load(); }
+  var url = el.dataset && el.dataset.blobUrl;
+  if (url) { URL.revokeObjectURL(url); delete el.dataset.blobUrl; }
+  el.remove();
+}
 function clearMedia() {
+  cancelPendingMedia();
   var st = stageEl();
   [...st.querySelectorAll('img.bc-media,video.bc-media')].forEach(function (el) {
-    if (el.tagName === 'VIDEO') { el.pause(); el.removeAttribute('src'); el.load(); }
-    el.remove();
+    releaseMedia(el);
   });
   st.style.backgroundImage = 'none';
   document.documentElement.removeAttribute('data-bc-media');
@@ -543,7 +553,8 @@ function markMedia(kind) {
   if (kind === 'video') document.documentElement.removeAttribute('data-bc-video-ready');
 }
 function markVideoReady(el) {
-  var mark = function () { document.documentElement.setAttribute('data-bc-video-ready', 'true'); };
+  var generation = mediaGeneration;
+  var mark = function () { if (generation === mediaGeneration && el.isConnected) document.documentElement.setAttribute('data-bc-video-ready', 'true'); };
   if (el.readyState >= 2) mark();
   else {
     el.addEventListener('loadeddata', mark, { once: true });
@@ -779,22 +790,30 @@ pop.addEventListener('click', function (ev) {
 
 // 守护回填入口：原生选择器选中的路径 / 守护侧主动应用
 function applyGalleryPath(p, meta) {
+  cancelPendingMedia();
+  var generation = mediaGeneration;
   var kind = isVideo(p) ? 'video' : isImage(p) ? 'image' : null;
   if (!kind) return Promise.reject(new Error('不认识的皮肤媒体格式。'));
   var st = stageEl(), old = Array.prototype.slice.call(st.querySelectorAll('img.bc-media,video.bc-media'));
   var el = document.createElement(kind === 'video' ? 'video' : 'img');
   el.className = 'bc-media'; el.setAttribute('data-bc-injected', BC);
-  var url = filePathToUrl(p); el.src = url;
+  var url = filePathToUrl(p);
   if (kind === 'video') { el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto'; }
   return new Promise(function (resolve, reject) {
-    var done = false, timer = setTimeout(function () { if (!done) { done = true; el.remove(); reject(new Error('皮肤媒体加载超时。')); } }, 30000);
+    var done = false, timer;
+    function detach() { clearTimeout(timer); pendingMedia.delete(cancel); el.removeEventListener('load', ok); el.removeEventListener('loadeddata', ok); el.removeEventListener('error', bad); }
+    function fail(error) { if (done) return; done = true; detach(); releaseMedia(el); reject(error); }
+    function cancel() { fail(new Error('媒体选择已取消或过期。')); }
+    timer = setTimeout(function() { fail(new Error('皮肤媒体加载超时。')); }, 30000);
+    pendingMedia.add(cancel);
     var ok = function () {
       if (done) return;
+      if (generation !== mediaGeneration) { cancel(); return; }
       done = true;
-      clearTimeout(timer);
+      detach();
       try {
         st.appendChild(el);
-        old.forEach(function (n) { var u = n.dataset.blobUrl; if (u) URL.revokeObjectURL(u); n.remove(); });
+
         currentUrl = url;
         markMedia(kind);
         if (kind === 'video') { markVideoReady(el); el.play().catch(function () {}); }
@@ -802,13 +821,16 @@ function applyGalleryPath(p, meta) {
         rememberImportedTheme(name, p, kind, meta && meta.provenance);
         // PERSIST is read and saved by the guardian; there is no renderer persist().
         persistMark(p, PERSIST.activeThemeId);
+        old.forEach(releaseMedia);
         resolve(true);
       } catch (error) {
+        releaseMedia(el);
         reject(error);
       }
     };
-    var bad = function () { if (done) return; done = true; clearTimeout(timer); el.remove(); reject(new Error('皮肤媒体加载失败。')); };
+    var bad = function () { fail(new Error('皮肤媒体加载失败。')); };
     if (kind === 'video') { el.addEventListener('loadeddata', ok, { once: true }); el.addEventListener('error', bad, { once: true }); } else { el.addEventListener('load', ok, { once: true }); el.addEventListener('error', bad, { once: true }); }
+    el.src = url;
   });
 }
 window.__bcApplyBackgroundPath = function (p, meta) { try { return meta && meta.themeName ? applyGalleryPath(String(p), meta) : (applyPath(String(p)), Promise.resolve(true)); } catch (e) { return Promise.reject(e); } };
@@ -819,7 +841,7 @@ window.__bcBackgroundMsg = function (t) { try { msg(String(t)); } catch (e) {} }
 function applyPath(p, themeId) {
   if (isImage(p)) { applyMediaUrl(filePathToUrl(p), 'image'); persistMark(p, themeId); }
   else if (isVideo(p)) { applyMediaUrl(filePathToUrl(p), 'video'); persistMark(p, themeId); }
-  else msg('不认识的扩展名：支持 png/jpg/webp/gif/bmp/avif 和 mp4/mov/webm/m4v。');
+  else msg('不支持的格式：' + ${JSON.stringify([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS].join(' / '))});
 }
 function isImage(p) { return ${JSON.stringify(IMAGE_EXTENSIONS)}.indexOf('.'+String(p).split('.').pop().toLowerCase())!==-1; }
 function isVideo(p) { return ${JSON.stringify(VIDEO_EXTENSIONS)}.indexOf('.'+String(p).split('.').pop().toLowerCase())!==-1; }
@@ -836,6 +858,9 @@ return 'ok';
  */
 export const BACKGROUND_BAR_CLEANUP: string =
   `(() => {
+if (window.__bcCancelPendingMedia) window.__bcCancelPendingMedia();
+document.querySelectorAll('#beauticode-bg-stage img.bc-media,#beauticode-bg-stage video.bc-media').forEach(function(n){if(n.tagName==='VIDEO'){n.pause();n.removeAttribute('src');n.load()}if(n.dataset.blobUrl)URL.revokeObjectURL(n.dataset.blobUrl);n.remove()});
+delete window.__bcCancelPendingMedia;
 const root = document.querySelectorAll('[data-bc-injected="${BACKGROUND_BAR_STYLE_ID}"]');
 root.forEach(function (n) { if (n && n.parentNode) n.parentNode.removeChild(n); });
 delete window.__bcBackgroundDemoInstalled;
