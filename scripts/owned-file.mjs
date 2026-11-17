@@ -9,7 +9,7 @@ export function readOwnedFile(file) {
     return fs.readFileSync(file,'utf8');
   } catch(error) { if(error.code==='ENOENT')return null;throw error; }
 }
-export function replaceOwnedFile(file, before, after) {
+export function replaceOwnedFile(file, before, after, mode) {
   if(readOwnedFile(file)!==before)throw new Error('Managed file changed externally; preserved.');
   if(after===null){if(before!==null)fs.unlinkSync(file);return;}
   fs.mkdirSync(path.dirname(file),{recursive:true});
@@ -17,7 +17,11 @@ export function replaceOwnedFile(file, before, after) {
   fs.writeFileSync(temporary,after,{flag:'wx',mode:0o600});
   try {
     if(before===null)fs.linkSync(temporary,file);
-    else {if(readOwnedFile(file)!==before)throw new Error('Managed file changed externally; preserved.');fs.renameSync(temporary,file);}
+    else {
+      if(readOwnedFile(file)!==before)throw new Error('Managed file changed externally; preserved.');
+      fs.chmodSync(temporary, mode ?? (fs.statSync(file).mode & 0o777));
+      fs.renameSync(temporary,file);
+    }
   } finally {fs.rmSync(temporary,{force:true});}
 }
 export function rollbackSteps(undos, original) {

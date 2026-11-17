@@ -286,8 +286,7 @@ function statusMac() {
 async function installWin(runtime) {
   const transaction = workbuddyWindowsWiring({env:process.env,home,launcher:runtime.launcher,journal:path.join(DATA_DIR,'workbuddy-env-ownership.json')}).install(port);
   log('  ✓ 用户端口配置已备份、写入并回读验证');
-  broadcastWindowsEnvironment();
-  log('  ✓ 已广播环境变更（无需注销即可让后续原图标启动继承端口）');
+
   /* Startup ownership and reversible file writes are handled by the wiring transaction. */
   return transaction;
 }
@@ -463,11 +462,12 @@ log(`安装 beautiCode × WorkBuddy（${PLAT}，端口 ${port}）：`);
 const stableRuntime = PLAT === 'win32' || PLAT === 'linux' ? await prepareStableRuntime() : null;
 if(stableRuntime) {
   await commitWorkbuddyInstall({
-    runtime:stableRuntime, expectedLauncher:PLAT==='linux'?renderRuntimeLauncherSh({host:'workbuddy',startupLogPath:LINUX_LOG,nodePath:stableRuntime.node.path}):renderRuntimeLauncherPs1({host:'workbuddy',startupLogPath:WIN_LOG}), portFile:PORT_FILE, portText:JSON.stringify({port:Number(port)},null,2)+'\n',
+    runtime:stableRuntime, expectedLauncher:()=>PLAT==='linux'?renderRuntimeLauncherSh({host:'workbuddy',startupLogPath:LINUX_LOG,nodePath:stableRuntime.node.path}):renderRuntimeLauncherPs1({host:'workbuddy',startupLogPath:WIN_LOG}), portFile:PORT_FILE, portText:JSON.stringify({port:Number(port)},null,2)+'\n',
     install:()=>PLAT==='win32'?installWin(stableRuntime):installLinux(stableRuntime),
     activate:()=>activateStableRuntime(stableRuntime,{nodePath:stableRuntime.node.path,startupLogPath:PLAT==='linux'?LINUX_LOG:WIN_LOG}),
     discard:()=>discardStableRuntime(stableRuntime),
   });
+  if (PLAT === 'win32') broadcastWindowsEnvironment();
 } else { writeConfiguredPort(port); installMac(); }
 
 startDaemon(stableRuntime);
