@@ -23,6 +23,11 @@ function fail(error: string, code?: string) {
   return code ? { ok: false, error: message, code } : { ok: false, error: message };
 }
 
+function applyFailure(result: { error: string; rolledBack?: boolean }) {
+  const recovery = result.rolledBack ? "磁盘状态已回滚，请检查原背景是否恢复。" : "请检查当前背景后重试。";
+  return { ok: false, error: `${toChineseErrorMessage(result.error)}；${recovery}`, ...(typeof result.rolledBack === "boolean" ? { rolledBack: result.rolledBack } : {}) };
+}
+
 export function createConsoleHost(session: BeautiSession) {
   const selections = new Map<string, PendingSelection>();
   let pickerBusy = false;
@@ -83,13 +88,13 @@ export function createConsoleHost(session: BeautiSession) {
       const result = await session.apply({ type: "clear" });
       return result.ok
         ? { ...result, ok: true, message: "已清除背景。" }
-        : fail(result.error);
+        : applyFailure(result);
     }
     if (route === "/__beauticode/ui/mode") {
       const muted = body.muted !== false;
       const result = await session.setMuted(muted);
       return result.ok
-        ? { ok: true, muted: result.muted, message: muted ? "背景视频已静音。" : "背景视频声音已打开。" }
+        ? { ...result, requestedMuted: muted, message: result.blocked ? "部分或全部窗口开声被阻止，视频可能仍为静音。请在视频控件中重试。" : result.sessions === 0 ? "声音偏好已保存，等待连接视频后生效。" : muted ? "背景视频已静音。" : "声音设置已发送，请以各窗口实际播放状态为准。" }
         : fail(result.error || "无法切换背景声音。");
     }
     if (route === "/__beauticode/ui/theme/use") {
@@ -98,7 +103,7 @@ export function createConsoleHost(session: BeautiSession) {
       const result = await session.useSavedTheme(id);
       return result.ok
         ? { ...result, ok: true, message: "已切换背景主题。" }
-        : fail(result.error);
+        : applyFailure(result);
     }
     if (route === "/__beauticode/ui/theme/delete") {
       const id = typeof body.id === "string" ? body.id.trim() : "";
@@ -155,7 +160,7 @@ export function createConsoleHost(session: BeautiSession) {
           : { type: "image" as const, imagePath: selected.path, source: "local" as const };
       const result = await session.applyAndSaveTheme(input, themeName);
       if (!result.ok || !("theme" in result) || !result.theme) {
-        return fail(result.ok ? "主题保存失败。" : result.error);
+        return result.ok ? fail("主题保存失败。") : applyFailure(result);
       }
       return {
         ok: true,

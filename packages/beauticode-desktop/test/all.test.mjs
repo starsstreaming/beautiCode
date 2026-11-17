@@ -18,9 +18,16 @@ const env = {
 
 function fakeOptions(hostFiles, spawnSync) {
   // This fixture models Windows install records even when the test runner itself is Linux.
-  const normalized = new Set(hostFiles.map((file) => path.win32.normalize(file)));
+  const plugin = path.join(env.DSH_HOME, "plugins", "beauticode-dsh");
+  const hasPlugin = hostFiles.some(file => path.win32.normalize(file) === path.win32.normalize(plugin));
+  const normalized = new Set([...hostFiles, ...(hasPlugin ? [path.join(env.DSH_HOME, "node_modules", "beauticode-dsh", "index.mjs")] : [])].map((file) => path.win32.normalize(file)));
   return {
     home,
+    readFile: (file) => {
+      if (!hasPlugin) throw new Error("missing fixture");
+      if (file.endsWith("package.json")) return JSON.stringify({ name: "beauticode-dsh", version: "fixture" });
+      return "- insert:\n    - id: beauticode-bridge\n      name: 'beauticode-dsh'\n      inject: [webServer]\n";
+    },
     runtimeRoot,
     env,
     platform: "win32",
@@ -188,7 +195,7 @@ test("an installer-owned DSH Junction remains ready and can be reinstalled", () 
     realpath: (candidate) => path.normalize(candidate) === link ? managed : path.normalize(candidate),
   };
 
-  assert.equal(getAllStatus(linkedOptions).hosts.find((row) => row.host === "dsh")?.readiness, "plugin-ready");
+  assert.equal(getAllStatus(linkedOptions).hosts.find((row) => row.host === "dsh")?.readiness, "plugin-wired");
   const result = runAllInstall(linkedOptions);
   assert.equal(result.results.find((row) => row.host === "dsh")?.outcome, "installed");
   assert.equal(result.ok, true);
@@ -248,7 +255,7 @@ test("a normal DSH plugin directory is not treated as a foreign link", () => {
     lstat: () => ({ isSymbolicLink: () => false, isDirectory: () => true }),
   }).hosts.find((row) => row.host === "dsh");
 
-  assert.equal(status?.readiness, "plugin-ready");
+  assert.equal(status?.readiness, "plugin-wired");
 });
 
 test("a DSH link that cannot be inspected fails closed as a conflict", () => {
@@ -281,5 +288,5 @@ test("DSH all-status reports plugin readiness without inventing a guardian", () 
   const dsh = getAllStatus(options).hosts.find((row) => row.host === "dsh");
   assert.equal(dsh.installed, true);
   assert.equal(dsh.guardian, "not-applicable");
-  assert.equal(dsh.readiness, "plugin-ready");
+  assert.equal(dsh.readiness, "plugin-wired");
 });

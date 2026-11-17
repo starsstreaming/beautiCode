@@ -451,7 +451,7 @@ body:not([data-ds-dark-theme]) #beauticode-console-pop{background:#f3f0e9;color:
     }
     muted = data.muted !== false;
     soundBtn.classList.toggle("on", !muted);
-    soundBtn.textContent = muted ? "声音已关" : "声音已开";
+    soundBtn.textContent = muted ? "声音偏好：关闭" : "声音偏好：开启";
     const themes = Array.isArray(data.themes) ? data.themes : [];
     const selected = themes.find((theme) => theme.id === currentThemeId);
     const currentLabel = selected?.name || label;

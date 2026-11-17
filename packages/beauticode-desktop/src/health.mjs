@@ -41,9 +41,9 @@ export function createHealthRunner(deps) {
       const conflict = resolved.platform === "win32" ? deps.inspectDshLinkConflict(resolved) : null;
       return {
         host, installation: installation.installed ? "plugin-present" : "missing",
-        runtime: "dsh-plugin", guardian: "not-applicable",
+        runtime: "dsh-plugin", guardian: "not-applicable", liveVerified: false,
         entry: installation.installed ? "not-observable" : "missing",
-        state: conflict ? "conflict" : installation.installed ? "plugin-installed" : "not-installed",
+        state: conflict ? "conflict" : installation.installed ? "plugin-wired" : "not-installed",
         ...(conflict ? { reason: conflict } : {}),
       };
     }
