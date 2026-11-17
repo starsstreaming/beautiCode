@@ -617,9 +617,8 @@ function rememberImportedTheme(name, path, kind) {
   syncThemesButton();
 }
 function applyBlob(file, themeName, realPath) {
-  var kind = (/\\.(mp4|mov|webm|m4v)$/i.test(file.name) || /^video\\//.test(file.type)) ? 'video'
-    : (/\\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name) || /^image\\//.test(file.type)) ? 'image' : null;
-  if (!kind) { msg('不认识的格式：支持 png/jpg/webp/gif/bmp/avif 和 mp4/mov/webm/m4v。'); return; }
+  var kind = isVideo(file.name) ? 'video' : isImage(file.name) ? 'image' : null;
+  if (!kind) { msg('不支持的格式：' + ${JSON.stringify([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS].join(' / '))}); return; }
   var u = URL.createObjectURL(file);
   applyMediaUrl(u, kind);
   currentUrl = u;
