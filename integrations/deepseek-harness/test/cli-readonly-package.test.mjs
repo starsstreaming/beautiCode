@@ -12,8 +12,11 @@ test('packaged DSH help and version remain read-only after tarball extraction', 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const stage = path.join(root, 'stage');
   await stageDshPlugin(stage, { build: false });
-  const npm = process.env.npm_execpath || path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
-  const pack = spawnSync(process.execPath, [npm, 'pack', '--ignore-scripts', '--json'], { cwd: stage, encoding: 'utf8', windowsHide: true });
+  const npm = process.env.npm_execpath;
+  const useShell = !npm && process.platform === 'win32';
+  const pack = spawnSync(npm ? process.execPath : useShell ? 'npm pack --ignore-scripts --json' : 'npm', npm ? [npm, 'pack', '--ignore-scripts', '--json'] : useShell ? [] : ['pack', '--ignore-scripts', '--json'], {
+    cwd: stage, encoding: 'utf8', windowsHide: true, shell: useShell,
+  });
   assert.equal(pack.status, 0, pack.stderr);
   const artifact = JSON.parse(pack.stdout)[0];
   const unpack = path.join(root, 'unpacked');await fs.mkdir(unpack);
