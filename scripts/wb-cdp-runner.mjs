@@ -233,17 +233,14 @@ if (!args.port) {
   if (configured) PORT = configured;
 }
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
-const GALLERY_MEDIA = {
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
-  '.gif': 'image/gif', '.bmp': 'image/bmp', '.avif': 'image/avif',
-  '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/mp4',
-};
-const VIDEO = new Set(['.mp4', '.mov']);
+
+
 let galleryConn = null;
 let galleryPort = null;
 let galleryServer = null;
 let galleryApplyFn = null;
 const skinRegistry = new Map();
+const enqueueGalleryApply = core.createSerialTaskQueue();
 
 function mediaIdentity(info) {
   return `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
@@ -265,9 +262,9 @@ function assertStableMedia(file, expectedIdentity) {
 async function validateLocalMedia(file) {
   const logical = path.resolve(String(file || ''));
   const ext = path.extname(logical).toLowerCase();
-  if (!GALLERY_MEDIA[ext]) throw new Error('不支持的媒体格式。');
+  if (![...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].includes(ext)) throw new Error('不支持的媒体格式。');
   const first = assertStableMedia(logical);
-  const checked = VIDEO.has(ext)
+  const checked = core.isVideoExtension(ext)
     ? await core.validateVideoFile(first.path, { mode: 'fast' })
     : await core.validateImageFile(first.path, { mode: 'fast' });
   const stable = assertStableMedia(checked.filePath, first.identity);
@@ -307,8 +304,8 @@ fetch('/api/catalog?t=' + encodeURIComponent(TOKEN)).then(function(r){return r.j
     card.className = 'card';
     card.dataset.id = s.id;
     card.dataset.name = s.name || '';
-    var media = document.createElement(s.type === 'video' ? 'video' : 'img');
-    if (s.type === 'video') { media.muted = true; media.preload = 'metadata'; } else { media.alt = ''; }
+    var media = document.createElement('img');
+    media.loading = 'lazy'; media.alt = '';
     media.src = '/media?id=' + encodeURIComponent(s.id) + '&t=' + encodeURIComponent(TOKEN);
     var span = document.createElement('span');
     span.textContent = s.name + (s.type === 'video' ? ' · 视频' : '');
@@ -396,7 +393,7 @@ function startGalleryServer(applyFn) {
       if (!core.isSafeSkinId(id)) { deny(res, 400, 'bad id'); return; }
       Promise.resolve(skinRegistry.get(id) || core.getApprovedSkin(id)).then(async (skin) => {
         skinRegistry.set(id, skin);
-        const download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(DATA_DIR, 'tmp', 'gallery'), signal: core.responseAbortSignal(res) });
+        const download = await core.downloadApprovedAsset(skin, 'image', { directory: path.join(DATA_DIR, 'tmp', 'gallery'), signal: core.responseAbortSignal(res) });
         res.setHeader('content-type', download.contentType || 'application/octet-stream');
         try { await core.streamLocalFile(download.filePath, res); }
         finally { fs.rmSync(download.tempDir, { recursive: true, force: true }); }
@@ -412,7 +409,7 @@ function startGalleryServer(applyFn) {
         if (n > 4096) { req.destroy(); return; }
         chunks.push(c);
       });
-      req.on('end', () => core.guardHttpHandler(async () => {
+      req.on('end', () => core.guardHttpHandler(() => enqueueGalleryApply(async () => {
         let body = {};
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { body = {}; }
         if (requestToken(req, u, body) !== GALLERY_TOKEN) { deny(res, 403, 'bad token'); return; }
@@ -462,7 +459,7 @@ function startGalleryServer(applyFn) {
           fs.rmSync(download.tempDir, { recursive: true, force: true });
           if (committed || !hadPrevious) fs.rmSync(backup, { force: true });
         }
-      })(req, res));
+      }))(req, res));
       return;
     }
     deny(res, 404, 'not found');
@@ -774,7 +771,7 @@ async function pickFileNative() {
   if (platform() === 'darwin') {
     return await new Promise((resolve, reject) => {
       execFile('osascript', ['-e',
-        'POSIX path of (choose file with prompt "选择背景图片或视频")'],
+        `POSIX path of (choose file with prompt "选择背景图片或视频" of type {${[...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].map(ext => '"' + ext.slice(1) + '"').join(',')}})`],
         (err, so) => err ? reject(err) : resolve(String(so).trim()));
     });
   }
@@ -800,7 +797,7 @@ async function pickFileNative() {
       "$owner.Opacity=0.01",
       "$owner.TopMost=$true",
       "$d=New-Object System.Windows.Forms.OpenFileDialog",
-      "$d.Filter='媒体|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp;*.avif;*.mp4;*.mov;*.webm;*.m4v'",
+      `$d.Filter='媒体|${[...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].map(ext => '*' + ext).join(';')}'`,
       "$d.Multiselect=$false",
       "$d.CheckFileExists=$true",
       "$d.RestoreDirectory=$true",
@@ -817,10 +814,10 @@ async function pickFileNative() {
   }
   // Linux：zenity 优先，kdialog 回退（KDE 桌面常无 zenity）
   const out = await new Promise((resolve, reject) => {
-    execFile('zenity', ['--file-selection', '--title', '选择背景图片或视频'],
+    execFile('zenity', ['--file-selection', '--title', '选择背景图片或视频', '--file-filter', [...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].map(ext => '*'+ext).join(' ')],
       (err, so) => {
         if (!err) return resolve(String(so).trim());
-        execFile('kdialog', ['--getopenfilename', '.', 'image/* video/*',
+        execFile('kdialog', ['--getopenfilename', '.', [...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].map(ext => '*'+ext).join(' '),
           '::选择背景图片或视频'], (e2, s2) => e2 ? reject(e2) : resolve(String(s2).trim()));
       });
   });

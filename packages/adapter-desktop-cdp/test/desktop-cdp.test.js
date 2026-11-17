@@ -462,5 +462,6 @@ test('light hosts read off the veil, and blur never moves the media', () => {
 test('desktop runners fail closed on stale identities and preserve video skin types', () => {  const source = fs.readFileSync(new URL('../../../scripts/desktop-cdp-runner.mjs', import.meta.url), 'utf8');
   assert.match(source, /assertStableMedia\(resolved, checked\.identity\)/);
   assert.match(source, /downloadApprovedAsset\(item, item\.type/);
-  assert.match(source, /createElement\(s\.type==='video'\?'video':'img'\)/);
+  assert.match(source, /document\.createElement\('img'\)/);
+  assert.match(source, /downloadApprovedAsset\(skin, 'image'/);
 });

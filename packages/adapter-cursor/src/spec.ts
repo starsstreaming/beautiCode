@@ -85,6 +85,7 @@ export const CURSOR_CDP_SPEC: DesktopCdpHostSpec = Object.freeze({
   // Earlier builds put Customize in the second cell. Each match also allows the injected entry right after it (nth-last-child(-n+2)).
   anchorSelector: '[data-action-id="marketplace"][data-sidebar-primary-action], .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(2):nth-last-child(-n+2), .agent-sidebar-header-actions > .agent-sidebar-cell:nth-child(4):nth-last-child(-n+2)',
   anchorText: "Customize",
+  anchorTexts: Object.freeze(["Customize", "自定义", "自訂"]),
   strings: Object.freeze({
     entry: "background",
     title: "Background",

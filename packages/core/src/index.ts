@@ -23,3 +23,5 @@ export * from "./startup-repair-chain.js";
 export * from "./skin-catalog.js";
 export * from "./linux-process.js";
 export * from "./http-boundary.js";
+export * from "./serial-task.js";
+export * from "./media-health.js";
