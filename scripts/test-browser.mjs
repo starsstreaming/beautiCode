@@ -8,6 +8,7 @@ const tests = [
   'packages/adapter-codex/test/appearance.browser.test.js',
   'packages/adapter-codex/test/wallpaper.browser.test.js',
   'packages/adapter-codex/test/gallery.browser.test.js',
+  'packages/adapter-desktop-cdp/test/media-lifecycle.browser.test.js',
   'integrations/deepseek-harness/test/background-rendering.browser.test.mjs',
   'integrations/deepseek-harness/test/plugin-readability.browser.test.mjs',
 ];

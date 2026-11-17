@@ -1,5 +1,8 @@
 # Phase one reliability changes
 
+This is the first-stage historical record. Subsequent targeted fixes and current
+remaining boundaries are documented in [defect-fixes-validation.md](defect-fixes-validation.md).
+
 The background integration now rejects unintended CLI actions before installation,
 contains local HTTP failures, rejects catalog redirects before following them,
 and distinguishes configuration evidence from live background readiness.

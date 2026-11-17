@@ -242,6 +242,7 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
 
   function closeLayer() {
     stopLoop();
+    runtime.layer?.disposeMotion?.();
     runtime.layer?.water?.destroy();
     runtime.layer?.node.remove();
     runtime.layer = null;
@@ -277,15 +278,24 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
 
     const water = attachWater(canvas);
     runtime.layer = { node, water };
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     const tick = (ts) => {
       if (!runtime.layer) return;
+      if (motion?.matches || document.hidden) { runtime.loop = 0; return; }
       if (ts - runtime.lastTick > 32) {
         runtime.lastTick = ts;
         water.render();
       }
       runtime.loop = requestAnimationFrame(tick);
     };
-    runtime.loop = requestAnimationFrame(tick);
+    const resume = () => {
+      if (motion?.matches || document.hidden) { stopLoop(); return; }
+      if (runtime.layer && !runtime.loop) runtime.loop = requestAnimationFrame(tick);
+    };
+    motion?.addEventListener?.("change", resume);
+    document.addEventListener("visibilitychange", resume);
+    runtime.layer.disposeMotion = () => { motion?.removeEventListener?.("change", resume); document.removeEventListener("visibilitychange", resume); };
+    resume();
   }
 
   function setWindowMode(mode) {
