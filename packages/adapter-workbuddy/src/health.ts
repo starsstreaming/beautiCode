@@ -1,10 +1,12 @@
+import { buildMediaHealthProbe, mediaHealthState, type MediaHealthEvidence } from "@beauticode/core";
+import { BACKDROP_SELECTORS } from "./contract.js";
 import fs from "node:fs";
 import path from "node:path";
 import { discoverWorkBuddyCdp, readBoundedJson, DEFAULT_WORKBUDDY_CDP_PORTS } from "./discovery.js";
 import { listWorkBuddyProcesses } from "./launch.js";
 import { assertLoopbackDebuggerUrl, pickWorkBuddyTarget, type WorkBuddyTarget } from "./target.js";
 
-export interface WorkBuddyUiHealthSnapshot {
+export interface WorkBuddyUiHealthSnapshot extends MediaHealthEvidence {
   host: "workbuddy";
   client: "closed" | "running" | "ambiguous" | "unknown";
   processCount: number;
@@ -16,10 +18,10 @@ export interface WorkBuddyUiHealthSnapshot {
   entry: boolean | null;
   style: boolean | null;
   stage: boolean | null;
-  state: "ready" | "waiting-for-launch" | "cdp-missing" | "host-ui-updated" | "entry-missing" | "partial-injection" | "probe-failed";
+  state: ReturnType<typeof mediaHealthState> | "ready" | "waiting-for-launch" | "cdp-missing" | "host-ui-updated" | "entry-missing" | "partial-injection" | "probe-failed";
 }
 
-type WorkBuddyUiProbe = Pick<WorkBuddyUiHealthSnapshot, "anchor" | "entry" | "style" | "stage">;
+type WorkBuddyUiProbe = MediaHealthEvidence & Pick<WorkBuddyUiHealthSnapshot, "anchor" | "entry" | "style" | "stage">;
 
 async function evaluatePage(target: WorkBuddyTarget, port: number): Promise<WorkBuddyUiProbe> {
   if (!target.webSocketDebuggerUrl) throw new Error("WorkBuddy target omitted its debugger socket.");
@@ -72,11 +74,11 @@ async function evaluatePage(target: WorkBuddyTarget, port: number): Promise<Work
           return;
         }
         const fields = value as Record<string, unknown>;
-        if (["anchor", "entry", "style", "stage"].some((key) => typeof fields[key] !== "boolean")) {
+        if (["anchor", "entry", "style", "stage", "selected", "media", "mediaVisible", "occluded"].some((key) => typeof fields[key] !== "boolean")) {
           reject(new Error("Invalid runtime probe fields."));
           return;
         }
-        resolve({ anchor: fields.anchor as boolean, entry: fields.entry as boolean, style: fields.style as boolean, stage: fields.stage as boolean });
+        resolve({ selected: fields.selected === true, unverifiable: fields.unverifiable === true, media: fields.media === true, mediaVisible: fields.mediaVisible === true, occluded: fields.occluded === true, opaqueSelectors: Array.isArray(fields.opaqueSelectors) ? fields.opaqueSelectors.filter((v): v is string => typeof v === "string") : [], anchor: fields.anchor as boolean, entry: fields.entry as boolean, style: fields.style as boolean, stage: fields.stage as boolean });
       };
       timer = setTimeout(() => { cleanup(); reject(new Error("Runtime probe timeout.")); }, 1_200);
       ws.addEventListener("message", onMessage);
@@ -88,7 +90,7 @@ async function evaluatePage(target: WorkBuddyTarget, port: number): Promise<Work
           method: "Runtime.evaluate",
           params: {
             returnByValue: true,
-            expression: `(() => ({anchor:!!document.querySelector('.conversation-list .conversation-list-tabs'),entry:!!document.getElementById('beauticode-workbuddy-bg-entry'),style:!!document.getElementById('beauticode-workbuddy-bg-style'),stage:!!document.getElementById('beauticode-bg-stage')}))()`,
+            expression: `(() => ({...${buildMediaHealthProbe(BACKDROP_SELECTORS)},anchor:!!document.querySelector('.conversation-list .conversation-list-tabs'),entry:!!document.getElementById('beauticode-workbuddy-bg-entry'),style:!!document.getElementById('beauticode-workbuddy-bg-style'),stage:!!document.getElementById('beauticode-bg-stage')}))()`,
           },
         }));
       } catch {
@@ -145,7 +147,7 @@ export async function inspectWorkBuddyUiHealth(): Promise<WorkBuddyUiHealthSnaps
     const target = pickWorkBuddyTarget(targets);
     if (!target) throw new Error("WorkBuddy target missing.");
     const ui = await evaluatePage(target, endpoint.port);
-    const state = !ui.anchor ? "host-ui-updated" : !ui.entry ? "entry-missing" : !ui.style || !ui.stage ? "partial-injection" : "ready";
+    const state = !ui.anchor ? "host-ui-updated" : !ui.entry ? "entry-missing" : !ui.style || !ui.stage ? "partial-injection" : mediaHealthState(ui);
     return { ...identity, client: client === "closed" ? "unknown" : client, cdp: "connected", port: endpoint.port, ...ui, state };
   } catch {
     return {

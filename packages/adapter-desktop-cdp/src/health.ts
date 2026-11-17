@@ -1,7 +1,8 @@
+import { buildMediaHealthProbe, mediaHealthState, type MediaHealthEvidence } from "@beauticode/core";
 import { assertLoopbackDebuggerUrl, discoverDesktopCdp } from "./cdp.js";
 import type { DesktopCdpHostSpec } from "./types.js";
 
-export interface DesktopUiHealthSnapshot {
+export interface DesktopUiHealthSnapshot extends MediaHealthEvidence {
   host: string;
   cdp: "connected" | "missing";
   port: number | null;
@@ -10,7 +11,7 @@ export interface DesktopUiHealthSnapshot {
   entry: boolean | null;
   style: boolean | null;
   stage: boolean | null;
-  state: "ready" | "cdp-missing" | "host-ui-updated" | "entry-missing" | "partial-injection" | "probe-failed";
+  state: ReturnType<typeof mediaHealthState> | "ready" | "cdp-missing" | "host-ui-updated" | "entry-missing" | "partial-injection" | "probe-failed";
 }
 
 type CdpConnection = { ws: WebSocket; send(method: string, params?: object): Promise<any> };
@@ -69,13 +70,14 @@ export async function inspectDesktopUiHealth(
     connection = await connectPage(endpoint.target.webSocketDebuggerUrl, endpoint.port, timeoutMs);
     const entryId = `beauticode-${spec.kind}-background-entry`;
     const styleId = `beauticode-${spec.kind}-background-style`;
-    const expression = `(() => { const a=document.querySelector(${JSON.stringify(spec.anchorSelector)}); const text=a?String(a.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase():''; return {anchor:!!a,anchorTextMatches:!!a&&text.includes(${JSON.stringify(spec.anchorText.toLowerCase())}),entry:!!document.getElementById(${JSON.stringify(entryId)}),style:!!document.getElementById(${JSON.stringify(styleId)}),stage:!!document.getElementById('beauticode-bg-stage')}; })()`;
+    const expression = `(() => { const a=document.querySelector(${JSON.stringify(spec.anchorSelector)}); const text=a?String(a.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase():''; return {...${buildMediaHealthProbe(spec.contract.backdropSelectors)},anchor:!!a,anchorTextMatches:!!a&&${JSON.stringify((spec.anchorTexts || [spec.anchorText]).map(t => t.toLowerCase()))}.some(label=>text.includes(label)),entry:!!document.getElementById(${JSON.stringify(entryId)}),style:!!document.getElementById(${JSON.stringify(styleId)}),stage:!!document.getElementById('beauticode-bg-stage')}; })()`;
     const response = await connection.send("Runtime.evaluate", { expression, returnByValue: true });
-    const result = response?.result?.value as Partial<Pick<DesktopUiHealthSnapshot, "anchor" | "anchorTextMatches" | "entry" | "style" | "stage">> | undefined;
-    if (!result || typeof result.anchor !== "boolean") return empty("probe-failed", "connected", endpoint.port);
+    const result = response?.result?.value as MediaHealthEvidence & Partial<Pick<DesktopUiHealthSnapshot, "anchor" | "anchorTextMatches" | "entry" | "style" | "stage">> | undefined;
+    if (!result || [result.anchor, result.anchorTextMatches, result.entry, result.style, result.stage, result.selected, result.media, result.mediaVisible, result.occluded].some(value => typeof value !== 'boolean')) return empty("probe-failed", "connected", endpoint.port);
     const snapshot: DesktopUiHealthSnapshot = {
       host: spec.kind, cdp: "connected", port: endpoint.port,
-      anchor: result.anchor,
+      selected: result.selected === true, unverifiable: result.unverifiable === true, media: result.media === true, mediaVisible: result.mediaVisible === true, occluded: result.occluded === true, opaqueSelectors: result.opaqueSelectors || [],
+      anchor: result.anchor === true,
       anchorTextMatches: result.anchorTextMatches === true,
       entry: result.entry === true,
       style: result.style === true,
@@ -88,7 +90,7 @@ export async function inspectDesktopUiHealth(
         ? "entry-missing"
         : !snapshot.style || !snapshot.stage
           ? "partial-injection"
-          : "ready";
+          : mediaHealthState(snapshot);
     return snapshot;
   } catch {
     return empty("probe-failed", "connected", endpoint.port);

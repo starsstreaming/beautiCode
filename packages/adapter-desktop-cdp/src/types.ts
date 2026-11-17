@@ -97,6 +97,7 @@ export interface DesktopCdpHostSpec {
   mount: "cursor" | "doubao";
   anchorSelector: string;
   anchorText: string;
+  anchorTexts?: readonly string[];
   strings: DesktopHostStrings;
   contract: DesktopBackgroundContract;
   theme: DesktopThemeContract;
