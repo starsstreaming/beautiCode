@@ -373,7 +373,8 @@ function startGallery() {
   if (galleryServer) return Promise.resolve(galleryPort);
   const handler = async (request, response) => {
     if (!isLoopbackHost(request.headers.host)) { response.writeHead(403).end(); return; }
-    const url = new URL(request.url, 'http://127.0.0.1');
+    const url = core.parseLocalRequestUrl(request, response);
+    if (!url) return;
     const token = request.headers['x-beauticode-media-token'] || url.searchParams.get('t');
     response.setHeader('referrer-policy', 'no-referrer');
     response.setHeader('cache-control', 'no-store');
@@ -395,9 +396,10 @@ function startGallery() {
       if (!skin) { response.writeHead(404).end(); return; }
       let download;
       try {
-        download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(dataRoot, 'tmp', 'gallery') });
+        download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(dataRoot, 'tmp', 'gallery'), signal: core.responseAbortSignal(response) });
         response.setHeader('content-type', download.contentType || 'application/octet-stream');
-        fs.createReadStream(download.filePath).on('close', () => fs.rmSync(download.tempDir, { recursive: true, force: true })).pipe(response);
+        try { await core.streamLocalFile(download.filePath, response); }
+        finally { fs.rmSync(download.tempDir, { recursive: true, force: true }); }
       } catch (error) {
         response.writeHead(502).end(JSON.stringify({ ok: false, error: error.message }));
       }
@@ -406,11 +408,11 @@ function startGallery() {
     if (url.pathname === '/apply' && request.method === 'POST') {
       let body = Buffer.alloc(0);
       request.on('data', (part) => { if (body.length < 4096) body = Buffer.concat([body, part]); });
-      request.on('end', async () => {
+      request.on('end', () => core.guardHttpHandler(async () => {
         try {
           const item = skinRegistry.get(String(JSON.parse(body.toString('utf8')).id || ''));
           if (!item || !activeConnection) throw new Error(`${spec.displayName} 守护尚未连接。`);
-          const download = await core.downloadApprovedAsset(item, item.type, { directory: path.join(dataRoot, 'tmp', 'gallery') });
+          const download = await core.downloadApprovedAsset(item, item.type, { directory: path.join(dataRoot, 'tmp', 'gallery'), signal: core.responseAbortSignal(response) });
           const persistentDir = path.join(dataRoot, 'themes');
           fs.mkdirSync(persistentDir, { recursive: true });
           const persistent = path.join(persistentDir, `${item.sourceSkinId}${path.extname(download.filePath)}`);
@@ -435,7 +437,7 @@ function startGallery() {
           }
           response.end(JSON.stringify({ ok: true }));
         } catch (error) { response.writeHead(500).end(JSON.stringify({ ok: false, error: error.message })); }
-      });
+      })(request, response));
       return;
     }
     response.writeHead(404).end();
@@ -444,7 +446,7 @@ function startGallery() {
     let port = args.host === 'cursor' ? 9381 : 9382;
     const tryPort = () => {
       if (port > 9390) { log.warn('皮肤中心端口耗尽。'); resolve(null); return; }
-      const server = createServer(handler);
+      const server = createServer(core.guardHttpHandler(handler));
       server.once('error', (error) => error.code === 'EADDRINUSE' ? (port++, tryPort()) : resolve(null));
       server.listen(port, '127.0.0.1', () => { galleryServer = server; galleryPort = port; resolve(port); });
     };

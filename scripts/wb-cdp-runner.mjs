@@ -351,6 +351,8 @@ function requestToken(req, url, body) {
 }
 
 function deny(res, status, error) {
+  if (res.destroyed || res.writableEnded) return;
+  if (res.headersSent) { res.destroy(); return; }
   res.statusCode = status;
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.end(JSON.stringify({ ok: false, error }));
@@ -365,7 +367,8 @@ function startGalleryServer(applyFn) {
       deny(res, 403, 'forbidden origin');
       return;
     }
-    const u = new URL(req.url, 'http://127.0.0.1');
+    const u = core.parseLocalRequestUrl(req, res);
+    if (!u) return;
     const allowedOrigin = req.headers.origin && isAllowedOrigin(req.headers.origin) ? req.headers.origin : '';
     if (allowedOrigin) res.setHeader('access-control-allow-origin', allowedOrigin);
     res.setHeader('access-control-allow-headers', 'content-type, x-beauticode-media-token');
@@ -393,9 +396,10 @@ function startGalleryServer(applyFn) {
       if (!core.isSafeSkinId(id)) { deny(res, 400, 'bad id'); return; }
       Promise.resolve(skinRegistry.get(id) || core.getApprovedSkin(id)).then(async (skin) => {
         skinRegistry.set(id, skin);
-        const download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(DATA_DIR, 'tmp', 'gallery') });
+        const download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(DATA_DIR, 'tmp', 'gallery'), signal: core.responseAbortSignal(res) });
         res.setHeader('content-type', download.contentType || 'application/octet-stream');
-        fs.createReadStream(download.filePath).on('close', () => fs.rmSync(download.tempDir, { recursive: true, force: true })).pipe(res);
+        try { await core.streamLocalFile(download.filePath, res); }
+        finally { fs.rmSync(download.tempDir, { recursive: true, force: true }); }
       }).catch((error) => deny(res, 502, error.message));
       return;
     }
@@ -408,7 +412,7 @@ function startGalleryServer(applyFn) {
         if (n > 4096) { req.destroy(); return; }
         chunks.push(c);
       });
-      req.on('end', async () => {
+      req.on('end', () => core.guardHttpHandler(async () => {
         let body = {};
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { body = {}; }
         if (requestToken(req, u, body) !== GALLERY_TOKEN) { deny(res, 403, 'bad token'); return; }
@@ -419,7 +423,7 @@ function startGalleryServer(applyFn) {
         if (!galleryConn || !galleryApplyFn) { deny(res, 503, '守护未连接 WorkBuddy'); return; }
         let download;
         try {
-          download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(DATA_DIR, 'tmp', 'gallery') });
+          download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(DATA_DIR, 'tmp', 'gallery'), signal: core.responseAbortSignal(res) });
         } catch (error) {
           deny(res, 502, error instanceof Error ? error.message : '皮肤资源下载失败');
           return;
@@ -458,7 +462,7 @@ function startGalleryServer(applyFn) {
           fs.rmSync(download.tempDir, { recursive: true, force: true });
           if (committed || !hadPrevious) fs.rmSync(backup, { force: true });
         }
-      });
+      })(req, res));
       return;
     }
     deny(res, 404, 'not found');
@@ -473,7 +477,7 @@ function startGalleryServer(applyFn) {
         return;
       }
       const port = p++;
-      const server = createServer(galleryHandler);
+      const server = createServer(core.guardHttpHandler(galleryHandler));
       server.once('error', (e) => {
         if (e.code === 'EADDRINUSE') { log.info(`皮肤商城端口 ${port} 被占，换下一个…`); tryNext(); }
         else { log.warn('skin-center-service-error', safeErrorCode(e)); resolve(null); }

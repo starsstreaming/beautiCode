@@ -22,3 +22,4 @@ export * from "./process-liveness.js";
 export * from "./startup-repair-chain.js";
 export * from "./skin-catalog.js";
 export * from "./linux-process.js";
+export * from "./http-boundary.js";

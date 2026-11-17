@@ -74,9 +74,10 @@ export async function downloadToFile(url, dest, { maxBytes, expectedOrigin, onPr
   // early when the browser client disconnects.
   const timeoutSignal = AbortSignal.timeout(INSTALL_TIMEOUT_MS);
   const response = await fetch(url, {
-    redirect: "follow",
+    redirect: "error",
     signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
   });
+  try {
   if (!response.ok || !response.body) {
     throw new Error("Skin media download failed.");
   }
@@ -119,6 +120,7 @@ export async function downloadToFile(url, dest, { maxBytes, expectedOrigin, onPr
   });
   await pipeline(Readable.fromWeb(response.body), limiter, fs.createWriteStream(dest));
   return { bytes: size, contentType: response.headers.get("content-type") ?? null };
+  } finally { await response.body?.cancel().catch(() => {}); }
 }
 
 function extensionOf(url, fallback) {
