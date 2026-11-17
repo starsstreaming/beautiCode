@@ -4,6 +4,7 @@
  * Copies the Cordis plugin, vendored core + adapter-dsh, and 画窗 assets.
  */
 import { spawnSync } from "node:child_process";
+import { writeArtifactManifest } from "./artifact-manifest.mjs";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -175,6 +176,7 @@ export async function stageDshPlugin(destRoot = defaultStageDir(), opts = {}) {
     "utf8");
   await stageEngineInto(destRoot);
   if (opts.publishName) await applyPublishName(destRoot, opts.publishName);
+  await writeArtifactManifest(destRoot, repoRoot);
   return destRoot;
 }
 

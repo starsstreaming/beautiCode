@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { stageDesktopAggregate } from '../../../scripts/pack-desktop-aggregate.mjs';
+import { verifyArtifactManifest } from '../../../scripts/artifact-manifest.mjs';
+
+test('packed tarball retains its build manifest and detects modified content', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bc-phase1-pack-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stage = path.join(root, 'stage');
+  await stageDesktopAggregate(stage, { build: false });
+  const npm = process.env.npm_execpath || (process.platform === 'win32' ? path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js') : null);
+  const pack = spawnSync(npm ? process.execPath : 'npm', npm ? [npm, 'pack', '--ignore-scripts', '--json'] : ['pack', '--ignore-scripts', '--json'], { cwd: stage, encoding: 'utf8', windowsHide: true });
+  assert.equal(pack.status, 0, pack.stderr);
+  const artifact = JSON.parse(pack.stdout)[0];
+  const unpack = path.join(root, 'unpacked');
+  await fs.mkdir(unpack);
+  const extracted = spawnSync('tar', ['-xf', path.join(stage, artifact.filename), '-C', unpack], { encoding: 'utf8', windowsHide: true });
+  assert.equal(extracted.status, 0, extracted.stderr);
+  const pkg = path.join(unpack, 'package');
+  const receipt = await verifyArtifactManifest(pkg);
+  assert.match(receipt.sourceCommit, /^[a-f0-9]{40}$/);
+  assert.equal(receipt.packageVersion, artifact.version);
+  const bundledDesktop = await import(pathToFileURL(path.join(pkg, 'runtime/desktop/packages/adapter-desktop-cdp/dist/runtime.js')).href);
+  assert.equal(typeof bundledDesktop.buildDesktopBackgroundInjection, 'function');
+  await fs.appendFile(path.join(pkg, 'runtime/dsh/cli.js'), '\n// tampered\n');
+  await assert.rejects(verifyArtifactManifest(pkg), /Artifact mismatch/);
+  t.diagnostic(`tarball ${artifact.filename}; integrity ${artifact.integrity}; ${artifact.entryCount} files`);
+});
