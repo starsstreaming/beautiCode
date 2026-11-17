@@ -28,3 +28,8 @@ test('client operation ID recovers a lost start response and prevents duplicate 
  assert.equal(ops.start('a',async()=>{calls++;return{ok:true}},id).result.ok,true);
  assert.equal(calls,1);assert.equal(ops.start('other',async()=>({ok:true}),id).ok,false);
 });
+test('cancel before task dispatch cannot start a download',async()=>{
+ const ops=createGalleryOperations();let calls=0;
+ const entry=ops.start('a',async()=>{calls++;return{ok:true}});ops.cancel(entry.id);await wait();
+ assert.equal(calls,0);assert.equal(ops.status(entry.id).phase,'cancelled');
+});

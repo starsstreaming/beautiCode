@@ -22,7 +22,7 @@ export function createGalleryOperations({timeoutMs=30*60*1000,ttlMs=15*60*1000,m
       const timer=setTimeout(()=>{if(entry.phase!=='apply')entry.controller.abort();},timeoutMs);
       timer.unref?.();
       const update=(phase:string)=>{entry.phase=phase;entry.updatedAt=Date.now();};
-      void Promise.resolve().then(()=>task({signal:entry.controller.signal,progress:update,beginApply(){entry.controller.signal.throwIfAborted();update('apply');}})).then(result=>{
+      void Promise.resolve().then(()=>{entry.controller.signal.throwIfAborted();return task({signal:entry.controller.signal,progress:update,beginApply(){entry.controller.signal.throwIfAborted();update('apply');}})}).then(result=>{
         entry.result=result;update(result.ok?'done':entry.controller.signal.aborted?'cancelled':'failed');
       },error=>{entry.result={ok:false,error:entry.controller.signal.aborted?'下载已取消或超时。':error instanceof Error?error.message:String(error)};update(entry.controller.signal.aborted?'cancelled':'failed');}).finally(()=>clearTimeout(timer));
       return status(entry.id);
