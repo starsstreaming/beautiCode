@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { writeArtifactManifest } from "./artifact-manifest.mjs";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -152,7 +153,7 @@ async function copyWorkbuddyRuntime(destRoot) {
     rewriteWorkbuddyRunner,
   );
   await copyText(path.join(repoRoot, "scripts", "quick-launch.mjs"), path.join(workbuddy, "scripts", "quick-launch.mjs"));
-  for (const name of ["wb-startup-media.mjs", "wb-runner-log.mjs", "wb-theme-name-diagnostic.mjs", "windows-owned-env.mjs"]) {
+  for (const name of ["wb-startup-media.mjs", "wb-runner-log.mjs", "wb-theme-name-diagnostic.mjs", "windows-owned-env.mjs", "workbuddy-linux-wiring.mjs", "xdg-autostart.mjs"]) {
     await copyText(path.join(repoRoot, "scripts", name), path.join(workbuddy, "scripts", name));
   }
   await copyText(
@@ -214,6 +215,7 @@ export async function stageDesktopAggregate(destRoot = defaultStageDir(), opts =
     path.join(destRoot, "runtime", "codex", "watch-host.mjs"),
     rewriteCodexWatchHost,
   );
+  await writeArtifactManifest(destRoot, repoRoot);
   return destRoot;
 }
 

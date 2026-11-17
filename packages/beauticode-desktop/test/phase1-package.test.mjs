@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { stageDesktopAggregate } from '../../../scripts/pack-desktop-aggregate.mjs';
+import { verifyArtifactManifest } from '../../../scripts/artifact-manifest.mjs';
 
 test('packed tarball keeps readonly CLI and repaired core/status/ownership modules', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bc-phase1-pack-'));
@@ -21,6 +22,9 @@ test('packed tarball keeps readonly CLI and repaired core/status/ownership modul
   const extracted = spawnSync('tar', ['-xf', path.join(stage, artifact.filename), '-C', unpack], { encoding: 'utf8', windowsHide: true });
   assert.equal(extracted.status, 0, extracted.stderr);
   const pkg = path.join(unpack, 'package');
+  const receipt = await verifyArtifactManifest(pkg);
+  assert.match(receipt.sourceCommit, /^[a-f0-9]{40}$/);
+  assert.equal(receipt.packageVersion, artifact.version);
   const { runCli } = await import(pathToFileURL(path.join(pkg, 'runtime/dsh/cli.js')).href);
   const empty = path.join(root, 'empty');
   await fs.mkdir(empty);
@@ -36,5 +40,10 @@ test('packed tarball keeps readonly CLI and repaired core/status/ownership modul
   }
   const ownership = await import(pathToFileURL(path.join(pkg, 'runtime/workbuddy/scripts/windows-owned-env.mjs')).href);
   assert.equal(typeof ownership.updateOwnedPort, 'function');
+  await import(pathToFileURL(path.join(pkg, 'runtime/workbuddy/scripts/workbuddy-linux-wiring.mjs')).href);
+  const bundledDesktop = await import(pathToFileURL(path.join(pkg, 'runtime/desktop/packages/adapter-desktop-cdp/dist/runtime.js')).href);
+  assert.equal(typeof bundledDesktop.buildDesktopBackgroundInjection, 'function');
+  await fs.appendFile(path.join(pkg, 'runtime/dsh/cli.js'), '\n// tampered\n');
+  await assert.rejects(verifyArtifactManifest(pkg), /Artifact mismatch/);
   t.diagnostic(`tarball ${artifact.filename}; integrity ${artifact.integrity}; ${artifact.entryCount} files`);
 });
