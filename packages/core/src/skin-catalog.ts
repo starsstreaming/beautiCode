@@ -221,6 +221,7 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
       chunks.push(chunk);
     }
   } finally {
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
   return Buffer.concat(chunks, size).toString("utf8");
@@ -234,7 +235,7 @@ async function fetchJson(
   let response: Response;
   try {
     response = await fetchImpl(target, {
-      redirect: "follow",
+      redirect: "error",
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -242,15 +243,15 @@ async function fetchJson(
     if (error instanceof SkinCatalogError) throw error;
     throw new SkinCatalogError("Unable to connect to the skin center.");
   }
-  assertResponseOrigin(response, target);
-  if (!response.ok) throw new SkinCatalogError("Skin center request failed.");
   let text: string;
   try {
+    assertResponseOrigin(response, target);
+    if (!response.ok) throw new SkinCatalogError("Skin center request failed.");
     text = await readBoundedText(response, maxBytes);
   } catch (error) {
     if (error instanceof SkinCatalogError) throw error;
     throw new SkinCatalogError("Skin center returned an invalid response.");
-  }
+  } finally { await response.body?.cancel().catch(() => {}); }
   try {
     return JSON.parse(text) as unknown;
   } catch {
@@ -320,24 +321,25 @@ export async function downloadApprovedAsset(
   let response: Response;
   try {
     response = await (options.fetchImpl ?? fetch)(target, {
-      redirect: "follow",
+      redirect: "error",
       signal,
     });
   } catch (error) {
     if (error instanceof SkinCatalogError) throw error;
     throw new SkinCatalogError("Skin asset download failed.");
   }
-  assertResponseOrigin(response, target);
-  if (!response.ok || !response.body) throw new SkinCatalogError("Skin asset download failed.");
-  const total = responseLength(response);
-  if (total !== null && total > maxBytes) throw new SkinCatalogError("Skin asset exceeds the size limit.");
-
-  const downloadRoot = path.resolve(options.directory);
-  await fsp.mkdir(downloadRoot, { recursive: true });
-  const tempDir = await fsp.mkdtemp(path.join(downloadRoot, ".hnnulwh-"));
-  const filePath = path.join(tempDir, `asset${extensionForContentType(response.headers.get("content-type"), part)}`);
-  let bytes = 0;
+  let tempDir: string | undefined;
   try {
+    assertResponseOrigin(response, target);
+    if (!response.ok || !response.body) throw new SkinCatalogError("Skin asset download failed.");
+    const total = responseLength(response);
+    if (total !== null && total > maxBytes) throw new SkinCatalogError("Skin asset exceeds the size limit.");
+
+    const downloadRoot = path.resolve(options.directory);
+    await fsp.mkdir(downloadRoot, { recursive: true });
+    tempDir = await fsp.mkdtemp(path.join(downloadRoot, ".hnnulwh-"));
+    const filePath = path.join(tempDir, `asset${extensionForContentType(response.headers.get("content-type"), part)}`);
+    let bytes = 0;
     const limiter = new Transform({
       transform(chunk, _encoding, callback) {
         bytes += Buffer.byteLength(chunk);
@@ -349,7 +351,7 @@ export async function downloadApprovedAsset(
         callback(null, chunk);
       },
     });
-    await pipeline(Readable.fromWeb(response.body as never), limiter, fs.createWriteStream(filePath, { flags: "wx" }));
+    await pipeline(Readable.fromWeb(response.body as never), limiter, fs.createWriteStream(filePath, { flags: "wx" }), { signal });
     if (part === "image") await validateImageFile(filePath, { maxBytes });
     else await validateVideoFile(filePath, { maxBytes });
     return {
@@ -361,8 +363,8 @@ export async function downloadApprovedAsset(
       part,
     };
   } catch (error) {
-    await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    if (tempDir) await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     if (error instanceof SkinCatalogError) throw error;
     throw new SkinCatalogError(error instanceof Error ? error.message : "Skin asset validation failed.");
-  }
+  } finally { await response.body?.cancel().catch(() => {}); }
 }

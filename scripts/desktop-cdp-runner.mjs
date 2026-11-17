@@ -10,13 +10,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MEDIA = Object.freeze({
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp',
-  '.avif': 'image/avif', '.mp4': 'video/mp4', '.mov': 'video/quicktime',
-  '.webm': 'video/webm', '.m4v': 'video/mp4',
-});
-const VIDEO = new Set(['.mp4', '.mov', '.webm', '.m4v']);
+
+
 
 function parseArgs(argv) {
   const out = { host: '', once: false, clean: false, verbose: false, watchdog: false, noRepair: false, pidFile: '' };
@@ -225,7 +220,7 @@ async function evaluate(connection, expression) {
 function pickFileLinux() {
   const title = '选择背景图片或视频';
   // Only what core media validation accepts (IMAGE_EXTENSIONS / VIDEO_EXTENSIONS).
-  const filter = '*.png *.jpg *.jpeg *.webp *.avif *.mp4 *.mov *.PNG *.JPG *.JPEG *.WEBP *.AVIF *.MP4 *.MOV';
+  const filter = [...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].flatMap(ext => ['*'+ext, '*'+ext.toUpperCase()]).join(' ');
   return new Promise((resolve, reject) => execFile(
     'zenity', ['--file-selection', '--title', title, '--file-filter', `媒体 | ${filter}`],
     { maxBuffer: 1024 * 1024 },
@@ -257,7 +252,7 @@ async function pickFileNative() {
     '$owner.Opacity=0.01',
     '$owner.TopMost=$true',
     '$dialog=New-Object System.Windows.Forms.OpenFileDialog',
-    "$dialog.Filter='媒体|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp;*.avif;*.mp4;*.mov;*.webm;*.m4v'",
+    `$dialog.Filter='媒体|${[...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].map(ext => '*' + ext).join(';')}'`,
     '$dialog.Multiselect=$false', '$dialog.CheckFileExists=$true', '$dialog.RestoreDirectory=$true',
     "$dialog.Title='选择背景图片或视频'",
     'try{[void]$owner.Show();[void]$owner.Activate();[void]$owner.BringToFront();[System.Windows.Forms.Application]::DoEvents();$result=$dialog.ShowDialog($owner);if($result -eq [System.Windows.Forms.DialogResult]::OK){[Console]::WriteLine($dialog.FileName)}}finally{$dialog.Dispose();$owner.Close();$owner.Dispose()}',
@@ -291,12 +286,12 @@ function assertStableMedia(file, expectedIdentity) {
 async function validateMedia(file) {
   const logical = path.resolve(String(file || ''));
   const ext = path.extname(logical).toLowerCase();
-  if (!MEDIA[ext]) throw new Error('不支持的媒体格式。');
+  if (![...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].includes(ext)) throw new Error('不支持的媒体格式。');
   const first = assertStableMedia(logical);
   // The shared validator performs magic/container checks and walks every path
   // segment for symlinks/reparse points. Keep the identity check here as well:
   // the renderer receives a path, so it must not race a replacement file.
-  const checked = VIDEO.has(ext)
+  const checked = core.isVideoExtension(ext)
     ? await core.validateVideoFile(first.path, { mode: 'fast' })
     : await core.validateImageFile(first.path, { mode: 'fast' });
   const stable = assertStableMedia(checked.filePath, first.identity);
@@ -324,7 +319,7 @@ async function setFileInput(connection, file, meta) {
   if (meta.mode === 'gallery' || meta.mode === 'theme' || meta.mode === 'restore') {
     const deadline = Date.now() + 35_000;
     while (Date.now() < deadline) {
-      const result = await evaluate(connection, `window.__bcDesktopApplyResult && window.__bcDesktopApplyResult[${JSON.stringify(requestId)}]`);
+      const result = await evaluate(connection, `(() => { const results=window.__bcDesktopApplyResult; const result=results&&results[${JSON.stringify(requestId)}]; if(result)delete results[${JSON.stringify(requestId)}]; return result; })()`);
       if (result?.status === 'ok') return result;
       if (result?.status === 'error') throw new Error(result.error || '背景媒体加载失败。');
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -349,6 +344,7 @@ function openExternal(url) {
 
 const galleryToken = crypto.randomBytes(20).toString('hex');
 const skinRegistry = new Map();
+const enqueueGalleryApply = core.createSerialTaskQueue();
 let galleryPort = null;
 let galleryServer = null;
 let activeConnection = null;
@@ -361,7 +357,7 @@ async function buildCatalog() {
 }
 
 function galleryPage() {
-  return `<!doctype html><html lang="zh"><meta charset="utf-8"><title>beautiCode 皮肤中心</title><style>body{margin:0;background:#101114;color:#eee;font:14px system-ui}header{padding:18px 22px;border-bottom:1px solid #333}main{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;padding:20px}.card{padding:0;overflow:hidden;border:1px solid #444;border-radius:14px;background:#242424;color:inherit;text-align:left}.card img,.card video{display:block;width:100%;aspect-ratio:16/10;object-fit:cover}.card span{display:block;padding:10px}#msg{padding:10px 22px;color:#aaa}</style><header><b>beautiCode 皮肤中心</b><div>${spec.displayName} · 选择后自动保存主题</div></header><div id="msg">正在读取…</div><main id="grid"></main><script>var token=${JSON.stringify(galleryToken)};fetch('/api/catalog?t='+token).then(r=>r.json()).then(d=>{msg.textContent='共 '+d.skins.length+' 款';d.skins.forEach(s=>{var b=document.createElement('button');b.className='card';var m=document.createElement(s.type==='video'?'video':'img');m.src='/media?id='+s.id+'&t='+token;if(s.type==='video'){m.muted=true;m.preload='metadata'}var n=document.createElement('span');n.textContent=s.name;b.append(m,n);b.onclick=()=>{msg.textContent='正在应用「'+s.name+'」…';fetch('/apply',{method:'POST',headers:{'content-type':'application/json','x-beauticode-media-token':token},body:JSON.stringify({id:s.id})}).then(r=>r.json()).then(v=>{msg.textContent=v.ok?'已应用「'+s.name+'」':v.error})};grid.appendChild(b)})})</script></html>`;
+  return `<!doctype html><html lang="zh"><meta charset="utf-8"><title>beautiCode 皮肤中心</title><style>body{margin:0;background:#101114;color:#eee;font:14px system-ui}header{padding:18px 22px;border-bottom:1px solid #333}main{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;padding:20px}.card{padding:0;overflow:hidden;border:1px solid #444;border-radius:14px;background:#242424;color:inherit;text-align:left}.card img,.card video{display:block;width:100%;aspect-ratio:16/10;object-fit:cover}.card span{display:block;padding:10px}#msg{padding:10px 22px;color:#aaa}</style><header><b>beautiCode 皮肤中心</b><div>${spec.displayName} · 选择后自动保存主题</div></header><div id="msg">正在读取…</div><main id="grid"></main><script>var token=${JSON.stringify(galleryToken)};fetch('/api/catalog?t='+token).then(r=>r.json()).then(d=>{msg.textContent='共 '+d.skins.length+' 款';d.skins.forEach(s=>{var b=document.createElement('button');b.className='card';var m=document.createElement('img');m.src='/media?id='+s.id+'&t='+token;m.loading='lazy';m.alt='';var n=document.createElement('span');n.textContent=s.name;b.append(m,n);b.onclick=()=>{msg.textContent='正在应用「'+s.name+'」…';fetch('/apply',{method:'POST',headers:{'content-type':'application/json','x-beauticode-media-token':token},body:JSON.stringify({id:s.id})}).then(r=>r.json()).then(v=>{msg.textContent=v.ok?'已应用「'+s.name+'」':v.error})};grid.appendChild(b)})})</script></html>`;
 }
 
 function isLoopbackHost(value) {
@@ -373,7 +369,8 @@ function startGallery() {
   if (galleryServer) return Promise.resolve(galleryPort);
   const handler = async (request, response) => {
     if (!isLoopbackHost(request.headers.host)) { response.writeHead(403).end(); return; }
-    const url = new URL(request.url, 'http://127.0.0.1');
+    const url = core.parseLocalRequestUrl(request, response);
+    if (!url) return;
     const token = request.headers['x-beauticode-media-token'] || url.searchParams.get('t');
     response.setHeader('referrer-policy', 'no-referrer');
     response.setHeader('cache-control', 'no-store');
@@ -395,9 +392,10 @@ function startGallery() {
       if (!skin) { response.writeHead(404).end(); return; }
       let download;
       try {
-        download = await core.downloadApprovedAsset(skin, skin.type, { directory: path.join(dataRoot, 'tmp', 'gallery') });
+        download = await core.downloadApprovedAsset(skin, 'image', { directory: path.join(dataRoot, 'tmp', 'gallery'), signal: core.responseAbortSignal(response) });
         response.setHeader('content-type', download.contentType || 'application/octet-stream');
-        fs.createReadStream(download.filePath).on('close', () => fs.rmSync(download.tempDir, { recursive: true, force: true })).pipe(response);
+        try { await core.streamLocalFile(download.filePath, response); }
+        finally { fs.rmSync(download.tempDir, { recursive: true, force: true }); }
       } catch (error) {
         response.writeHead(502).end(JSON.stringify({ ok: false, error: error.message }));
       }
@@ -406,11 +404,11 @@ function startGallery() {
     if (url.pathname === '/apply' && request.method === 'POST') {
       let body = Buffer.alloc(0);
       request.on('data', (part) => { if (body.length < 4096) body = Buffer.concat([body, part]); });
-      request.on('end', async () => {
+      request.on('end', () => core.guardHttpHandler(() => enqueueGalleryApply(async () => {
         try {
           const item = skinRegistry.get(String(JSON.parse(body.toString('utf8')).id || ''));
           if (!item || !activeConnection) throw new Error(`${spec.displayName} 守护尚未连接。`);
-          const download = await core.downloadApprovedAsset(item, item.type, { directory: path.join(dataRoot, 'tmp', 'gallery') });
+          const download = await core.downloadApprovedAsset(item, item.type, { directory: path.join(dataRoot, 'tmp', 'gallery'), signal: core.responseAbortSignal(response) });
           const persistentDir = path.join(dataRoot, 'themes');
           fs.mkdirSync(persistentDir, { recursive: true });
           const persistent = path.join(persistentDir, `${item.sourceSkinId}${path.extname(download.filePath)}`);
@@ -435,7 +433,7 @@ function startGallery() {
           }
           response.end(JSON.stringify({ ok: true }));
         } catch (error) { response.writeHead(500).end(JSON.stringify({ ok: false, error: error.message })); }
-      });
+      }))(request, response));
       return;
     }
     response.writeHead(404).end();
@@ -444,7 +442,7 @@ function startGallery() {
     let port = args.host === 'cursor' ? 9381 : 9382;
     const tryPort = () => {
       if (port > 9390) { log.warn('皮肤中心端口耗尽。'); resolve(null); return; }
-      const server = createServer(handler);
+      const server = createServer(core.guardHttpHandler(handler));
       server.once('error', (error) => error.code === 'EADDRINUSE' ? (port++, tryPort()) : resolve(null));
       server.listen(port, '127.0.0.1', () => { galleryServer = server; galleryPort = port; resolve(port); });
     };
@@ -503,7 +501,7 @@ async function runSession(endpoint) {
     if (busy) return;
     busy = true;
     try {
-      const snapshot = await evaluate(connection, `(() => { const a=document.querySelector(${JSON.stringify(spec.anchorSelector)}); const t=a?String(a.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase():''; return {pick:window.__bcDesktopPickRequest||0,apply:window.__bcDesktopApplyRequest||null,skin:window.__bcDesktopSkinCenterRequest||0,dirty:window.__bcDesktopPersistDirty||0,entry:!!document.getElementById('beauticode-${args.host}-background-entry'),style:!!document.getElementById('beauticode-${args.host}-background-style'),stage:!!document.getElementById('beauticode-bg-stage'),anchor:!!a,anchorTextMatches:!!a&&t.includes(${JSON.stringify(spec.anchorText.toLowerCase())})}; })()`);
+      const snapshot = await evaluate(connection, `(() => { const a=document.querySelector(${JSON.stringify(spec.anchorSelector)}); const t=a?String(a.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase():''; return {pick:window.__bcDesktopPickRequest||0,apply:window.__bcDesktopApplyRequest||null,skin:window.__bcDesktopSkinCenterRequest||0,dirty:window.__bcDesktopPersistDirty||0,entry:!!document.getElementById('beauticode-${args.host}-background-entry'),style:!!document.getElementById('beauticode-${args.host}-background-style'),stage:!!document.getElementById('beauticode-bg-stage'),anchor:!!a,anchorTextMatches:!!a&&${JSON.stringify((spec.anchorTexts || [spec.anchorText]).map(t => t.toLowerCase()))}.some(label=>t.includes(label))}; })()`);
       if (!snapshot.anchor || !snapshot.anchorTextMatches) {
         reportRuntimeDiagnosis('host-ui-updated');
         await evaluate(connection, buildCleanup());
