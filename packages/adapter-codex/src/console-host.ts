@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import type { BeautiSession } from "./session.js";
-import { toChineseErrorMessage } from "@beauticode/core";
+import { createGalleryOperations, isSafeSkinId, toChineseErrorMessage } from "@beauticode/core";
 import { pickLocalMedia } from "./native-picker.js";
 import {
   installSkinFromCenter,
@@ -31,6 +31,8 @@ function applyFailure(result: { error: string; rolledBack?: boolean }) {
 export function createConsoleHost(session: BeautiSession) {
   const selections = new Map<string, PendingSelection>();
   let pickerBusy = false;
+  const galleryOperations = createGalleryOperations();
+  const queries = new Map<string,AbortController>();
 
   function publicThemes() {
     return session.listSavedThemes().then((list) =>
@@ -69,6 +71,12 @@ export function createConsoleHost(session: BeautiSession) {
       request.body && typeof request.body === "object" && !Array.isArray(request.body)
         ? (request.body as Record<string, unknown>)
         : {};
+    if (route === "/__beauticode/ui/gallery/cancel-request") { queries.get(String(body.requestId))?.abort(); return {ok:true}; }
+    if (route === "/__beauticode/ui/gallery/operation") {
+      const action=String(body.action||"status");
+      if(action==="start") { const id=String(body.id||"");if(!isSafeSkinId(id))return fail("皮肤 ID 无效。");return galleryOperations.start(id, context=>installSkinFromCenter(session,id,context)); }
+      return action==="cancel"?galleryOperations.cancel(String(body.operationId)):galleryOperations.status(String(body.operationId));
+    }
     if (route === "/__beauticode/ui/status") return status();
     if (route === "/__beauticode/ui/gallery/config") return skinCenterConfig();
     if (route.startsWith("/__beauticode/ui/gallery/catalog")) {
@@ -78,7 +86,10 @@ export function createConsoleHost(session: BeautiSession) {
       const type = url.searchParams.get("type");
       if (q) query.q = q;
       if (type) query.type = type;
-      return skinCenterCatalog(query);
+      const id=String(request.id||crypto.randomUUID()), controller=new AbortController();
+      queries.set(id,controller);
+      try { return await skinCenterCatalog(query,controller.signal); }
+      finally { queries.delete(id); }
     }
     if (route === "/__beauticode/ui/gallery/install") {
       const id = typeof body.id === "string" ? body.id.trim() : "";

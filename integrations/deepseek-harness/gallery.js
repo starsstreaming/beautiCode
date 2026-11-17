@@ -50,6 +50,33 @@
   const typeSelect = host.querySelector(".bcg-type");
   let centerUrl = "";
   let busy = false;
+
+  let queryAbort=null, openAbort=null, polling=null;
+  const operationKey="beauticode-gallery-operation";
+  let operationId="";
+  try { operationId=sessionStorage.getItem(operationKey)||""; } catch {}
+  const cancelButton=document.createElement("button");cancelButton.type="button";cancelButton.className="bcg-btn";cancelButton.textContent="取消下载";cancelButton.hidden=true;
+  host.querySelector(".bcg-head").append(cancelButton);
+  function rememberOperation(id){operationId=id;try{id?sessionStorage.setItem(operationKey,id):sessionStorage.removeItem(operationKey);}catch{}}
+  const operation=(action,body={})=>request("/__beauticode/ui/gallery/operation",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,...body})});
+  async function watchOperation(){
+    polling?.abort();const controller=new AbortController();polling=controller;busy=true;cancelButton.hidden=false;
+    const deadline=Date.now()+120000;
+    try{
+      while(!controller.signal.aborted&&!host.hidden){
+        const state=await operation("status",{operationId});
+        if(controller.signal.aborted||host.hidden)return;
+        if(state.result){msg.textContent=state.result.message||state.result.error||(state.result.ok?"已安装。":"安装失败。");if(state.result.ok)document.dispatchEvent(new CustomEvent("beauticode-gallery-installed"));rememberOperation("");return;}
+        cancelButton.disabled=state.phase==="apply";
+        msg.textContent=state.phase==="apply"?"正在提交背景，可稍后重新打开查询结果。":"正在下载，可取消。";
+        if(Date.now()>deadline){msg.textContent="操作仍在进行，关闭后重新打开可查询结果。";return;}
+        await new Promise(resolve=>{const finish=()=>{clearTimeout(timer);controller.signal.removeEventListener("abort",finish);resolve()};const timer=setTimeout(finish,400);controller.signal.addEventListener("abort",finish,{once:true})});
+      }
+    }catch(error){if(!controller.signal.aborted){msg.textContent=error.message;if(error.code==="operation_unknown")rememberOperation("");}}
+    finally{if(polling===controller){polling=null;busy=false;cancelButton.hidden=!operationId;}}
+  }
+  cancelButton.onclick=()=>{if(operationId)void operation("cancel",{operationId}).then(state=>{if(state.message)msg.textContent=state.message;else msg.textContent="正在取消下载…";if(!host.hidden&&!busy)void watchOperation()}).catch(error=>{msg.textContent=error.message})};
+
   let loadGeneration = 0;
 
   let returnFocus = null;
@@ -95,6 +122,7 @@
   async function request(path, init) {
     const response = await fetch(path, {
       ...init,
+      signal:init?.signal ? AbortSignal.any([init.signal,AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000),
       headers: { ...(init?.headers || {}), ...(globalThis.__beauticodeTransport?.headers() ?? {}) },
     });
     if ((response.headers.get("content-type") || "").includes("ndjson")) {
@@ -102,7 +130,7 @@
     }
     const body = await response.json().catch(() => null);
     if (!response.ok || body?.ok === false) {
-      throw new Error(body?.error || `请求失败（${response.status}）`);
+      throw Object.assign(new Error(body?.error || `请求失败（${response.status}）`),{code:body?.code});
     }
     return body;
   }
@@ -138,12 +166,13 @@
 
   async function load() {
     const generation = ++loadGeneration;
+    queryAbort?.abort();queryAbort=new AbortController();const signal=queryAbort.signal;
     msg.textContent = "正在读取目录…";
     try {
       const params = new URLSearchParams();
       if (queryInput.value.trim()) params.set("q", queryInput.value.trim());
       if (typeSelect.value) params.set("type", typeSelect.value);
-      const data = await request(`/__beauticode/ui/gallery/catalog?${params}`);
+      const data = await request(`/__beauticode/ui/gallery/catalog?${params}`,{signal});
       if (generation !== loadGeneration || host.hidden) return;
       centerUrl = data.url || centerUrl;
       grid.innerHTML = (data.skins || [])
@@ -170,9 +199,12 @@
     if (host.hidden) returnFocus = document.activeElement;
     host.hidden = false;
     focusInside();
+    openAbort?.abort();openAbort=new AbortController();const opening=openAbort;
+    if(operationId){void watchOperation();return;}
     try {
-      const config = await request("/__beauticode/ui/gallery/config");
-      centerUrl = config.url || "";
+      let config;try{config=await request("/__beauticode/ui/gallery/config",{signal:opening.signal});}catch(error){if(!opening.signal.aborted)msg.textContent=error.message;return;}
+      if(opening.signal.aborted||host.hidden)return;
+    centerUrl = config.url || "";
       if (!config.enabled) {
         grid.innerHTML = "";
         msg.textContent = "尚未配置皮肤中心地址。";
@@ -190,6 +222,8 @@
   function close() {
     host.hidden = true;
     loadGeneration += 1;
+    queryAbort?.abort();openAbort?.abort();polling?.abort();
+    if(operationId)void operation('cancel',{operationId}).catch(()=>{});
     if (returnFocus?.isConnected) returnFocus.focus();
     returnFocus = null;
   }
@@ -211,21 +245,9 @@
     const id = card.getAttribute("data-id");
     busy = true;
     msg.textContent = "开始安装…";
-    request("/__beauticode/ui/gallery/install", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id }),
-    })
-      .then((result) => {
-        msg.textContent = result.message || "已安装。";
-        document.dispatchEvent(new CustomEvent("beauticode-gallery-installed"));
-      })
-      .catch((error) => {
-        msg.textContent = error instanceof Error ? error.message : String(error);
-      })
-      .finally(() => {
-        busy = false;
-      });
+    operation("start",{id}).then(state=>{rememberOperation(state.id);if(host.hidden){void operation("cancel",{operationId});return;}return watchOperation()})
+      .catch(error=>{msg.textContent=error.message;})
+      .finally(()=>{if(!polling)busy=false;});
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !host.hidden) {

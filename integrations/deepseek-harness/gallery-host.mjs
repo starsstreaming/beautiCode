@@ -8,6 +8,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import {
   SKIN_CENTER_ORIGIN,
+  createGalleryOperations,
   downloadApprovedAsset,
   getApprovedSkin,
   listApprovedSkins,
@@ -173,7 +174,61 @@ export function createGalleryHandlers({ dataRoot, actions }) {
     throw new Error("当前引擎不支持导入皮肤。");
   }
 
+  const operations=createGalleryOperations();
+  async function performInstall(id,operation) {
+    const tmpDir=path.join(dataRoot,"tmp","gallery",crypto.randomUUID());
+    try {
+        const skin = await getApprovedSkin(id, { signal: operation.signal });
+        await fsp.mkdir(tmpDir, { recursive: true });
+        const imageDownload = await downloadApprovedAsset(skin, "image", {
+          directory: tmpDir,
+          signal: operation.signal,
+          onProgress: (done, total) => operation.progress("download"),
+        });
+        const imagePath = imageDownload.filePath;
+        let videoPath;
+        if (skin.type === "video") {
+          const videoDownload = await downloadApprovedAsset(skin, "video", {
+            directory: tmpDir,
+            signal: operation.signal,
+            onProgress: (done, total) => operation.progress("download"),
+          });
+          videoPath = videoDownload.filePath;
+        }
+        // Skin-center media is downloaded into the store, so it is a managed
+        // import. importTheme applies-and-saves atomically; the media is copied
+        // before it returns, so tmpDir is safe to remove in finally.
+        operation.beginApply();
+        // The apply/save step is atomic and cannot be interrupted; refuse to
+        // start it when the client already went away so a disconnected UI does
+        // not still commit and apply a background after the controls recovered.
+        if (operation.signal.aborted) throw new Error("客户端已断开。");
+        const imported = await importTheme({
+          name: normalizeThemeName(skin.name || id),
+          imagePath,
+          ...(videoPath ? { videoPath } : {}),
+          ...(skin.effects ? { effects: skin.effects } : {}),
+          source: "managed",
+          provenance: {
+            source: skin.source,
+            sourceSkinId: skin.sourceSkinId,
+            sourceVersion: skin.sourceVersion,
+          },
+        });
+
+      if(imported?.ok===false)return imported;
+      return {ok:true,theme:imported.theme||imported,message:imported.message||"已安装并应用。"};
+    } finally {await fsp.rm(tmpDir,{recursive:true,force:true}).catch(()=>{});}
+  }
+
   return {
+    async operation(req,res,sendJson,isSameOrigin,readJson) {
+      if(req.method!=="POST"){res.writeHead(405).end();return;}
+      if(!isSameOrigin(req)){res.writeHead(403).end();return;}
+      const body=await readJson(req);
+      if(body.action==="start") {const id=String(body.id||"");if(!isSafeSkinId(id)){sendJson(res,400,{ok:false,error:"皮肤 ID 无效。"});return;}sendJson(res,200,operations.start(id,ctx=>performInstall(id,ctx)));return;}
+      sendJson(res,200,body.action==="cancel"?operations.cancel(String(body.operationId)):operations.status(String(body.operationId)));
+    },
     async config(req, res, sendJson, isSameOrigin) {
       if (req.method !== "GET") {
         res.writeHead(405).end();
@@ -199,12 +254,16 @@ export function createGalleryHandlers({ dataRoot, actions }) {
       try {
         const incoming = new URL(req.url || "/", "http://127.0.0.1");
         const type = incoming.searchParams.get("type");
-        const skins = await listApprovedSkins({
+        const cancel=new AbortController();const onClose=()=>cancel.abort();res.once('close',onClose);
+        let skins;
+        try { skins = await listApprovedSkins({
+          signal:cancel.signal,
           query: {
             ...(incoming.searchParams.get("q") ? { q: incoming.searchParams.get("q") } : {}),
             ...(type === "image" || type === "video" ? { type } : {}),
           },
         });
+        } finally {res.off('close',onClose);}
         sendJson(res, 200, {
           ok: true,
           skins,

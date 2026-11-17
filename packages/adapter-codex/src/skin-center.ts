@@ -45,7 +45,7 @@ export async function skinCenterConfig(): Promise<{
 export async function skinCenterCatalog(query: {
   q?: string;
   type?: string;
-}): Promise<{
+}, signal?: AbortSignal): Promise<{
   ok: boolean;
   skins: unknown[];
   nextCursor?: unknown;
@@ -55,6 +55,7 @@ export async function skinCenterCatalog(query: {
   try {
     const type = query.type === "image" || query.type === "video" ? query.type : undefined;
     const skins = await listApprovedSkins({
+      ...(signal ? { signal } : {}),
       ...(query.q ? { query: { q: query.q, ...(type ? { type } : {}) } } : type ? { query: { type } } : {}),
     });
     return { ok: true, skins, nextCursor: null, url: SKIN_CENTER_ORIGIN };
@@ -81,17 +82,18 @@ function normalizeThemeName(value: unknown, fallback = "主题"): string {
 export async function installSkinFromCenter(
   session: BeautiSession,
   id: string,
+  operation?: { signal: AbortSignal; beginApply(): void; progress(phase:string): void },
 ): Promise<{ ok: boolean; error?: string; theme?: unknown; message?: string }> {
   if (!isSafeSkinId(id)) return { ok: false, error: "皮肤 ID 无效。" };
   const tempDirs: string[] = [];
   try {
-    const skin = await getApprovedSkin(id);
+    const skin = await getApprovedSkin(id, operation ? {signal:operation.signal} : {});
     const directory = path.join(session.dataRoot, "tmp", "gallery");
-    const image = await downloadApprovedAsset(skin, "image", { directory });
+    const image = await downloadApprovedAsset(skin, "image", { directory, ...(operation ? {signal:operation.signal} : {}) });
     tempDirs.push(image.tempDir);
     let video: Awaited<ReturnType<typeof downloadApprovedAsset>> | undefined;
     if (skin.type === "video") {
-      video = await downloadApprovedAsset(skin, "video", { directory });
+      video = await downloadApprovedAsset(skin, "video", { directory, ...(operation ? {signal:operation.signal} : {}) });
       tempDirs.push(video.tempDir);
     }
     const provenance = {
@@ -116,6 +118,7 @@ export async function installSkinFromCenter(
           provenance,
         };
     const name = normalizeThemeName(skin.name || id);
+    operation?.beginApply();
     const result = await session.applyAndSaveTheme(input, name);
     if (!result.ok) return { ok: false, error: result.error || "安装失败。" };
     return {
