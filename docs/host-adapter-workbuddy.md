@@ -149,7 +149,7 @@ WORKBUDDY_REMOTE_DEBUGGING_PORT=9335 \
 
 | 层类 | 处理 | 选择器 |
 |---|---|---|
-| **壁纸区**（外壳、会话主区、中央视图、侧栏列表体） | **透明** | `BACKDROP_SELECTORS`（10 个） |
+| **壁纸区**（外壳、会话主区、中央视图、侧栏列表体） | **透明** | `BACKDROP_SELECTORS`，含 5.11.3 右侧布局的 `.layout-window-frame__body` |
 | **浮层**（侧栏面板、输入区、代码块、工具卡、组件卡、气泡、右侧产出卡片） | **统一半透 α** | `SURFACE_RULES`（7 条，各自带 token） |
 | **浮层内部子面**（卡片 header/body/diff 容器、输入区工具栏与模型选项、右侧面板内部） | **透明**（压平） | `FLATTEN_SELECTORS` + `SIDEBAR_FLATTEN_SELECTORS` |
 | **语义色**（diff 增删行） | **保持实心** | `SEMANTIC_TINT_SELECTORS`（故意不压平） |
