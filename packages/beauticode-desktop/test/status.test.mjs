@@ -44,7 +44,7 @@ test("status has an explicit read-only result for every supported host", () => {
 test("status uses the Windows Startup folder as the canonical runner marker", () => {
   const appData = "C:/Users/test/AppData/Roaming";
   const startup = path.join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
-  for (const host of ["workbuddy", "cursor", "doubao"]) {
+  for (const host of ["workbuddy", "cursor", "doubao", "doubaowork"]) {
     const marker = path.join(startup, `beauticode-${host === "workbuddy" ? "wb" : host}-runner.vbs`).replaceAll("\\", "/");
     const result = getHostStatus(host, {
       runtimeRoot: "C:/package/runtime",
@@ -59,7 +59,7 @@ test("status uses the Windows Startup folder as the canonical runner marker", ()
 
 test("status does not mistake the retired APPDATA-root marker for an install", () => {
   const appData = "C:/Users/test/AppData/Roaming";
-  for (const host of ["workbuddy", "cursor", "doubao"]) {
+  for (const host of ["workbuddy", "cursor", "doubao", "doubaowork"]) {
     const legacy = path.join(appData, `beauticode-${host === "workbuddy" ? "wb" : host}-runner.vbs`).replaceAll("\\", "/");
     const result = getHostStatus(host, {
       runtimeRoot: "C:/package/runtime",

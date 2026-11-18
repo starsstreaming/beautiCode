@@ -8,6 +8,34 @@ import { spawn, spawnSync } from "node:child_process";
 export const MIN_NODE_MAJOR = 22;
 export const RUNTIME_SCHEMA = "beauticode.runtime/v1";
 
+/** Resolve static workspace imports in a desktop runtime that ships without node_modules. */
+export async function rewriteRuntimeWorkspaceImports(root, adapters) {
+  const packages = path.join(root, "packages");
+  const dist = (name) => path.join(packages, name, "dist");
+  const targets = new Map([
+    ["@beauticode/core", path.join(dist("core"), "index.js")],
+    ["@beauticode/adapter-desktop-cdp", path.join(dist("adapter-desktop-cdp"), "index.js")],
+  ]);
+  async function rewrite(directory) {
+    for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) await rewrite(file);
+      else if (entry.isFile() && entry.name.endsWith(".js")) {
+        const source = await fsp.readFile(file, "utf8");
+        let patched = source;
+        for (const [specifier, target] of targets) {
+          const relative = path.relative(directory, target).replaceAll("\\", "/");
+          const spec = relative.startsWith(".") ? relative : "./" + relative;
+          patched = patched.replaceAll('from "' + specifier + '"', 'from "' + spec + '"')
+            .replaceAll("from '" + specifier + "'", "from '" + spec + "'");
+        }
+        if (patched !== source) await fsp.writeFile(file, patched, "utf8");
+      }
+    }
+  }
+  for (const adapter of adapters) await rewrite(dist(adapter));
+}
+
 /**
  * Per-user machine-local data base. Windows keeps %LOCALAPPDATA%; Linux uses
  * the XDG data home so every beautiCode file lives under ~/.local/share.

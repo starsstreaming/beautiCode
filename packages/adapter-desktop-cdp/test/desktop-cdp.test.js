@@ -15,6 +15,7 @@ import {
   readBoundedJson,
   repairDesktopProcess,
   selectDesktopMainProcesses,
+  startDesktopStartupRepairMonitor,
   waitForDesktopCdp,
 } from '../dist/index.js';
 
@@ -248,6 +249,19 @@ test('repair transaction absorbs a replacement no-CDP PID before controlled laun
   assert.equal(launchArgs, '--start_time=123');
 });
 
+test('attach-only hosts leave both original and replacement processes alone', async () => {
+  const rows = [{ ...processRow(1000), pid: 42 }, { ...processRow(1001), pid: 43 }];
+  const attachOnly = { ...spec, startupRepair: false };
+  const fail = () => assert.fail('attach-only startup must never inspect, stop or relaunch a process');
+  for (const row of rows) {
+    assert.equal(await repairDesktopProcess(attachOnly, row, undefined, {
+      listProcesses: fail, terminate: fail, forceTerminate: fail, launch: fail, pickPort: fail,
+    }), 'deferred');
+  }
+  const monitor = startDesktopStartupRepairMonitor(attachOnly, { warn: fail, info: fail });
+  monitor.close();
+});
+
 test('repair waits for two empty snapshots before controlled launch', async () => {
   const oldRow = { ...processRow(1000), pid: 42 };
   const snapshots = [[oldRow], [oldRow], [], [], []];
@@ -411,6 +425,21 @@ test('desktop target polling uses a 150ms fake-clock cadence after a 220ms probe
   assert.equal(now, 370);
 });
 
+test('settings mode stays off unless a host asks for it, and opaque plates are the default', () => {
+  const source = buildDesktopBackgroundInjection(spec);
+  assert.match(source, /settingsMode/);
+  assert.match(source, /data-bc-readable-surfaces="false"/);
+  assert.match(source, /s\.readable!==false/);
+  // Turning "opaque panels" off must not rewrite the user's transparency. The
+  // settings panel needs the alpha row, otherwise the remaining plate cannot be
+  // removed and the wallpaper stays hidden behind a white sheet.
+  assert.doesNotMatch(source, /PERSIST\.alpha=18/);
+  assert.match(source, /row\(CFG\.strings\.dim,dim,null,'dim'\),alphaRow/);
+  assert.match(source, /bc-desktop-glyph/);
+  assert.doesNotMatch(source, /"settings":/);
+  assert.doesNotMatch(source, /"surfaceBaseVariable":/);
+});
+
 test('desktop renderer scopes host surfaces to active media and uses shared defaults', () => {
   const source = buildDesktopBackgroundInjection(spec);
   assert.match(source, /DESKTOP_DEFAULT_DIM|dim:49/);
@@ -457,6 +486,15 @@ test('light hosts read off the veil, and blur never moves the media', () => {
   assert.doesNotMatch(source, /calc\(100% \+ 24px\)/);
   assert.match(source, /setAttribute\('data-bc-blur-user'/);
   assert.match(source, /removeAttribute\('data-bc-blur-user'\)/);
+});
+
+test('import prefills the file stem, and video frames stay opt-in', () => {
+  const source = buildDesktopBackgroundInjection(spec);
+  assert.match(source, /function themeStem/);
+  assert.match(source, /meta\.suggestedName\|\|themeStem\(file\.name\)/);
+  assert.match(source, /"videoFrame":false/);
+  assert.match(source, /var framed=kind==='video'&&CFG\.videoFrame/);
+  assert.match(source, /\.bc-desktop-dialog \*\{pointer-events:auto\}/);
 });
 
 test('desktop runners fail closed on stale identities and preserve video skin types', () => {  const source = fs.readFileSync(new URL('../../../scripts/desktop-cdp-runner.mjs', import.meta.url), 'utf8');

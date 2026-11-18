@@ -1,6 +1,6 @@
 import type { HostKind } from "@beauticode/core";
 
-export type DesktopCdpHostKind = Extract<HostKind, "cursor" | "doubao">;
+export type DesktopCdpHostKind = Extract<HostKind, "cursor" | "doubao" | "doubaowork">;
 
 export interface DesktopHostStrings {
   entry: string;
@@ -28,6 +28,9 @@ export interface DesktopHostStrings {
   close: string;
   image: string;
   video: string;
+  scene?: string;
+  wallpaperLibrary?: string;
+  appliedScene?: string;
   missingFile: string;
   unsupportedFile: string;
   importFailed: string;
@@ -46,6 +49,25 @@ export interface DesktopBackgroundContract {
   readingSelectors?: readonly string[];
   /** Sticky input surfaces must hide the transcript behind them. */
   opaqueSelectors?: readonly string[];
+  /**
+   * Plates that keep the host's own fill until the user turns transparency on.
+   * Missing or corrupt preferences stay opaque.
+   */
+  readabilitySelectors?: readonly string[];
+  /** Children of a readability plate. They must not add a second alpha layer. */
+  readabilityFlattenSelectors?: readonly string[];
+}
+
+/** Mount background controls inside the host's appearance settings. */
+export interface DesktopSettingsContract {
+  modalSelector: string;
+  /** Exact title of that nested page. */
+  pageTitle: string;
+  /** Exact row used to find the nested page's own group. */
+  pageMarker: string;
+  title: string;
+  intro: string;
+  readability: string;
 }
 
 /** Exact host markers used to resolve the rendered theme without text matching. */
@@ -87,20 +109,36 @@ export interface DesktopCdpHostSpec {
   candidatePorts: readonly number[];
   /** Suppress a second repair when this host replaces its launcher and drops CDP flags. */
   repairSuppressionMs?: number;
+  /** When false, attach to existing CDP sessions or use explicit quick launch. */
+  startupRepair?: boolean;
   /** Host-specific delay after the old process tree exits and before relaunch. */
   restartDelayMs?: number;
   /** Minimum distance between the popup and the host window's top chrome. */
   popupTopInset: number;
   targetUrl: string;
   targetRuntimeUrl: string;
+  /**
+   * Extra hostnames that render the same shell as targetUrl. The path must
+   * still match. When several pages match, the visible one is the largest.
+   */
+  targetHostnames?: readonly string[];
   targetIdentity?: DesktopTargetIdentity;
-  mount: "cursor" | "doubao";
+  mount: "cursor" | "doubao" | "doubaowork";
   anchorSelector: string;
   anchorText: string;
   anchorTexts?: readonly string[];
   strings: DesktopHostStrings;
   contract: DesktopBackgroundContract;
   theme: DesktopThemeContract;
+  /** Present only for hosts that keep background controls in their own settings page. */
+  settings?: DesktopSettingsContract;
+  /** Host plate token, for example `--dbx-bg-base-web`. Absent hosts keep the shared fallbacks. */
+  surfaceBaseVariable?: string;
+  /**
+   * Play video in a same-origin document. Set this only when the host page's
+   * own HTMLVideoElement never finishes loading.
+   */
+  videoFrame?: boolean;
 }
 
 /** Structured identity for hosts whose renderer URL contains an install path. */
