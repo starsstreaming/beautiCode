@@ -105,8 +105,8 @@ export function createConsoleHost(session: BeautiSession) {
       const muted = body.muted !== false;
       const result = await session.setMuted(muted);
       return result.ok
-        ? { ...result, requestedMuted: muted, message: result.blocked ? "部分或全部窗口开声被阻止，视频可能仍为静音。请在视频控件中重试。" : result.sessions === 0 ? "声音偏好已保存，等待连接视频后生效。" : muted ? "背景视频已静音。" : "声音设置已发送，请以各窗口实际播放状态为准。" }
-        : fail(result.error || "无法切换背景声音。");
+        ? { ...result, requestedMuted: muted, message: result.partial ? "部分窗口未能设置声音，请检查各窗口结果后重试。" : result.blocked ? "部分或全部窗口开声被阻止，视频可能仍为静音。请在视频控件中重试。" : result.sessions === 0 ? "声音偏好已保存，等待连接视频后生效。" : muted && result.actualMuted === true ? "背景视频已静音。" : "声音设置已发送，请以各窗口实际播放状态为准。" }
+        : { ...result, requestedMuted: muted, error: result.error || "无法切换背景声音。" };
     }
     if (route === "/__beauticode/ui/theme/use") {
       const id = typeof body.id === "string" ? body.id.trim() : "";

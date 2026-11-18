@@ -27,6 +27,13 @@ import {
 } from "./readiness.js";
 import { selectCodexPrimaryTargets } from "./target-selection.js";
 
+export interface AudioWindowOutcome {id:string;ok:boolean;hasVideo:boolean;muted:boolean|null;blocked:boolean}
+export function aggregateAudioState(outcomes: AudioWindowOutcome[]): boolean|null {
+  const live=outcomes.filter(o=>o.ok&&o.hasVideo);
+  if(!live.length||outcomes.some(o=>!o.ok)||live.some(o=>o.muted===null))return null;
+  return live.every(o=>o.muted===true)?true:live.every(o=>o.muted===false)?false:null;
+}
+
 export interface CodexHostApplierOptions {
   port: number;
   /** Prefer targets whose URL starts with this prefix. Default app:// */
@@ -578,6 +585,9 @@ export class CodexHostApplier implements HostApplier {
     muted: boolean;
     blocked: boolean;
     sessions: number;
+    outcomes?: AudioWindowOutcome[];
+    partial?: boolean;
+    actualMuted?: boolean | null;
     error?: string;
   }> {
     this.assertOpen();
@@ -601,6 +611,7 @@ export class CodexHostApplier implements HostApplier {
     if (this.sessions.size === 0) {
       // Preference remembered for the next inject even with no live page.
       return {
+        outcomes: [], partial: false, actualMuted: null,
         ok: true,
         muted: this.videoMuted,
         blocked: false,
@@ -610,6 +621,7 @@ export class CodexHostApplier implements HostApplier {
     let okCount = 0;
     let anyBlocked = false;
     const errors: string[] = [];
+    const outcomes: AudioWindowOutcome[] = [];
     for (const [id, session] of this.sessions) {
       if (session.closed) {
         this.sessions.delete(id);
@@ -617,16 +629,15 @@ export class CodexHostApplier implements HostApplier {
       }
       try {
         const result = await setSessionMuted(session, wantMuted);
+        outcomes.push({id,ok:!!result?.ok,hasVideo:!!result?.hasVideo,muted:result?.actualMuted ?? null,blocked:!!result?.blocked});
         if (result && result.ok) {
           okCount += 1;
           if (result.blocked) anyBlocked = true;
-        } else if (result) {
-          // Runtime present but no video yet — still count as accepted preference.
-          okCount += 1;
         } else {
           errors.push(`${id}: runtime rejected mute toggle`);
         }
       } catch (err) {
+        outcomes.push({id,ok:false,hasVideo:false,muted:null,blocked:false});
         errors.push(
           `${id}: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -638,6 +649,7 @@ export class CodexHostApplier implements HostApplier {
         muted: this.videoMuted,
         blocked: false,
         sessions: 0,
+        outcomes, partial:false, actualMuted:null,
         error: errors[0] ?? "Could not toggle mute on any session",
       };
     }
@@ -646,6 +658,9 @@ export class CodexHostApplier implements HostApplier {
       muted: this.videoMuted,
       blocked: anyBlocked,
       sessions: okCount,
+      outcomes,
+      partial: outcomes.some(o=>!o.ok),
+      actualMuted: aggregateAudioState(outcomes),
     };
   }
 
@@ -936,7 +951,7 @@ async function setSessionFishMode(
 async function setSessionMuted(
   session: CdpSession,
   muted: boolean,
-): Promise<{ ok: boolean; muted: boolean; blocked: boolean; hasVideo: boolean } | null> {
+): Promise<{ ok: boolean; muted: boolean; actualMuted: boolean|null; blocked: boolean; hasVideo: boolean } | null> {
   const flag = muted ? "true" : "false";
   // userGesture helps Chromium accept unmute after a muted autoplay start.
   const expr = `(() => {
@@ -952,6 +967,7 @@ async function setSessionMuted(
         muted: Boolean(r.muted),
         blocked: Boolean(r.blocked),
         hasVideo: Boolean(r.hasVideo),
+        actualMuted: typeof r.actualMuted==='boolean' ? r.actualMuted : null,
       };
     } catch (_) {
       return null;
@@ -962,6 +978,7 @@ async function setSessionMuted(
     muted: boolean;
     blocked: boolean;
     hasVideo: boolean;
+    actualMuted: boolean|null;
   } | null>(expr, { userGesture: true });
   return result ?? null;
 }

@@ -140,6 +140,7 @@
             // Blocked only when we wanted sound but every/any live node stayed muted.
             blocked: !videoMuted && videos.length > 0 && anyStillMuted,
             hasVideo: videos.length > 0,
+            actualMuted: !videos.length ? null : videos.every(v=>v.muted===true) ? true : videos.every(v=>v.muted===false) ? false : null,
         };
     };
     /**
@@ -163,6 +164,7 @@
             muted: Boolean(videoMuted),
             blocked: Boolean(applied.blocked),
             hasVideo: Boolean(applied.hasVideo),
+            actualMuted: applied.actualMuted,
         };
     };
     const setBackgroundTone = (tone) => {

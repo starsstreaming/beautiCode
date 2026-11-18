@@ -607,7 +607,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     if (arg === '--dsh-home' || arg === '--plugin-home') {
       if (!argv[i + 1] || argv[i + 1].startsWith('-')) throw new Error(`Missing value for ${arg}`);
       i += 1;
-    } else if (['--help', '-h', '--version', '-v', '--remove'].includes(arg)) {
+    } else if (['--help', '-h', '--version', '-v', '--remove', '--status'].includes(arg)) {
       actions.push(arg === '-h' ? '--help' : arg === '-v' ? '--version' : arg);
     } else {
       throw new Error(`Unknown argument: ${arg}. Use --help.`);
@@ -616,7 +616,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (new Set(actions).size > 1) throw new Error('Conflicting actions. Use --help.');
   const action = actions[0] || 'install';
   if (action === '--help') {
-    const help = 'Usage: beauticode-dsh [--remove] [--dsh-home PATH] [--plugin-home PATH]\nNo action: install. --help: show help. --version: show version.\nInstallation does not launch DeepSeek Harness.';
+    const help = 'Usage: beauticode-dsh [--remove] [--dsh-home PATH] [--plugin-home PATH]\nNo action: install. --help: show help. --version: show version. --status: inspect plugin files without writing.\nInstallation does not launch DeepSeek Harness.';
     console.log(help);
     return { help };
   }
@@ -633,6 +633,12 @@ export async function runCli(argv = process.argv.slice(2)) {
     pluginHome,
     legacyPluginHome: requestedPluginHome ? null : legacyDefaultPluginHome(),
   };
+  if (action === '--status') {
+    const filesPresent = await isManagedPluginDirectory(path.resolve(pluginHome));
+    const result = {ok:true,pluginHome:path.resolve(pluginHome),filesPresent,state:filesPresent?'plugin-files-present':'not-installed',wiring:'not-verified',liveVerified:false};
+    console.log(JSON.stringify(result,null,2));
+    return result;
+  }
   if (action === '--remove') return uninstall(opts);
   return install(opts);
 }

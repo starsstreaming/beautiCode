@@ -1,3 +1,4 @@
+import type { AudioWindowOutcome } from "./host-applier.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -472,6 +473,9 @@ export class BeautiSession implements HostSession {
    * video keeps playing muted and `blocked: true` is returned.
    */
   async setMuted(muted: boolean): Promise<{
+    outcomes?: AudioWindowOutcome[];
+    partial?: boolean;
+    actualMuted?: boolean|null;
     ok: boolean;
     muted: boolean;
     blocked: boolean;

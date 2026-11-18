@@ -85,6 +85,7 @@
                 muted: Boolean(controls.muted),
                 blocked: Boolean(applied.blocked),
                 hasVideo: Boolean(applied.hasVideo),
+                actualMuted: applied.actualMuted,
             };
         },
         /** Current <video> currentTime/duration for theme progress persistence. */
