@@ -27,8 +27,10 @@
 import { spawn, spawnSync, execSync } from 'node:child_process';
 import { isManagedWorkBuddyRunner, readGuardianProcess } from './guardian-process.mjs';
 import fs from 'node:fs';
+import { workbuddyWindowsPaths, workbuddyWindowsWiring } from './workbuddy-windows-wiring.mjs';
+import { commitWorkbuddyInstall } from './workbuddy-install-transaction.mjs';
 import { workbuddyLinuxPaths, workbuddyLinuxWiring } from './workbuddy-linux-wiring.mjs';
-import { updateOwnedPort } from './windows-owned-env.mjs';
+
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,14 +40,14 @@ import {
   beautiCodeLocalRoot,
   discardStableRuntime,
   hostRuntimeRoot,
-  renderWindowsStartupVbs,
+  renderRuntimeLauncherPs1,
+  renderRuntimeLauncherSh,
   renderXdgDesktopEntry,
   resolveNodeExecutable,
   stableRuntimeRoot,
   startDetachedLauncher,
   startupDirectory,
   syncStableRuntime,
-  writeTextAtomic,
 } from './portable-runtime.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -197,8 +199,8 @@ async function prepareStableRuntime() {
     activate: false,
   });
   try {
-    await resolveNodeExecutable({ stableRoot: runtime.hostRoot });
-    return await activateStableRuntime(runtime, { startupLogPath: PLAT === 'linux' ? LINUX_LOG : WIN_LOG });
+    runtime.node = await resolveNodeExecutable({ stableRoot: runtime.hostRoot });
+    return runtime;
   } catch (error) {
     await discardStableRuntime(runtime);
     throw error;
@@ -210,8 +212,7 @@ const LAUNCHER_MAC = path.join(home, 'Library/LaunchAgents/com.beauticode.wb-run
 const MAC_LOG = path.join(home, 'Library/Logs/beauticode-wb-runner.log');
 const STABLE_ROOT = stableRuntimeRoot(process.env, home);
 const STABLE_HOST_ROOT = hostRuntimeRoot(STABLE_ROOT, 'workbuddy');
-const STARTUP_VBS = path.join(home, 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/beauticode-wb-runner.vbs');
-const LEGACY_STARTUP_VBS = path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'beauticode-wb-runner.vbs');
+const STARTUP_VBS = workbuddyWindowsPaths(process.env, home).startup;
 const WIN_LOG = path.join(
   process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'),
   'beauticode', 'logs', 'wb-runner.log',
@@ -241,7 +242,6 @@ const macPlist = () => `<?xml version="1.0" encoding="UTF-8"?>
   <key>StandardErrorPath</key><string>${MAC_LOG}</string>
 </dict></plist>`;
 
-const winVbs = (launcher) => renderWindowsStartupVbs({ launcher, args: ['--watchdog'] });
 
 function shSingleQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
@@ -284,28 +284,14 @@ function statusMac() {
 }
 
 async function installWin(runtime) {
-  updateOwnedPort({ journal: path.join(DATA_DIR, 'workbuddy-env-ownership.json'), port });
+  const transaction = workbuddyWindowsWiring({env:process.env,home,launcher:runtime.launcher,journal:path.join(DATA_DIR,'workbuddy-env-ownership.json')}).install(port);
   log('  ✓ 用户端口配置已备份、写入并回读验证');
-  broadcastWindowsEnvironment();
-  log('  ✓ 已广播环境变更（无需注销即可让后续原图标启动继承端口）');
-  fs.mkdirSync(path.dirname(STARTUP_VBS), { recursive: true });
-  const startupContent = winVbs(runtime.launcher);
-  let currentStartupContent = null;
-  try { currentStartupContent = fs.readFileSync(STARTUP_VBS, 'utf8'); }
-  catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  if (currentStartupContent !== startupContent) await writeTextAtomic(STARTUP_VBS, startupContent);
-  if (path.resolve(LEGACY_STARTUP_VBS) !== path.resolve(STARTUP_VBS)) fs.rmSync(LEGACY_STARTUP_VBS, { force: true });
-  log(currentStartupContent === startupContent
-    ? '  ✓「启动」文件夹 VBS 已是当前配置（跳过无变化替换）'
-    : '  ✓ 已写入「启动」文件夹 VBS（登录自启、隐藏窗口）');
-  if (process.env[ENV_KEY] !== port) {
-    log('  ⚠ 当前会话还没继承新 env：注销重登一次，或先手动带 env 启动一次 WorkBuddy');
-  }
+
+  /* Startup ownership and reversible file writes are handled by the wiring transaction. */
+  return transaction;
 }
 function uninstallWin() {
-  fs.rmSync(STARTUP_VBS, { force: true });
-  fs.rmSync(LEGACY_STARTUP_VBS, { force: true });
-  const restored = updateOwnedPort({ journal: path.join(DATA_DIR, 'workbuddy-env-ownership.json'), remove: true });
+  const restored = workbuddyWindowsWiring({env:process.env,home,launcher:path.join(STABLE_HOST_ROOT,'launcher.ps1'),journal:path.join(DATA_DIR,'workbuddy-env-ownership.json')}).remove();
   broadcastWindowsEnvironment();
   log(restored === 'restored' ? '  ✓ 已拆除启动项并恢复原用户环境变量' : '  ✓ 已拆除启动项；未受本次安装管理或后来修改的环境变量已保留');
 }
@@ -323,8 +309,9 @@ function statusWin() {
 
 function installLinux(runtime) {
   if (!runtime) throw new Error('Stable WorkBuddy runtime required.');
-  workbuddyLinuxWiring({ env: process.env, home, launcher: runtime.launcher }).install(port);
+  const transaction = workbuddyLinuxWiring({ env: process.env, home, launcher: runtime.launcher }).install(port);
   log('  ✓ environment.d + autostart 已写入（下次登录生效；当前会话可手动 export）');
+  return transaction;
 }
 function uninstallLinux() {
   workbuddyLinuxWiring({ env: process.env, home, launcher: path.join(STABLE_HOST_ROOT, 'launcher.sh') }).remove();
@@ -473,8 +460,15 @@ if (PACKAGED_RUNTIME) {
 // the stable runtime and verified Node are ready.
 log(`安装 beautiCode × WorkBuddy（${PLAT}，端口 ${port}）：`);
 const stableRuntime = PLAT === 'win32' || PLAT === 'linux' ? await prepareStableRuntime() : null;
-writeConfiguredPort(port);
-if (PLAT === 'darwin') installMac(); else if (PLAT === 'win32') await installWin(stableRuntime); else installLinux(stableRuntime);
+if(stableRuntime) {
+  await commitWorkbuddyInstall({
+    runtime:stableRuntime, expectedLauncher:()=>PLAT==='linux'?renderRuntimeLauncherSh({host:'workbuddy',startupLogPath:LINUX_LOG,nodePath:stableRuntime.node.path}):renderRuntimeLauncherPs1({host:'workbuddy',startupLogPath:WIN_LOG}), portFile:PORT_FILE, portText:JSON.stringify({port:Number(port)},null,2)+'\n',
+    install:()=>PLAT==='win32'?installWin(stableRuntime):installLinux(stableRuntime),
+    activate:()=>activateStableRuntime(stableRuntime,{nodePath:stableRuntime.node.path,startupLogPath:PLAT==='linux'?LINUX_LOG:WIN_LOG}),
+    discard:()=>discardStableRuntime(stableRuntime),
+  });
+  if (PLAT === 'win32') broadcastWindowsEnvironment();
+} else { writeConfiguredPort(port); installMac(); }
 
 startDaemon(stableRuntime);
 
