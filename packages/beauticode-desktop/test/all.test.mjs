@@ -40,6 +40,11 @@ function fakeOptions(hostFiles, spawnSync) {
   };
 }
 
+test("aggregate install discovers Doubao in its Application directory", () => {
+  const options = fakeOptions(["C:/Users/test/AppData/Local/Doubao/Application/Doubao.exe"], () => ({ status: 0 }));
+  assert.equal(detectHostAvailability("doubao", options).available, true);
+});
+
 test("all install skips missing hosts and updates detected hosts without launching them", () => {
   const invocations = [];
   const options = fakeOptions([

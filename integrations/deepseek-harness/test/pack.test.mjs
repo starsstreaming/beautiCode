@@ -87,9 +87,8 @@ test("installer backs up and deduplicates its own duplicate loader entries", asy
     ].join("\n"), "utf8");
     await runCli(["--dsh-home", dshHome, "--plugin-home", pluginHome]);
     const patch = await fs.readFile(path.join(web, "cordis.patch.yml"), "utf8");
-    // The plugin package carries the canonical loader. The profile must not
-    // retain a second managed loader, but unrelated profile entries survive.
-    assert.equal((patch.match(/id:\s*beauticode-bridge/g) || []).length, 0);
+    // This profile has no beautiCode bundle, so one usable overlay survives.
+    assert.equal((patch.match(/id:\s*beauticode-bridge/g) || []).length, 1);
     assert.match(patch, /id:\s*unrelated-plugin/);
     const pluginPatch = await fs.readFile(path.join(pluginHome, "cordis.patch.yml"), "utf8");
     assert.equal((pluginPatch.match(/id:\s*beauticode-bridge/g) || []).length, 1);
@@ -98,6 +97,26 @@ test("installer backs up and deduplicates its own duplicate loader entries", asy
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("installer follows the selected DSH home junction and reuses its existing plugin link", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-dsh-relocated-home-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const home = path.join(root, "dsh");
+  const alias = path.join(root, ".dsh");
+  const plugin = path.join(home, "plugins", "beauticode-dsh");
+  const profile = path.join(home, "profiles", "web");
+  const link = path.join(profile, "node_modules", "beauticode-dsh");
+  const type = process.platform === "win32" ? "junction" : "dir";
+  await fs.mkdir(path.dirname(link), { recursive: true });
+  await fs.symlink(home, alias, type);
+  await fs.writeFile(path.join(profile, "package.json"), JSON.stringify({ dependencies: {} }));
+  await runCli(["--dsh-home", home]);
+  await fs.unlink(link);
+  await fs.symlink(path.join(alias, "plugins", "beauticode-dsh"), link, type);
+  const result = await runCli(["--dsh-home", alias]);
+  assert.equal(await fs.realpath(result.dest), await fs.realpath(plugin));
+  assert.equal(await fs.realpath(link), await fs.realpath(plugin));
 });
 
 test("installer refuses to overwrite or remove an unrelated plugin-home directory", async () => {

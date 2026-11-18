@@ -83,7 +83,10 @@ export function isDesktopTarget(
 ): boolean {
   if (target.type !== "page") return false;
   const identity = spec.targetIdentity;
-  if (!identity) return target.url === spec.targetUrl;
+  if (!identity) {
+    const route = spec.targetUrl.replace(/\/$/, "");
+    return target.url === route || target.url === route + "/";
+  }
   let parsed: URL;
   try {
     parsed = new URL(target.url);

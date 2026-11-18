@@ -44,6 +44,10 @@ test('DSH status follows the profile dependency to the bundled bridge patch', t 
   const manifest = path.join(profile, 'package.json');
   fs.writeFileSync(manifest, JSON.stringify({ dependencies: { 'beauticode-dsh': `link:${plugin.replaceAll('\\', '/')}` } }));
   const opts = { home: root, env: { DSH_HOME: root }, platform: 'linux', runtimeRoot: root };
+  assert.equal(getHostStatus('dsh', opts).installed, false);
+  const configured = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  configured.dsh = { profile: { bundles: ['@deepseek-ai/dsh-base', 'beauticode-dsh'] } };
+  fs.writeFileSync(manifest, JSON.stringify(configured));
   assert.equal(getHostStatus('dsh', opts).installed, true);
   assert.equal(getAllStatus(opts).hosts.find(h => h.host === 'dsh').readiness, 'plugin-wired');
   fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), '- remove:\n    - id: beauticode-bridge\n');
@@ -68,5 +72,15 @@ test('a staged DSH CLI install into an existing temporary profile is recognized'
   await runCli(['--dsh-home', home, '--plugin-home', path.join(root, 'installed-plugin')]);
   const status = getHostStatus('dsh', { home: root, env: { DSH_HOME: home }, platform: process.platform, runtimeRoot: root });
   assert.equal(status.installed, true);
-  assert.equal(fs.existsSync(path.join(profile, 'cordis.patch.yml')), false);
+  const patch = path.join(profile, 'cordis.patch.yml');
+  assert.match(fs.readFileSync(patch, 'utf8'), /id: beauticode-bridge/);
+  const manifest = path.join(profile, 'package.json');
+  const configured = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  configured.dsh = { profile: { bundles: ['@deepseek-ai/dsh-base', 'beauticode-dsh'] } };
+  fs.writeFileSync(manifest, JSON.stringify(configured));
+  await runCli(['--dsh-home', home, '--plugin-home', path.join(root, 'installed-plugin')]);
+  assert.doesNotMatch(fs.readFileSync(patch, 'utf8'), /id: beauticode-bridge/);
+  await runCli(['--remove', '--dsh-home', home, '--plugin-home', path.join(root, 'installed-plugin')]);
+  const after = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  assert.deepEqual(after.dsh.profile.bundles, ['@deepseek-ai/dsh-base']);
 });

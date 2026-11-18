@@ -2,6 +2,8 @@
 
 beautiCode 通过 DeepSeek Harness 的 Cordis 插件接口接入（`beauticode-dsh`），不修改 DSH 源码，也不依赖 Chromium 调试端口。插件通过 DSH 的结构化页面注入同时支持 Web 和官方 Desktop；后者的页面地址是 `dsh-app://app/`，Host 默认端口是 `19387`。DSH 由你自己启动；beautiCode 只挂插件、不替代、不重启你的 DSH。Codex Desktop 仍由托盘按原路径拉起，与本节无关。
 
+Web 安装器按 profile 的 dsh.profile.bundles 判断插件是否已经注册为包层。已注册时保留包层并备份、移除重复的补丁条目；未注册时由当前 profile 的补丁挂载。已有 DSH 主目录改用目录联接点时，安装器解析该目录的真实位置，继续检查插件子目录及链接归属。
+
 ## 已实现能力
 
 - 图片背景、MP4 视频背景与清除。首页（`data-phase="hero"`）壁纸保持原亮度；进入会话（`active` / `settling`）后才压暗。

@@ -11,14 +11,16 @@ export function inspectDshInstallation({ home, env, exists = fs.existsSync, read
     try { profilePatch = readFile(path.join(profile, 'cordis.patch.yml'), 'utf8'); }
     catch (error) { if (error.code !== 'ENOENT') continue; }
     const patches = [profilePatch];
-    // The installer removes a duplicate profile bridge when the linked package
-    // ships its own patch. Require the actual dependency and matching link target.
+    // A dependency exposes its files to the loader. The profile's bundle list
+    // determines whether the dependency's patch is part of the composition.
     if (!/\bbeauticode-bridge\b/.test(profilePatch)) {
       try {
         const manifest = JSON.parse(readFile(path.join(profile, 'package.json'), 'utf8'));
         const dependency = manifest.dependencies?.['beauticode-dsh'];
+        const bundles = manifest.dsh?.profile?.bundles;
         const plugin = path.join(profile, 'node_modules', 'beauticode-dsh');
-        if (typeof dependency === 'string' && dependency.startsWith('link:') && dependency.length > 5) {
+        if (Array.isArray(bundles) && bundles.includes('beauticode-dsh') &&
+            typeof dependency === 'string' && dependency.startsWith('link:') && dependency.length > 5) {
           const target = path.resolve(profile, dependency.slice(5));
           if (fs.realpathSync.native(plugin) === fs.realpathSync.native(target)) {
             patches.push(readFile(path.join(plugin, 'cordis.patch.yml'), 'utf8'));

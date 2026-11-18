@@ -138,23 +138,27 @@ test("loopback media server: token, range, origin, identity drift", async () => 
 
 test("fast staging rejects local media drift without requiring a full-file hash", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-media-fast-"));
+  const media = new MediaServerController();
   try {
     const videoPath = path.join(root, "background.mp4");
     await fs.writeFile(videoPath, mp4Fixture("FAST"));
 
-    const media = new MediaServerController();
     const staged = await media.stage(videoPath, { validation: "fast" });
     assert.ok(staged);
     assert.equal(staged.validation, "fast");
     await media.commit(staged);
 
     await fs.writeFile(videoPath, mp4Fixture("DRFT"));
+    // Fast staging checks file metadata. Windows can assign the same time to
+    // two immediate writes of equal size, so make the drift explicit.
+    const changedAt = new Date(staged.mtimeMs + 2000);
+    await fs.utimes(videoPath, changedAt, changedAt);
     const changed = await fetch(staged.url, {
       headers: { [MEDIA_TOKEN_HEADER_CANON]: staged.token },
     });
     assert.equal(changed.status, 404);
-    await media.close();
   } finally {
+    await media.close();
     await fs.rm(root, { recursive: true, force: true });
   }
 });

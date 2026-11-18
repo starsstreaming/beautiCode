@@ -17,6 +17,9 @@ export function doubaoExecutableCandidates(options: CandidateOptions = {}): stri
   const realpath = options.realpath || fs.realpathSync.native;
   const values = [
     env.LOCALAPPDATA
+      ? path.join(env.LOCALAPPDATA, "Doubao", "Application", "Doubao.exe")
+      : "",
+    env.LOCALAPPDATA
       ? path.join(env.LOCALAPPDATA, "Doubao", "Doubao.exe")
       : "",
     env.LOCALAPPDATA
