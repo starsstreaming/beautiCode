@@ -445,6 +445,11 @@ export function apply(ctx, config = {}) {
       }),
       ctx.webServer.register({
         kind: "exact",
+        path: "/__beauticode/ui/gallery/operation",
+        handler: (req,res) => ui.galleryOperation(req,res),
+      }),
+      ctx.webServer.register({
+        kind: "exact",
         path: "/__beauticode/ui/gallery/install",
         handler: (req, res) => ui.galleryInstall(req, res),
       }),

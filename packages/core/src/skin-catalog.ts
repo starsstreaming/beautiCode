@@ -231,13 +231,14 @@ async function fetchJson(
   target: URL,
   maxBytes: number,
   fetchImpl: FetchImpl,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   let response: Response;
   try {
     response = await fetchImpl(target, {
       redirect: "error",
       headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]) : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     if (error instanceof SkinCatalogError) throw error;
@@ -262,21 +263,23 @@ async function fetchJson(
 export async function listApprovedSkins(options: {
   query?: { q?: string; type?: "image" | "video" };
   fetchImpl?: FetchImpl;
+  signal?: AbortSignal;
 } = {}): Promise<ApprovedSkin[]> {
   const target = requestUrl("/api/catalog", options.query);
-  const body = await fetchJson(target, CATALOG_MAX_BYTES, options.fetchImpl ?? fetch);
+  const body = await fetchJson(target, CATALOG_MAX_BYTES, options.fetchImpl ?? fetch, options.signal);
   return parseApprovedSkinCatalog(body);
 }
 
 export async function getApprovedSkin(
   id: string,
-  options: { fetchImpl?: FetchImpl } = {},
+  options: { fetchImpl?: FetchImpl; signal?: AbortSignal } = {},
 ): Promise<ApprovedSkin> {
   assertSafeSkinId(id);
   const body = await fetchJson(
     requestUrl(`/api/skins/${id}`),
     METADATA_MAX_BYTES,
     options.fetchImpl ?? fetch,
+    options.signal,
   );
   const object = assertObject(body, "Skin metadata is malformed.");
   return parseApprovedSkin(object.skin ?? object);

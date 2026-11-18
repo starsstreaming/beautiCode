@@ -805,6 +805,7 @@ export function createBeauticodeUi({
       return gallery.catalog(req, res, sendJson, isSameOrigin);
     },
 
+    async galleryOperation(req,res) { return gallery.operation(req,res,sendJson,isSameOrigin,readJson); },
     async galleryInstall(req, res) {
       return gallery.install(req, res, sendJson, isSameOrigin, readJson);
     },
