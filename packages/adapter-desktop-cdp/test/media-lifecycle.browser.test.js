@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { buildDesktopBackgroundInjection, buildDesktopBackgroundCleanup } from '../dist/index.js';
 import { CURSOR_CDP_SPEC } from '../../adapter-cursor/dist/spec.js';
+import { BACKDROP_SELECTORS } from '../../adapter-workbuddy/dist/contract.js';
 import { buildMediaHealthProbe, mediaHealthState, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from '../../core/dist/index.js';
 
 const browserTest=process.env.BEAUTICODE_PLAYWRIGHT_MODULE?test:test.skip;
@@ -59,20 +60,39 @@ browserTest('localized Cursor anchors retain structural checks and picker format
 });
 browserTest('media health distinguishes empty, broken, hidden, and known occluded backgrounds',async t=>{
   const page=await fixture(t);
-  const probe=buildMediaHealthProbe(['.layout-window-frame__body']);
+  const probe=buildMediaHealthProbe(BACKDROP_SELECTORS);
   assert.equal(mediaHealthState(await page.evaluate(probe)),'no-background');
   await apply(page,'fast.png','h');await page.waitForFunction(()=>window.__bcDesktopApplyResult.h?.status==='ok');
   assert.equal(mediaHealthState(await page.evaluate(probe)),'presentation-unverified');
   await page.evaluate(()=>{const cover=document.createElement('div');cover.className='layout-window-frame__body';cover.style.cssText='position:fixed;inset:0;background:rgb(248,253,255)';document.body.append(cover)});
   assert.equal(mediaHealthState(await page.evaluate(probe)),'injected-but-occluded');
-  for (const background of ['color(srgb 1 1 1 / 0.4)', 'color-mix(in srgb, white 40%, transparent)', 'linear-gradient(transparent, transparent)']) {
+  for (const background of ['color(srgb 1 1 1 / 0.82)', 'color-mix(in srgb, white 40%, transparent)', 'linear-gradient(transparent, transparent)']) {
     await page.locator('.layout-window-frame__body').evaluate((n, background) => n.style.background = background, background);
     assert.equal(mediaHealthState(await page.evaluate(probe)), 'presentation-unverified', background);
   }
+  const cover = page.locator('.layout-window-frame__body');
+  await cover.evaluate(n => n.style.background = 'color(srgb 1 1 1 / 0.95)');
+  assert.deepEqual((await page.evaluate(probe)).opaqueSelectors, ['.layout-window-frame__body']);
+  await cover.evaluate(n => n.style.transform = 'translateY(100vh)');
+  assert.deepEqual((await page.evaluate(probe)).opaqueSelectors, []);
   await page.locator('.layout-window-frame__body').evaluate(n=>n.style.display='none');
   assert.equal(mediaHealthState(await page.evaluate(probe)),'presentation-unverified');
   await page.locator('.bc-media').evaluate(n=>n.style.visibility='hidden');
   assert.equal(mediaHealthState(await page.evaluate(probe)),'injected-but-occluded');
+
+  await page.evaluate(() => {
+    const video = document.createElement('video');
+    video.className = 'bc-media';
+    Object.defineProperties(video, {
+      readyState: { configurable: true, value: HTMLMediaElement.HAVE_METADATA },
+      videoWidth: { value: 1280 },
+    });
+    document.getElementById('beauticode-bg-stage').replaceChildren(video);
+  });
+  assert.equal(mediaHealthState(await page.evaluate(probe)), 'media-not-ready');
+  await page.locator('video.bc-media').evaluate(video =>
+    Object.defineProperty(video, 'readyState', { value: HTMLMediaElement.HAVE_CURRENT_DATA }));
+  assert.equal((await page.evaluate(probe)).media, true);
 });
 browserTest('atmosphere respects reduced motion and resumes when preference changes',async t=>{
   const page=await fixture(t);

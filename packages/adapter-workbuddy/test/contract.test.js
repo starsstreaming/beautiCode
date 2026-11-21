@@ -139,6 +139,10 @@ test("wallpaper area is transparent and the scroll fade is killed", () => {
     BACKDROP_SELECTORS.includes(".wb-home-route"),
     "the opaque WorkBuddy 5.5.6 home route must not cover the right side of the wallpaper",
   );
+  assert.ok(
+    BACKDROP_SELECTORS.includes(".layout-window-frame__body"),
+    "the WorkBuddy 5.11.3 layout body must be transparent",
+  );
   for (const selector of BACKDROP_SELECTORS) {
     assert.ok(css.includes(selector), `backdrop selector ${selector} missing`);
   }
