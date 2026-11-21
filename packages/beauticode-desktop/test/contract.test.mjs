@@ -25,7 +25,7 @@ test("CLI help exposes all supported hosts and lifecycle commands", () => {
     windowsHide: true,
   });
   assert.equal(result.status, 0, result.stderr);
-  for (const host of ["dsh", "codex", "workbuddy", "cursor", "doubao"]) {
+  for (const host of ["dsh", "codex", "workbuddy", "cursor", "doubao", "doubaowork"]) {
     assert.match(result.stdout, new RegExp(`\\b${host}\\b`));
   }
   for (const command of ["install", "status", "uninstall"]) {
@@ -34,9 +34,9 @@ test("CLI help exposes all supported hosts and lifecycle commands", () => {
   assert.match(result.stdout, /all <install\|status\|health>/);
 });
 
-test("public route parser accepts only the five hosts and three lifecycle commands", async () => {
+test("public route parser accepts only the six hosts and three lifecycle commands", async () => {
   const { HOSTS, parseCommand } = await import(pathToFileURL(path.join(root, "src", "index.mjs")).href);
-  assert.deepEqual(HOSTS, ["dsh", "codex", "workbuddy", "cursor", "doubao"]);
+  assert.deepEqual(HOSTS, ["dsh", "codex", "workbuddy", "cursor", "doubao", "doubaowork"]);
   assert.deepEqual(parseCommand(["--help"]), { kind: "help" });
   assert.deepEqual(parseCommand(["cursor", "status"]), { kind: "host", host: "cursor", command: "status" });
   assert.deepEqual(parseCommand(["dsh", "install"]), { kind: "host", host: "dsh", command: "install" });

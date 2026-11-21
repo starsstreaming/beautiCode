@@ -32,7 +32,7 @@ test("packed Codex and WorkBuddy runtimes include new recovery modules", async (
   } finally { await fs.rm(dest, { recursive: true, force: true }); }
 });
 
-test("staging produces one self-contained runtime for all five hosts", async () => {
+test("staging produces one self-contained runtime for all six hosts", async () => {
   const dest = await fs.mkdtemp(path.join(os.tmpdir(), "beauticode-desktop-pack-"));
   try {
     await stageDesktopAggregate(dest, { build: false });
@@ -86,6 +86,7 @@ test("staged host runtime entrypoints import without workspace resolution", asyn
       "runtime/desktop/packages/adapter-desktop-cdp/dist/index.js",
       "runtime/desktop/packages/adapter-cursor/dist/index.js",
       "runtime/desktop/packages/adapter-doubao/dist/index.js",
+      "runtime/desktop/packages/adapter-doubaowork/dist/index.js",
     ]) {
       await import(pathToFileURL(path.join(dest, relative)).href);
     }

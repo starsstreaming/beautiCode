@@ -18,7 +18,7 @@ test("each host resolves install and uninstall to a package-local script", () =>
       assert.equal(route.host, host);
       assert.equal(route.command, command);
       assert.equal(route.script.startsWith(runtimeRoot + path.sep), true);
-      assert.equal(route.script.includes("desktop"), host === "cursor" || host === "doubao");
+      assert.equal(route.script.includes("desktop"), host === "cursor" || host === "doubao" || host === "doubaowork");
       assert.ok(Array.isArray(route.args));
       assert.equal(path.isAbsolute(route.script), true);
     }

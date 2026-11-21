@@ -26,8 +26,8 @@ function parseArgs(argv) {
     else if (arg === '--no-repair') out.noRepair = true;
     else if (arg === '--pid-file') out.pidFile = String(argv[++i] || '');
   }
-  if (out.host !== 'cursor' && out.host !== 'doubao') {
-    throw new Error('用法：node desktop-cdp-runner.mjs --host cursor|doubao [--once|--clean|--watchdog|--no-repair]');
+  if (out.host !== 'cursor' && out.host !== 'doubao' && out.host !== 'doubaowork') {
+    throw new Error('用法：node desktop-cdp-runner.mjs --host cursor|doubao|doubaowork [--once|--clean|--watchdog|--no-repair]');
   }
   return out;
 }
@@ -54,17 +54,22 @@ if (args.watchdog) {
   const stopSignals = new Set(['SIGINT', 'SIGTERM']);
   let stopping = false;
   let child = null;
+  let delay = 1000;
   const start = () => {
     if (stopping) return;
     child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...childArgs], {
       stdio: 'inherit', windowsHide: true,
     });
     let ended = false;
+    const startedAt = Date.now();
     const restart = () => {
       if (ended) return;
       ended = true;
       child = null;
-      if (!stopping) setTimeout(start, 1000);
+      if (!stopping) {
+        delay = Date.now() - startedAt > 30_000 ? 1000 : Math.min(30_000, delay * 2);
+        setTimeout(start, delay);
+      }
     };
     child.once('exit', restart);
     child.once('error', restart);
@@ -90,13 +95,17 @@ const shared = await loadModule('@beauticode/adapter-desktop-cdp', '../packages/
 const core = await loadModule('@beauticode/core', '../packages/core/dist/index.js');
 const adapter = args.host === 'cursor'
   ? await loadModule('@beauticode/adapter-cursor', '../packages/adapter-cursor/dist/index.js')
-  : await loadModule('@beauticode/adapter-doubao', '../packages/adapter-doubao/dist/index.js');
-const spec = args.host === 'cursor' ? adapter.CURSOR_CDP_SPEC : adapter.DOUBAO_CDP_SPEC;
-const buildInjection = args.host === 'cursor'
-  ? adapter.buildCursorBackgroundInjection
+  : args.host === 'doubaowork'
+    ? await loadModule('@beauticode/adapter-doubaowork', '../packages/adapter-doubaowork/dist/index.js')
+    : await loadModule('@beauticode/adapter-doubao', '../packages/adapter-doubao/dist/index.js');
+const spec = args.host === 'cursor' ? adapter.CURSOR_CDP_SPEC
+  : args.host === 'doubaowork' ? adapter.DOUBAOWORK_CDP_SPEC
+  : adapter.DOUBAO_CDP_SPEC;
+const buildInjection = args.host === 'cursor' ? adapter.buildCursorBackgroundInjection
+  : args.host === 'doubaowork' ? adapter.buildDoubaoWorkBackgroundInjection
   : adapter.buildDoubaoBackgroundInjection;
-const buildCleanup = args.host === 'cursor'
-  ? adapter.buildCursorBackgroundCleanup
+const buildCleanup = args.host === 'cursor' ? adapter.buildCursorBackgroundCleanup
+  : args.host === 'doubaowork' ? adapter.buildDoubaoWorkBackgroundCleanup
   : adapter.buildDoubaoBackgroundCleanup;
 
 const ts = () => new Date().toISOString().slice(11, 23);
@@ -111,7 +120,17 @@ const dataRoot = process.platform === 'linux'
   ? path.join(process.env.LOCALAPPDATA || (process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME) ? process.env.XDG_DATA_HOME : path.join(os.homedir(), '.local', 'share')), 'beautiCode', 'hosts', args.host)
   : path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'beauticode', 'hosts', args.host);
 const stateFile = path.join(dataRoot, 'state.json');
+const runnerLog = path.join(dataRoot, 'runner.log');
 fs.mkdirSync(dataRoot, { recursive: true });
+function writeRunnerLog(line) {
+  process.stderr.write(line);
+  try {
+    if (fs.existsSync(runnerLog) && fs.statSync(runnerLog).size > 1_048_576) fs.renameSync(runnerLog, `${runnerLog}.previous`);
+    fs.appendFileSync(runnerLog, line);
+  } catch { /* A locked log must not stop injection. */ }
+}
+log.info = (...parts) => writeRunnerLog(`[${ts()}] [${args.host}] ${parts.join(' ')}\n`);
+log.warn = (...parts) => writeRunnerLog(`[${ts()}] [${args.host}:warn] ${parts.join(' ')}\n`);
 
 function readState() {
   try {
@@ -123,8 +142,9 @@ function readState() {
 }
 
 function writeState(raw) {
-  if (typeof raw !== 'string' || Buffer.byteLength(raw) > 256 * 1024) return;
-  JSON.parse(raw);
+  if (typeof raw !== 'string' || Buffer.byteLength(raw) > 256 * 1024) throw new Error('背景状态缺失或过大。');
+  const state = JSON.parse(raw);
+  if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('背景状态格式无效。');
   const tmp = `${stateFile}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, raw, 'utf8');
   fs.renameSync(tmp, stateFile);
@@ -252,7 +272,7 @@ async function pickFileNative() {
     '$owner.Opacity=0.01',
     '$owner.TopMost=$true',
     '$dialog=New-Object System.Windows.Forms.OpenFileDialog',
-    `$dialog.Filter='媒体|${[...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].map(ext => '*' + ext).join(';')}'`,
+    `$dialog.Filter='媒体|${[...core.IMAGE_EXTENSIONS, ...core.VIDEO_EXTENSIONS].map(ext => '*' + ext).join(';')}${args.host === 'doubaowork' ? '|Wallpaper Engine 项目|project.json' : ''}'`,
     '$dialog.Multiselect=$false', '$dialog.CheckFileExists=$true', '$dialog.RestoreDirectory=$true',
     "$dialog.Title='选择背景图片或视频'",
     'try{[void]$owner.Show();[void]$owner.Activate();[void]$owner.BringToFront();[System.Windows.Forms.Application]::DoEvents();$result=$dialog.ShowDialog($owner);if($result -eq [System.Windows.Forms.DialogResult]::OK){[Console]::WriteLine($dialog.FileName)}}finally{$dialog.Dispose();$owner.Close();$owner.Dispose()}',
@@ -298,12 +318,19 @@ async function validateMedia(file) {
   return { path: stable.path, identity: stable.identity };
 }
 
-async function setFileInput(connection, file, meta) {
-  const checked = await validateMedia(file);
+async function setFileInput(connection, file, meta, project = null) {
+  if (!project && args.host === 'doubaowork' && typeof file === 'string' &&
+      path.basename(file).toLowerCase() === 'project.json') {
+    project = await core.resolveWallpaperProject(file);
+  }
+  const checked = await validateMedia(project?.mediaPath ?? file);
   const resolved = checked.path;
   assertStableMedia(resolved, checked.identity);
   const requestId = meta.requestId || `runner-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-  const prepared = { ...meta, path: resolved, requestId };
+  const prepared = {
+    ...meta, path: resolved, themePath: project?.projectPath ?? resolved, themeType: project?.type,
+    suggestedName: project?.title, requestId,
+  };
   await evaluate(connection, `window.__bcDesktopPrepareFile(${JSON.stringify(prepared)})`);
   await connection.send('DOM.enable');
   const document = await connection.send('DOM.getDocument', { depth: 1 });
@@ -316,7 +343,7 @@ async function setFileInput(connection, file, meta) {
   await connection.send('DOM.setFileInputFiles', { files: [resolved], nodeId });
   assertStableMedia(resolved, checked.identity);
   await evaluate(connection, `document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new Event('change',{bubbles:true}))`);
-  if (meta.mode === 'gallery' || meta.mode === 'theme' || meta.mode === 'restore') {
+  if (meta.mode !== 'import') {
     const deadline = Date.now() + 35_000;
     while (Date.now() < deadline) {
       const result = await evaluate(connection, `(() => { const results=window.__bcDesktopApplyResult; const result=results&&results[${JSON.stringify(requestId)}]; if(result)delete results[${JSON.stringify(requestId)}]; return result; })()`);
@@ -476,81 +503,152 @@ function reportRuntimeDiagnosis(state) {
   }
 }
 
-async function runSession(endpoint) {
+async function runSession(endpoint, handoff) {
   const wsUrl = shared.assertLoopbackDebuggerUrl(endpoint.target.webSocketDebuggerUrl, endpoint.port);
   const connection = await openWs(wsUrl);
+  const closed = new Promise(resolve => connection.ws.addEventListener('close', resolve, { once: true }));
+  let interval;
+  let nextEndpoint = null;
   activeConnection = connection;
-  await connection.send('Page.enable');
-  if (args.clean) {
-    await evaluate(connection, buildCleanup());
-    connection.close();
-    return 'done';
-  }
-  const port = await startGallery();
-  const galleryUrl = port ? `http://127.0.0.1:${port}/beauticode/gallery?t=${galleryToken}` : '';
-  try { await applyRuntime(connection, galleryUrl); }
-  catch (error) { activeConnection = null; connection.close(); throw error; }
-  log.info(`已注入 ${shared.safeTargetLabel(endpoint.target.url)} :${endpoint.port}`);
+  try {
+    await connection.send('Page.enable');
+    if (args.clean) {
+      await evaluate(connection, buildCleanup());
+      return 'done';
+    }
+    const port = await startGallery();
+    const galleryUrl = port ? `http://127.0.0.1:${port}/beauticode/gallery?t=${galleryToken}` : '';
+    if (handoff) await evaluate(connection, buildCleanup());
+    await applyRuntime(connection, galleryUrl);
+    log.info(`已注入 ${shared.safeTargetLabel(endpoint.target.url)} :${endpoint.port}`);
 
-  let busy = false;
-  let lastPick = 0;
-  let lastApply = '';
-  let lastSkin = 0;
-  let lastDirty = 0;
-  const tick = async () => {
-    if (busy) return;
-    busy = true;
-    try {
-      const snapshot = await evaluate(connection, `(() => { const a=document.querySelector(${JSON.stringify(spec.anchorSelector)}); const t=a?String(a.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase():''; return {pick:window.__bcDesktopPickRequest||0,apply:window.__bcDesktopApplyRequest||null,skin:window.__bcDesktopSkinCenterRequest||0,dirty:window.__bcDesktopPersistDirty||0,entry:!!document.getElementById('beauticode-${args.host}-background-entry'),style:!!document.getElementById('beauticode-${args.host}-background-style'),stage:!!document.getElementById('beauticode-bg-stage'),anchor:!!a,anchorTextMatches:!!a&&${JSON.stringify((spec.anchorTexts || [spec.anchorText]).map(t => t.toLowerCase()))}.some(label=>t.includes(label))}; })()`);
-      if (!snapshot.anchor || !snapshot.anchorTextMatches) {
-        reportRuntimeDiagnosis('host-ui-updated');
-        await evaluate(connection, buildCleanup());
-        return;
-      }
-      if (!snapshot.entry || !snapshot.style || !snapshot.stage) {
-        reportRuntimeDiagnosis(!snapshot.entry ? 'entry-missing' : 'partial-injection');
-        await applyRuntime(connection, galleryUrl);
-      } else {
-        reportRuntimeDiagnosis('ready');
-      }
-      if (snapshot.pick && snapshot.pick !== lastPick) {
-        lastPick = snapshot.pick;
-        await evaluate(connection, 'window.__bcDesktopPickRequest=0');
-        let picked = '';
-        try { picked = await pickFileNative(); } catch {}
-        if (picked) {
-          try { await setFileInput(connection, picked, { mode: 'import', save: false }); }
-          catch (error) {
-            // Surface rejected picks (e.g. unsupported format) instead of failing silently.
-            log.warn(`导入背景失败：${error.message}`);
-            await evaluate(connection, `window.__bcDesktopMessage&&window.__bcDesktopMessage(${JSON.stringify(String(error.message || spec.strings.missingFile))})`);
+    let busy = false;
+    let lastPick = 0;
+    let lastApply = '';
+    let lastSkin = 0;
+    let lastLibrary = '';
+    let lastDirty = 0;
+    let pageChecks = 0;
+    let library;
+    const snapshotExpression = `(() => {
+      const a = document.querySelector(${JSON.stringify(spec.anchorSelector)});
+      const label = a ? String(a.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase() : '';
+      return {
+        pick: window.__bcDesktopPickRequest || 0, apply: window.__bcDesktopApplyRequest || null,
+        skin: window.__bcDesktopSkinCenterRequest || 0, library: window.__bcDesktopLibraryRequest || null,
+        dirty: window.__bcDesktopPersistDirty || 0,
+        entry: !!document.getElementById('beauticode-${args.host}-background-entry'),
+        style: !!document.getElementById('beauticode-${args.host}-background-style'),
+        stage: !!document.getElementById('beauticode-bg-stage'),
+        anchor: !!a,
+        anchorTextMatches: !!a && (${Boolean(spec.settings)} ||
+          ${JSON.stringify((spec.anchorTexts || [spec.anchorText]).map(t => t.toLowerCase()))}.some(text => label.includes(text))),
+      };
+    })()`;
+
+    async function flushState() {
+      const snapshot = await evaluate(connection, `({
+        dirty: window.__bcDesktopPersistDirty || 0,
+        raw: window.__bcDesktopPersistGet?.(),
+      })`);
+      if (snapshot.dirty === lastDirty) return;
+      writeState(snapshot.raw);
+      lastDirty = snapshot.dirty;
+    }
+
+    async function considerPageSwitch() {
+      if (!spec.targetHostnames?.length || args.once || ++pageChecks % 11 !== 0) return;
+      const best = await shared.probeDesktopCdp(spec, endpoint.port, 700, { preferredTargetId: endpoint.target.id });
+      if (!best || best.target.id === endpoint.target.id) return;
+      await enqueueGalleryApply(async () => {
+        await flushState();
+        // Keep this window when a newer edit arrived during the disk write.
+        const result = await evaluate(connection, `(window.__bcDesktopPersistDirty || 0) === ${lastDirty} && (${buildCleanup()})`);
+        if (result !== 'cleaned') return;
+        nextEndpoint = best;
+        log.info('可见页面更大，改挂到当前窗口。');
+        connection.close();
+      });
+    }
+
+    const tick = async () => {
+      if (busy || connection.ws.readyState !== WebSocket.OPEN) return;
+      busy = true;
+      try {
+        const snapshot = await evaluate(connection, snapshotExpression);
+        if (snapshot.dirty !== lastDirty) await flushState();
+        if (!snapshot.anchor || !snapshot.anchorTextMatches) {
+          reportRuntimeDiagnosis('host-ui-updated');
+          await evaluate(connection, buildCleanup());
+          lastDirty = 0;
+          await considerPageSwitch();
+          return;
+        }
+        if (!snapshot.entry || !snapshot.style || !snapshot.stage) {
+          reportRuntimeDiagnosis(!snapshot.entry ? 'entry-missing' : 'partial-injection');
+          await applyRuntime(connection, galleryUrl);
+        } else {
+          reportRuntimeDiagnosis('ready');
+        }
+        if (snapshot.pick && snapshot.pick !== lastPick) {
+          lastPick = snapshot.pick;
+          await evaluate(connection, 'window.__bcDesktopPickRequest=0');
+          let picked = '';
+          try { picked = await pickFileNative(); } catch {}
+          if (picked) {
+            try { await setFileInput(connection, picked, { mode: 'import', save: false }); }
+            catch (error) {
+              log.warn(`导入背景失败：${error.message}`);
+              await evaluate(connection, `window.__bcDesktopMessage?.(${JSON.stringify(String(error.message || spec.strings.missingFile))})`);
+            }
           }
         }
-      }
-      if (snapshot.apply?.requestId && snapshot.apply.requestId !== lastApply) {
-        lastApply = snapshot.apply.requestId;
-        await evaluate(connection, 'window.__bcDesktopApplyRequest=null');
-        try { await setFileInput(connection, snapshot.apply.path, snapshot.apply); }
-        catch { await evaluate(connection, `window.__bcDesktopMessage(${JSON.stringify(spec.strings.missingFile)})`); }
-      }
-      if (snapshot.skin && snapshot.skin !== lastSkin) {
-        lastSkin = snapshot.skin;
-        await evaluate(connection, 'window.__bcDesktopSkinCenterRequest=0');
-        if (galleryUrl) openExternal(galleryUrl);
-      }
-      if (snapshot.dirty !== lastDirty) {
-        lastDirty = snapshot.dirty;
-        const raw = await evaluate(connection, 'window.__bcDesktopPersistGet&&window.__bcDesktopPersistGet()');
-        if (raw) writeState(raw);
-      }
-    } finally { busy = false; }
-  };
-  await tick();
-  if (args.once) { connection.close(); return 'done'; }
-  const interval = setInterval(() => tick().catch((error) => log.debug(error.message)), 180);
-  return await new Promise((resolve) => {
-    connection.ws.addEventListener('close', () => { clearInterval(interval); activeConnection = null; resolve('closed'); }, { once: true });
-  });
+        if (snapshot.apply?.requestId && snapshot.apply.requestId !== lastApply) {
+          const request = snapshot.apply;
+          lastApply = request.requestId;
+          await evaluate(connection, `if(window.__bcDesktopApplyRequest?.requestId===${JSON.stringify(lastApply)})window.__bcDesktopApplyRequest=null`);
+          try {
+            const project = request.mode === 'library' ? await library?.resolve(request.libraryId) : null;
+            if (request.mode === 'library' && !project) throw new Error('Wallpaper selection expired.');
+            await setFileInput(connection, request.path, request, project);
+          } catch {
+            await evaluate(connection, `window.__bcDesktopMessage?.(${JSON.stringify(spec.strings.missingFile)})`);
+          }
+        }
+        if (spec.settings && snapshot.library?.requestId && snapshot.library.requestId !== lastLibrary) {
+          const request = snapshot.library;
+          lastLibrary = request.requestId;
+          if (!library || request.refresh === true) {
+            const roots = await core.discoverWallpaperRoots(path.join(dataRoot, '..', '..', 'wallpaper-library.json'));
+            library = await core.WallpaperLibrary.scan(roots);
+          }
+          const limit = 80;
+          const offset = Number.isSafeInteger(request.offset) && request.offset >= 0 ? request.offset : 0;
+          const page = { ...library.list(offset, limit), offset, limit };
+          await evaluate(connection, `window.__bcDesktopShowLibrary?.(${JSON.stringify(lastLibrary)},${JSON.stringify(page)})`);
+        }
+        if (snapshot.skin && snapshot.skin !== lastSkin) {
+          lastSkin = snapshot.skin;
+          await evaluate(connection, 'window.__bcDesktopSkinCenterRequest=0');
+          if (galleryUrl) openExternal(galleryUrl);
+        }
+        await considerPageSwitch();
+      } finally { busy = false; }
+    };
+
+    await tick();
+    if (args.once) {
+      await flushState();
+      return 'done';
+    }
+    interval = setInterval(() => tick().catch((error) => log.debug(error.message)), 180);
+    await closed;
+    return nextEndpoint;
+  } finally {
+    clearInterval(interval);
+    if (activeConnection === connection) activeConnection = null;
+    connection.close();
+  }
 }
 
 const monitor = args.noRepair ? { close() {} } : shared.startDesktopStartupRepairMonitor(spec, log);
@@ -562,12 +660,17 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
   activeConnection?.close();
 });
 
+let nextEndpoint = null;
 do {
-  const endpoint = await shared.discoverDesktopCdp(spec);
+  const handoff = nextEndpoint !== null;
+  const endpoint = nextEndpoint ?? await shared.discoverDesktopCdp(spec);
+  nextEndpoint = null;
   if (endpoint) {
     try {
-      const result = await runSession(endpoint);
+      const result = await runSession(endpoint, handoff);
       if (result === 'done') break;
+      nextEndpoint = result;
+      if (nextEndpoint) continue;
     } catch (error) {
       if (!String(error?.message || '').startsWith('DOM 兼容检查失败：')) log.warn(error.message);
       if (args.once || args.clean) { process.exitCode = 1; break; }
