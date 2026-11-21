@@ -2,7 +2,7 @@ import { buildMediaHealthProbe, mediaHealthState, type MediaHealthEvidence } fro
 import { BACKDROP_SELECTORS } from "./contract.js";
 import fs from "node:fs";
 import path from "node:path";
-import { discoverWorkBuddyCdp, readBoundedJson, DEFAULT_WORKBUDDY_CDP_PORTS } from "./discovery.js";
+import { discoverWorkBuddyCdp, readBoundedJson, DEFAULT_WORKBUDDY_CDP_PORTS, WORKBUDDY_CDP_ENV_KEY } from "./discovery.js";
 import { listWorkBuddyProcesses } from "./launch.js";
 import { assertLoopbackDebuggerUrl, pickWorkBuddyTarget, type WorkBuddyTarget } from "./target.js";
 
@@ -104,7 +104,7 @@ async function evaluatePage(target: WorkBuddyTarget, port: number): Promise<Work
 }
 
 /** Read-only host-specific probe; WorkBuddy's navigation contract differs from the desktop-CDP hosts. */
-export async function inspectWorkBuddyUiHealth(): Promise<WorkBuddyUiHealthSnapshot> {
+export async function inspectWorkBuddyUiHealth(preferredPort?: number): Promise<WorkBuddyUiHealthSnapshot> {
   const processes = await listWorkBuddyProcesses();
   const primary = processes.length === 1 ? processes[0] : null;
   let executableFingerprint: string | null = null;
@@ -117,7 +117,13 @@ export async function inspectWorkBuddyUiHealth(): Promise<WorkBuddyUiHealthSnaps
     } catch { /* executable metadata can be temporarily unavailable during update */ }
   }
   const client: WorkBuddyUiHealthSnapshot["client"] = processes.length === 0 ? "closed" : processes.length === 1 ? "running" : "ambiguous";
-  const endpoint = await discoverWorkBuddyCdp({ ports: [...new Set(DEFAULT_WORKBUDDY_CDP_PORTS)] });
+  const envPort = process.env[WORKBUDDY_CDP_ENV_KEY] ?? "";
+  const endpoint = await discoverWorkBuddyCdp({ ports: [
+    ...(preferredPort === undefined ? [] : [preferredPort]),
+    ...(/^\d+$/.test(envPort) ? [Number(envPort)] : []),
+    ...(primary?.port ? [primary.port] : []),
+    ...DEFAULT_WORKBUDDY_CDP_PORTS,
+  ] });
   const identity = {
     host: "workbuddy" as const,
     client,

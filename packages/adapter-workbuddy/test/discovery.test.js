@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import http from "node:http";
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import test from "node:test";
 import {
   DEFAULT_WORKBUDDY_CDP_PORT,
   WORKBUDDY_CDP_ENV_KEY,
   classifyWorkBuddyStartupProcess,
+  inspectWorkBuddyUiHealth,
   isWorkBuddyMainProcess,
   parsePsElapsedSeconds,
   parseRemoteDebuggingFlags,
@@ -159,6 +166,38 @@ test("probeWorkBuddyCdp ignores a Codex app:// page on the same port", async (t)
   });
   t.after(() => other.close());
   assert.equal(await probeWorkBuddyCdp(other.port, { timeoutMs: 500 }), null);
+});
+
+test("health probes a configured WorkBuddy port outside the defaults", async t => {
+  const wb = await serve((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(req.url === "/json/version"
+      ? { Browser: "Chrome/test" }
+      : [{ id: "workbuddy", type: "page", url: WB_URL }]));
+  });
+  t.after(() => wb.close());
+  const previous = process.env[WORKBUDDY_CDP_ENV_KEY];
+  process.env[WORKBUDDY_CDP_ENV_KEY] = String(wb.port);
+  try {
+    const health = await inspectWorkBuddyUiHealth();
+    assert.equal(health.port, wb.port);
+    assert.equal(health.cdp, "connected");
+  } finally {
+    if (previous === undefined) delete process.env[WORKBUDDY_CDP_ENV_KEY];
+    else process.env[WORKBUDDY_CDP_ENV_KEY] = previous;
+  }
+
+  if (!["win32", "linux"].includes(process.platform)) return;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "wb-health-port-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await fs.mkdir(path.join(dir, "beauticode"));
+  await fs.writeFile(path.join(dir, "beauticode", "workbuddy-port.json"), JSON.stringify({ port: wb.port }));
+  const setup = fileURLToPath(new URL("../../../scripts/wb-setup.mjs", import.meta.url));
+  const { stdout } = await promisify(execFile)(process.execPath, [setup, "status", "--machine-status"], {
+    env: { ...process.env, APPDATA: dir, LOCALAPPDATA: dir, XDG_CONFIG_HOME: dir, [WORKBUDDY_CDP_ENV_KEY]: "9335" },
+    windowsHide: true,
+  });
+  assert.equal(JSON.parse(stdout).health.port, wb.port);
 });
 
 test("install candidates include the usual Windows / macOS locations", () => {
