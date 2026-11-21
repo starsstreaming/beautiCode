@@ -530,6 +530,8 @@ async function runSession(endpoint, handoff) {
     let lastSkin = 0;
     let lastLibrary = '';
     let lastDirty = 0;
+    let failedSaveDirty = null;
+    let nextSaveRetry = 0;
     let pageChecks = 0;
     let library;
     const snapshotExpression = `(() => {
@@ -558,6 +560,7 @@ async function runSession(endpoint, handoff) {
       if (snapshot.dirty === lastDirty) return;
       writeState(snapshot.raw);
       lastDirty = snapshot.dirty;
+      failedSaveDirty = null;
     }
 
     async function considerPageSwitch() {
@@ -582,13 +585,24 @@ async function runSession(endpoint, handoff) {
         const snapshot = await evaluate(connection, snapshotExpression);
         if (!snapshot.hasPersistence) {
           lastDirty = lastPick = lastSkin = 0;
+          failedSaveDirty = null;
           lastApply = lastLibrary = '';
           library = undefined;
-        } else if (snapshot.dirty !== lastDirty) await flushState();
+        } else if (snapshot.dirty !== lastDirty && (snapshot.dirty !== failedSaveDirty || Date.now() >= nextSaveRetry)) {
+          try {
+            await flushState();
+          } catch {
+            if (failedSaveDirty === null) log.warn('背景设置未能保存；保留当前窗口并稍后重试。');
+            failedSaveDirty = snapshot.dirty;
+            nextSaveRetry = Date.now() + 5000;
+          }
+        }
         if (!snapshot.anchor || !snapshot.anchorTextMatches) {
           reportRuntimeDiagnosis('host-ui-updated');
-          await evaluate(connection, buildCleanup());
-          lastDirty = 0;
+          if (failedSaveDirty === null) {
+            await evaluate(connection, buildCleanup());
+            lastDirty = 0;
+          }
           await considerPageSwitch();
           return;
         }

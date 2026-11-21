@@ -24,8 +24,20 @@ function packageInsert(pluginName) {
   ].join("\n");
 }
 
+function splitDocument(text) {
+  const header = /^(?:(?:[ \t]*(?:#.*)?|%[^\r\n]*)\r?\n)*---[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)/.exec(text)?.[0] || "";
+  const rest = text.slice(header.length);
+  const end = /^\.\.\.[ \t]*(?:#.*)?\r?$/m.exec(rest);
+  const content = end ? rest.slice(0, end.index) : rest;
+  const footer = end ? rest.slice(end.index) : "";
+  if (/^---(?:[ \t]|$)/m.test(content) || footer.split(/\r?\n/).slice(1).some(line => line.trim() && !line.trimStart().startsWith("#"))) {
+    throw new Error("Expected one DSH overlay document.");
+  }
+  return { header, content, footer };
+}
+
 function hasBridge(text) {
-  return stripBridge(text).count > 0;
+  return stripBridge(splitDocument(text).content).count > 0;
 }
 
 async function backupPatch(filePath) {
@@ -97,7 +109,7 @@ function stripBridge(text) {
     i = blockEnd - 1;
   }
 
-  return { count, text: lines.filter((_, index) => !removed[index]).join("\n") };
+  return { count, rootIndent, text: lines.filter((_, index) => !removed[index]).join("\n") };
 }
 
 function overlayPayload(text) {
@@ -136,31 +148,34 @@ async function writePatch(filePath, body) {
     return;
   }
   const raw = await fsp.readFile(filePath, "utf8");
-  const rewrite = stripBridge(raw);
+  const { header, content, footer } = splitDocument(raw);
+  const rewrite = stripBridge(content);
   if (rewrite.count > 1) {
     await backupPatch(filePath);
   }
-  const remainder = rewrite.count ? rewrite.text : raw;
+  const remainder = rewrite.count ? rewrite.text : content;
   const kept = keptOverlay(remainder);
-  const next = kept ? withTrailingNewline(kept) + insert : insert;
-  await fsp.writeFile(filePath, withTrailingNewline(next), "utf8");
+  const aligned = insert.replace(/^(?=.)/gm, " ".repeat(rewrite.rootIndent));
+  const next = (kept ? withTrailingNewline(kept) : "") + aligned;
+  await fsp.writeFile(filePath, (header ? withTrailingNewline(header) : "") + next + footer, "utf8");
 }
 
 async function removePatch(filePath) {
   if (!fs.existsSync(filePath)) return false;
   const raw = await fsp.readFile(filePath, "utf8");
-  const rewrite = stripBridge(raw);
+  const { header, content, footer } = splitDocument(raw);
+  const rewrite = stripBridge(content);
   if (!rewrite.count) return false;
   const kept = keptOverlay(rewrite.text);
   if (!kept) {
     await fsp.writeFile(
       filePath,
-      "# Your patch layer for this dsh profile.\n[]\n",
+      header + "# Your patch layer for this dsh profile.\n[]\n" + footer,
       "utf8",
     );
     return true;
   }
-  await fsp.writeFile(filePath, withTrailingNewline(kept), "utf8");
+  await fsp.writeFile(filePath, header + withTrailingNewline(kept) + footer, "utf8");
   return true;
 }
 

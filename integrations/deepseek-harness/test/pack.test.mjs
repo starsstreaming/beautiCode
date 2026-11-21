@@ -6,8 +6,25 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stageDshPlugin } from "../../../scripts/pack-dsh-plugin.mjs";
 import { runCli } from "../cli.js";
+import { writePatch, removePatch, packageInsert } from "../profile-patch.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+test("install, repair and remove retain an indented YAML document's sibling and end marker", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bc-dsh-document-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "cordis.patch.yml");
+  const original = "# profile\n---\n  - insert:\n      - id: user-plugin\n... # end\n";
+  await fs.writeFile(file, original);
+  await writePatch(file, packageInsert("beauticode-dsh"));
+  const installed = await fs.readFile(file, "utf8");
+  assert.match(installed, /^  - insert:\n      - id: beauticode-bridge/m);
+  assert.ok(installed.endsWith("... # end\n"));
+  await writePatch(file, packageInsert("beauticode-dsh"));
+  assert.equal(await fs.readFile(file, "utf8"), installed);
+  assert.equal(await removePatch(file), true);
+  assert.equal(await fs.readFile(file, "utf8"), original);
+});
 
 test("install and removal preserve a profile that points at a different dependency", async t => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "bc-dsh-other-dep-"));

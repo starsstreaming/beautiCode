@@ -52,14 +52,18 @@ function mockCdpPages() {
           ticks++;
           if (ticks === 1) { dirty = 1; dim = 65; }
           if (ticks === 2) { dirty = 0; injected.delete(this.page); }
+          if (ticks === 3) { dirty = 2; dim = 75; }
           const mounted = injected.has(this.page);
           value = { anchor: true, anchorTextMatches: true, entry: mounted, style: mounted, stage: mounted, hasPersistence: mounted, dirty };
         } else if (expression.includes('document.visibilityState')) {
           // A change arrives in the old window after the tick's original snapshot.
-          dirty = 1;
+          dirty = 3;
           dim = 87;
-          value = this.page === 'new' && restoredAfterReload ? 900 : 0;
-        } else if (expression.includes('raw: window.__bcDesktopPersistGet')) value = { dirty, raw: injected.has(this.page) ? JSON.stringify({ dim }) : undefined };
+          value = this.page === 'new' && restoredAfterReload ? 900 : this.page === 'old' ? 400 : 0;
+        } else if (expression.includes('raw: window.__bcDesktopPersistGet')) {
+          const raw = dirty === 2 ? JSON.stringify({ large: 'x'.repeat(270000) }) : JSON.stringify({ dim });
+          value = { dirty, raw: injected.has(this.page) ? raw : undefined };
+        }
         else if (this.page === 'old' && expression === 'window.__bcDesktopRestoreState({"dim":65})') restoredAfterReload = true;
         else if (expression.includes("return 'cleaned'")) {
           injected.delete(this.page);

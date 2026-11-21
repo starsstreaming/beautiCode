@@ -88,8 +88,25 @@ function Get-PackageInsert {
   ) -join "`n"
 }
 
+function Split-PatchDocument([string]$Text) {
+  $header = [regex]::Match($Text, '^(?:(?:[ \t]*(?:#[^\r\n]*)?|%[^\r\n]*)\r?\n)*---[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)').Value
+  $content = $Text.Substring($header.Length)
+  $end = [regex]::Match($content, '(?m)^\.\.\.[ \t]*(?:#.*)?\r?$')
+  $footer = ''
+  if ($end.Success) {
+    $footer = $content.Substring($end.Index)
+    $content = $content.Substring(0, $end.Index)
+  }
+  if ($content -match '(?m)^---(?:[ \t]|\r?$)' -or ($footer -split '\r?\n' | Select-Object -Skip 1 | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })) {
+    throw 'Expected one DSH overlay document.'
+  }
+  if ($header -and -not $header.EndsWith("`n")) { $header += "`r`n" }
+  return [pscustomobject]@{ Header = $header; Content = $content; Footer = $footer }
+}
+
 function Test-PatchHasBridge([string]$Text) {
-  return ((Get-BridgeRewrite $Text).BridgeCount -gt 0)
+  $doc = Split-PatchDocument $Text
+  return ((Get-BridgeRewrite $doc.Content).BridgeCount -gt 0)
 }
 
 function Backup-BridgePatch([string]$Path) {
@@ -220,7 +237,8 @@ function Remove-BridgeFromPatch([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
   $raw = [IO.File]::ReadAllText($Path)
   if (-not (Test-PatchHasBridge $raw)) { return $false }
-  $rewrite = Get-BridgeRewrite $raw
+  $doc = Split-PatchDocument $raw
+  $rewrite = Get-BridgeRewrite $doc.Content
   if (-not $rewrite.Safe -or -not $rewrite.Changed) {
     throw ("Unsafe DSH patch rewrite: cannot locate {0} beauticode bridge entries." -f $rewrite.BridgeCount)
   }
@@ -234,13 +252,13 @@ function Remove-BridgeFromPatch([string]$Path) {
       Remove-Item -LiteralPath $Path -Force
       return $true
     }
-    Write-RecoverableText $Path "# Your patch layer for this dsh profile.`r`n[]`r`n"
+    Write-RecoverableText $Path ($doc.Header + "# Your patch layer for this dsh profile.`r`n[]`r`n" + $doc.Footer)
     return $true
   }
   if (-not ($trimmed -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })) {
     $trimmed += "`r`n[]"
   }
-  Write-RecoverableText $Path ($trimmed + "`r`n")
+  Write-RecoverableText $Path ($doc.Header + $trimmed + "`r`n" + $doc.Footer)
   return $true
 }
 
@@ -254,22 +272,26 @@ function Write-BridgePatch([string]$Path, [string]$Body) {
     return
   }
   $raw = [IO.File]::ReadAllText($Path)
-  $rewrite = Get-BridgeRewrite $raw
-  if (Test-PatchHasBridge $raw) {
+  $doc = Split-PatchDocument $raw
+  $rewrite = Get-BridgeRewrite $doc.Content
+  $rootLine = $doc.Content -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') } | Select-Object -First 1
+  $indent = [regex]::Match([string]$rootLine, '^[ \t]*').Value
+  $Body = [regex]::Replace($Body, '(?m)^(?=.)', $indent)
+  if ($rewrite.BridgeCount -gt 0) {
     if (-not $rewrite.Safe -or -not $rewrite.Changed) {
       throw ("Unsafe DSH patch rewrite: cannot replace {0} beauticode bridge entries." -f $rewrite.BridgeCount)
     }
     $stripped = (Remove-SeededRootList $rewrite.Text).TrimEnd()
   } else {
-    $stripped = (Remove-SeededRootList $raw).TrimEnd()
+    $stripped = (Remove-SeededRootList $doc.Content).TrimEnd()
   }
   # A seeded DSH overlay may contain comments around the root empty list.
   $payload = @($stripped -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })
   if ($payload.Count -eq 0 -or ($payload.Count -eq 1 -and $payload[0].Trim() -match '^\[\](?:[ \t]+#.*)?$')) {
-    Write-RecoverableText $Path ($Body + "`r`n")
+    Write-RecoverableText $Path ($doc.Header + $Body + "`r`n" + $doc.Footer)
     return
   }
-  Write-RecoverableText $Path ($stripped.TrimEnd() + "`r`n`r`n" + $Body + "`r`n")
+  Write-RecoverableText $Path ($doc.Header + $stripped.TrimEnd() + "`r`n`r`n" + $Body + "`r`n" + $doc.Footer)
 }
 
 function Get-PluginEntry([string]$Path) {

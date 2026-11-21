@@ -23,6 +23,8 @@ test('DSH status requires an actual plugin entry and active wiring, without clai
   fs.writeFileSync(patch, wire);
   assert.equal(getHostStatus('dsh', opts).installed, true);
   assert.equal(getAllStatus(opts).hosts.find(h => h.host === 'dsh').readiness, 'plugin-wired');
+  fs.writeFileSync(patch, '---\n' + wire.replace(/^(?=.)/gm, '  ') + '...\n');
+  assert.equal(getHostStatus('dsh', opts).installed, true);
   fs.writeFileSync(patch, wire.replace('- insert:', '- remove:'));
   assert.equal(getHostStatus('dsh', opts).installed, false);
   fs.writeFileSync(patch, wire + '      disabled: true\n');
