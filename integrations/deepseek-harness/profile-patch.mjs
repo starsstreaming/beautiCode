@@ -118,10 +118,10 @@ function isEmptyOverlay(text) {
 function keptOverlay(text) {
   const withoutFlowEmpty = text
     .split(/\r?\n/)
-    .filter((line) => line.trim() !== "[]")
+    .filter((line) => !/^\[\][ \t]*(?:#.*)?$/.test(line))
     .join("\n");
   if (isEmptyOverlay(withoutFlowEmpty)) return "";
-  return withoutFlowEmpty.trim();
+  return withoutFlowEmpty;
 }
 
 function withTrailingNewline(text) {
@@ -141,7 +141,7 @@ async function writePatch(filePath, body) {
   }
   const remainder = hasBridge(raw) ? stripBridge(raw) : raw;
   const kept = keptOverlay(remainder);
-  const next = kept ? `${kept}\n\n${insert}` : insert;
+  const next = kept ? withTrailingNewline(kept) + insert : insert;
   await fsp.writeFile(filePath, withTrailingNewline(next), "utf8");
 }
 

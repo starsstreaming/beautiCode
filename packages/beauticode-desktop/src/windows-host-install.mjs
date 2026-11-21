@@ -70,11 +70,11 @@ export function resolveRegisteredExecutable(host, options = {}) {
       candidates.push(displayIconExecutable(row.DisplayIcon));
     }
     for (const candidate of candidates) {
-      if (!path.win32.isAbsolute(candidate) || path.win32.basename(candidate).toLowerCase() !== config.executable.toLowerCase()) continue;
+      if (!/^[a-z]:[\\/]/i.test(candidate) || path.win32.basename(candidate).toLowerCase() !== config.executable.toLowerCase()) continue;
       if (!exists(candidate)) continue;
       try {
         const canonical = path.win32.normalize(realpath(candidate));
-        if (path.win32.basename(canonical).toLowerCase() !== config.executable.toLowerCase()) continue;
+        if (!/^[a-z]:[\\/]/i.test(canonical) || path.win32.basename(canonical).toLowerCase() !== config.executable.toLowerCase()) continue;
         found.set(canonical.toLowerCase(), canonical);
       } catch { /* Broken or inaccessible registration is not evidence. */ }
     }

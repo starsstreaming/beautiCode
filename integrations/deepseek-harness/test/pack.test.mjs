@@ -9,6 +9,23 @@ import { runCli } from "../cli.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+test("install and removal preserve a profile that points at a different dependency", async t => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "bc-dsh-other-dep-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const profile = path.join(home, "profiles", "web");
+  await fs.mkdir(profile, { recursive: true });
+  const manifest = JSON.stringify({ dependencies: { "beauticode-dsh": "link:./another-copy" } });
+  const patch = "# existing profile\n[]\n";
+  await fs.writeFile(path.join(profile, "package.json"), manifest);
+  await fs.writeFile(path.join(profile, "cordis.patch.yml"), patch);
+  for (const args of [[], ["--remove"]]) {
+    await assert.rejects(runCli([...args, "--dsh-home", home]), /DSH 依赖属于其他安装/);
+    assert.equal(await fs.readFile(path.join(profile, "package.json"), "utf8"), manifest);
+    assert.equal(await fs.readFile(path.join(profile, "cordis.patch.yml"), "utf8"), patch);
+    assert.deepEqual(await fs.readdir(home), ["profiles"]);
+  }
+});
+
 test("staged npm plugin is a self-contained DSH bundle with a vendored engine", async () => {
   const dest = path.join(os.tmpdir(), `bc-dsh-pack-${process.pid}`);
   await stageDshPlugin(dest, { build: false });
@@ -76,6 +93,8 @@ test("installer backs up and deduplicates its own duplicate loader entries", asy
       "- insert:",
       "    - id: unrelated-plugin",
       "      name: unrelated",
+      "      options:",
+      "        []",
       "    - id: beauticode-bridge",
       "      name: old-a",
       "      inject: [webServer]",
@@ -90,6 +109,7 @@ test("installer backs up and deduplicates its own duplicate loader entries", asy
     // This profile has no beautiCode bundle, so one usable overlay survives.
     assert.equal((patch.match(/id:\s*beauticode-bridge/g) || []).length, 1);
     assert.match(patch, /id:\s*unrelated-plugin/);
+    assert.match(patch, /options:\n        \[\]/);
     const pluginPatch = await fs.readFile(path.join(pluginHome, "cordis.patch.yml"), "utf8");
     assert.equal((pluginPatch.match(/id:\s*beauticode-bridge/g) || []).length, 1);
     const backups = (await fs.readdir(web)).filter((name) => name.includes("beauticode-backup"));

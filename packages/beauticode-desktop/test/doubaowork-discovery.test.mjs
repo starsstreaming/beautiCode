@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { queryWindowsInstallRecords, resolveRegisteredExecutable } from "../src/windows-host-install.mjs";
@@ -58,6 +59,22 @@ test("rejects foreign, relative and conflicting Doubao Work registrations", () =
     { DisplayName: "豆包工作", DisplayIcon: '"E:\\WorkB\\icon.ico"' },
   ]), null);
 });
+
+for (const [host, name, executable] of [["doubao", "豆包", "Doubao.exe"], ["doubaowork", "豆包工作", "DoubaoWork.exe"]]) {
+  test(host + " requires a local drive before and after resolving its registered executable", () => {
+    const networkRoot = "\\\\server\\share";
+    const options = {
+      query: () => [{ DisplayName: name, InstallLocation: networkRoot }],
+      exists: () => assert.fail("unexpected network lookup"),
+    };
+    assert.equal(resolveRegisteredExecutable(host, options), null);
+    assert.equal(resolveRegisteredExecutable(host, {
+      query: () => [{ DisplayName: name, InstallLocation: "D:\\Apps" }],
+      exists: () => true,
+      realpath: () => path.win32.join(networkRoot, executable),
+    }), null);
+  });
+}
 
 test("does not probe a network path supplied by a Doubao Work registration", () => {
   let probed = false;

@@ -13,7 +13,7 @@ export function inspectDshInstallation({ home, env, exists = fs.existsSync, read
     const patches = [profilePatch];
     // A dependency exposes its files to the loader. The profile's bundle list
     // determines whether the dependency's patch is part of the composition.
-    if (!/\bbeauticode-bridge\b/.test(profilePatch)) {
+    if (!/\bbeauticode-bridge\b/.test(profilePatch.replace(/^[ \t]*#.*$/gm, ''))) {
       try {
         const manifest = JSON.parse(readFile(path.join(profile, 'package.json'), 'utf8'));
         const dependency = manifest.dependencies?.['beauticode-dsh'];

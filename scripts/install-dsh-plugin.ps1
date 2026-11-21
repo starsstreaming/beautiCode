@@ -203,6 +203,12 @@ function Write-RecoverableText([string]$Path, [string]$Text) {
   }
 }
 
+function Remove-SeededRootList([string]$Text) {
+  # Also repair overlays created by older installers that appended a sequence
+  # after DSH's empty root. An indented [] may belong to a user's nested item.
+  return [regex]::Replace($Text, '(?m)^\[\][ \t]*(?:#.*)?(?:\r?\n|$)', '')
+}
+
 function Remove-BridgeFromPatch([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
   $raw = [IO.File]::ReadAllText($Path)
@@ -211,9 +217,9 @@ function Remove-BridgeFromPatch([string]$Path) {
   if (-not $rewrite.Safe -or -not $rewrite.Changed) {
     throw ("Unsafe DSH patch rewrite: cannot locate {0} beauticode bridge entries." -f $rewrite.BridgeCount)
   }
-  $trimmed = $rewrite.Text.Trim()
+  $trimmed = (Remove-SeededRootList $rewrite.Text).TrimEnd()
   $emptyOverlay = $trimmed.Length -eq 0
-  $emptyFlowOverlay = [bool]($trimmed -match '^\[\]$')
+  $emptyFlowOverlay = $trimmed.Trim() -eq '[]'
   if ($emptyOverlay -or $emptyFlowOverlay) {
     $dir = Split-Path -Parent $Path
     if (([IO.Path]::GetFileName($Path) -eq "cordis.patch.yml") -and ($dir -eq $DshHome)) {
@@ -224,7 +230,10 @@ function Remove-BridgeFromPatch([string]$Path) {
     Write-RecoverableText $Path "# Your patch layer for this dsh profile.`r`n[]`r`n"
     return $true
   }
-  Write-RecoverableText $Path ($trimmed.TrimEnd() + "`r`n")
+  if (-not ($trimmed -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })) {
+    $trimmed += "`r`n[]"
+  }
+  Write-RecoverableText $Path ($trimmed + "`r`n")
   return $true
 }
 
@@ -243,13 +252,13 @@ function Write-BridgePatch([string]$Path, [string]$Body) {
     if (-not $rewrite.Safe -or -not $rewrite.Changed) {
       throw ("Unsafe DSH patch rewrite: cannot replace {0} beauticode bridge entries." -f $rewrite.BridgeCount)
     }
-    $stripped = $rewrite.Text.Trim()
+    $stripped = (Remove-SeededRootList $rewrite.Text).TrimEnd()
   } else {
-    $stripped = $raw.Trim()
+    $stripped = (Remove-SeededRootList $raw).TrimEnd()
   }
-  $emptyOverlay = $stripped.Length -eq 0
-  $emptyFlowOverlay = [bool]($stripped -match '^\[\]$')
-  if ($emptyOverlay -or $emptyFlowOverlay) {
+  # A seeded DSH overlay may contain comments around the root empty list.
+  $payload = @($stripped -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })
+  if ($payload.Count -eq 0 -or ($payload.Count -eq 1 -and $payload[0].Trim() -match '^\[\](?:[ \t]+#.*)?$')) {
     Write-RecoverableText $Path ($Body + "`r`n")
     return
   }
@@ -382,11 +391,10 @@ function Remove-WebPackageDeps {
   if (-not (Test-Path -LiteralPath $webPackage -PathType Leaf)) { return $false }
   $raw = [IO.File]::ReadAllText($webPackage)
   $json = $raw | ConvertFrom-Json
-  if (-not $json.dependencies) { return $false }
   $deps = $json.dependencies
   $changed = $false
   foreach ($name in @($pluginName, $legacyPluginName)) {
-    if ($deps.PSObject.Properties.Name -contains $name) {
+    if ($null -ne $deps -and $deps.PSObject.Properties.Name -contains $name) {
       $deps.PSObject.Properties.Remove($name)
       $changed = $true
     }

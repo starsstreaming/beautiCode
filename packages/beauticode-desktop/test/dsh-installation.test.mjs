@@ -52,6 +52,8 @@ test('DSH status follows the profile dependency to the bundled bridge patch', t 
   assert.equal(getAllStatus(opts).hosts.find(h => h.host === 'dsh').readiness, 'plugin-wired');
   fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), '- remove:\n    - id: beauticode-bridge\n');
   assert.equal(getHostStatus('dsh', opts).installed, false);
+  fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), '# beauticode-bridge is loaded by the bundle\n[]\n');
+  assert.equal(getHostStatus('dsh', opts).installed, true);
   fs.unlinkSync(path.join(profile, 'cordis.patch.yml'));
   fs.writeFileSync(manifest, JSON.stringify({ dependencies: { 'beauticode-dsh': 'link:./foreign' } }));
   assert.equal(getHostStatus('dsh', opts).installed, false);
@@ -80,6 +82,8 @@ test('a staged DSH CLI install into an existing temporary profile is recognized'
   fs.writeFileSync(manifest, JSON.stringify(configured));
   await runCli(['--dsh-home', home, '--plugin-home', path.join(root, 'installed-plugin')]);
   assert.doesNotMatch(fs.readFileSync(patch, 'utf8'), /id: beauticode-bridge/);
+  delete configured.dependencies;
+  fs.writeFileSync(manifest, JSON.stringify(configured));
   await runCli(['--remove', '--dsh-home', home, '--plugin-home', path.join(root, 'installed-plugin')]);
   const after = JSON.parse(fs.readFileSync(manifest, 'utf8'));
   assert.deepEqual(after.dsh.profile.bundles, ['@deepseek-ai/dsh-base']);

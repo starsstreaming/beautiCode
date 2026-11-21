@@ -327,13 +327,46 @@ async function ensureWebPackageDep(webPackage, pluginHome) {
   return loadsPluginBundle;
 }
 
+async function checkProfileWiring(opts) {
+  const profile = path.join(opts.dshHome, "profiles", "web");
+  const manifest = path.join(profile, "package.json");
+  const link = pluginLinkPath(profile);
+  const legacy = legacyPluginLinkPath(profile);
+  for (const entry of [link, legacy, manifest, path.join(profile, "cordis.patch.yml"), path.join(opts.dshHome, "cordis.patch.yml")]) {
+    await assertNoSymlinkAncestors(entry);
+    if (entry !== link && entry !== legacy && await entryExists(entry) && (await fsp.lstat(entry)).isSymbolicLink()) {
+      throw new Error("拒绝改写链接指向的 DSH 配置：" + entry);
+    }
+  }
+  for (const entry of [link, legacy]) {
+    if (await entryExists(entry) && !(await isOwnedPluginLink(entry, entry === link ? opts.pluginHome : undefined))) {
+      throw new Error("DSH 插件链接属于其他安装：" + entry);
+    }
+  }
+  if (!fs.existsSync(manifest)) return;
+  const { dependencies } = JSON.parse(await fsp.readFile(manifest, "utf8"));
+  if (dependencies === undefined) return;
+  if (!dependencies || typeof dependencies !== "object" || Array.isArray(dependencies)) {
+    throw new Error("无效的 DSH dependencies 配置。");
+  }
+  for (const name of [pluginName, "@beauticode/dsh-plugin"]) {
+    if (!Object.hasOwn(dependencies, name)) continue;
+    const value = dependencies[name];
+    if (typeof value === "string" && value.startsWith("link:") && value.length > 5) {
+      const target = path.resolve(profile, value.slice(5));
+      if (path.relative(opts.pluginHome, target) === "") continue;
+      if (opts.legacyPluginHome && path.relative(opts.legacyPluginHome, target) === "" && await isManagedPluginDirectory(target)) continue;
+    }
+    throw new Error("DSH 依赖属于其他安装：" + name);
+  }
+}
+
 async function removeWebPackageDep(webPackage) {
   if (!fs.existsSync(webPackage)) return false;
   const json = JSON.parse(await fsp.readFile(webPackage, "utf8"));
-  if (!json.dependencies || typeof json.dependencies !== "object") return false;
   let changed = false;
   for (const name of [pluginName, "@beauticode/dsh-plugin"]) {
-    if (Object.prototype.hasOwnProperty.call(json.dependencies, name)) {
+    if (json.dependencies && Object.hasOwn(json.dependencies, name)) {
       delete json.dependencies[name];
       changed = true;
     }
@@ -484,6 +517,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     console.log(JSON.stringify(result,null,2));
     return result;
   }
+  await checkProfileWiring(opts);
   if (action === '--remove') return uninstall(opts);
   return install(opts);
 }

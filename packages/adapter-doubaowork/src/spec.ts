@@ -13,13 +13,15 @@ interface CandidateOptions {
 // cannot widen what counts as Doubao Work.
 export function doubaoworkExecutableCandidates(options: CandidateOptions = {}): string[] {
   const env = options.env || process.env;
-  const recordPath = path.join(env.LOCALAPPDATA || "", "beauticode", "hosts", "doubaowork", "executable.json");
-  const readRecord = options.readRecord || (() => JSON.parse(fs.readFileSync(recordPath, "utf8")) as unknown);
+  const local = env.LOCALAPPDATA && /^[a-z]:[\\/]/i.test(env.LOCALAPPDATA) ? env.LOCALAPPDATA : null;
+  const readRecord = options.readRecord || (() => local
+    ? JSON.parse(fs.readFileSync(path.win32.join(local, "beauticode", "hosts", "doubaowork", "executable.json"), "utf8")) as unknown
+    : null);
   const exists = options.exists || fs.existsSync;
   const realpath = options.realpath || fs.realpathSync.native;
   const values = [
-    env.LOCALAPPDATA
-      ? path.join(env.LOCALAPPDATA, "DoubaoWork", "Application", "app", "DoubaoWork.exe")
+    local
+      ? path.win32.join(local, "DoubaoWork", "Application", "app", "DoubaoWork.exe")
       : "",
   ];
   try {
