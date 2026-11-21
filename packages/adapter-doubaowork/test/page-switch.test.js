@@ -11,9 +11,12 @@ function mockCdpPages() {
   let lists = 0;
   let dirty = 0;
   let dim = 49;
+  let ticks = 0;
+  let restoredAfterReload = false;
   const injected = new Set(['new']);
   const pages = [
     { id: 'old', type: 'page', url: 'doubaowork://doubaowork-chat/chat' },
+    ...Array.from({ length: 7 }, (_, i) => ({ id: 'hidden-' + i, type: 'page', url: 'doubaowork://doubaowork-chat/chat' })),
     { id: 'new', type: 'page', url: 'doubaowork://doubaowork-launcher/chat' },
   ].map(page => ({ ...page, webSocketDebuggerUrl: 'ws://127.0.0.1:9346/devtools/page/' + page.id }));
   globalThis.fetch = async input => {
@@ -46,13 +49,18 @@ function mockCdpPages() {
           injected.add(this.page);
         }
         else if (expression.includes('anchorTextMatches:')) {
-          value = { anchor: true, anchorTextMatches: true, entry: true, style: true, stage: true, dirty };
+          ticks++;
+          if (ticks === 1) { dirty = 1; dim = 65; }
+          if (ticks === 2) { dirty = 0; injected.delete(this.page); }
+          const mounted = injected.has(this.page);
+          value = { anchor: true, anchorTextMatches: true, entry: mounted, style: mounted, stage: mounted, hasPersistence: mounted, dirty };
         } else if (expression.includes('document.visibilityState')) {
           // A change arrives in the old window after the tick's original snapshot.
           dirty = 1;
           dim = 87;
-          value = this.page === 'old' ? 400 : 900;
-        } else if (expression.includes('raw: window.__bcDesktopPersistGet')) value = { dirty, raw: JSON.stringify({ dim }) };
+          value = this.page === 'new' && restoredAfterReload ? 900 : 0;
+        } else if (expression.includes('raw: window.__bcDesktopPersistGet')) value = { dirty, raw: injected.has(this.page) ? JSON.stringify({ dim }) : undefined };
+        else if (this.page === 'old' && expression === 'window.__bcDesktopRestoreState({"dim":65})') restoredAfterReload = true;
         else if (expression.includes("return 'cleaned'")) {
           injected.delete(this.page);
           value = 'cleaned';

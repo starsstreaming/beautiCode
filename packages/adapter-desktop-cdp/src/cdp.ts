@@ -313,9 +313,13 @@ export async function probeDesktopCdp(
       const ordered = [...matches].sort((a, b) => targetPriority(spec, b) - targetPriority(spec, a));
       if (preferred) ordered.splice(ordered.indexOf(preferred), 1);
       if (preferred) ordered.unshift(preferred);
-      const measured = ordered.slice(0, MAX_MEASURED_PAGES);
-      const areas = await Promise.all(measured.map(candidate => pageArea(spec, candidate)));
-      if (areas.some(area => area > 0)) target = chooseDesktopTarget(measured, areas);
+      let visible: DesktopTarget | null = null;
+      for (let start = 0; start < ordered.length && !visible; start += MAX_MEASURED_PAGES) {
+        const measured = ordered.slice(start, start + MAX_MEASURED_PAGES);
+        const areas = await Promise.all(measured.map(candidate => pageArea(spec, candidate)));
+        if (areas.some(area => area > 0)) visible = chooseDesktopTarget(measured, areas);
+      }
+      if (visible) target = visible;
       else if (options?.preferredTargetId) return null;
     }
     if (!target) return null;

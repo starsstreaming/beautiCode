@@ -232,11 +232,21 @@ function linkSpecFor(pluginHome) {
   return `link:${path.resolve(pluginHome).replaceAll("\\", "/")}`;
 }
 
+async function sameDirectory(left, right) {
+  if (path.relative(left, right) === "") return true;
+  try {
+    return path.relative(await fsp.realpath(left), await fsp.realpath(right)) === "";
+  } catch {
+    return false;
+  }
+}
+
 async function sameLinkTarget(link, dest) {
   try {
     const stat = await fsp.lstat(link);
     if (stat.isSymbolicLink()) {
-      return path.relative(await fsp.realpath(link), await fsp.realpath(dest)) === "";
+      const target = path.resolve(path.dirname(link), await fsp.readlink(link));
+      return sameDirectory(target, dest);
     }
     if (stat.isDirectory()) {
       return path.resolve(link) === path.resolve(dest);
@@ -354,8 +364,8 @@ async function checkProfileWiring(opts) {
     const value = dependencies[name];
     if (typeof value === "string" && value.startsWith("link:") && value.length > 5) {
       const target = path.resolve(profile, value.slice(5));
-      if (path.relative(opts.pluginHome, target) === "") continue;
-      if (opts.legacyPluginHome && path.relative(opts.legacyPluginHome, target) === "" && await isManagedPluginDirectory(target)) continue;
+      if (await sameDirectory(opts.pluginHome, target)) continue;
+      if (opts.legacyPluginHome && await sameDirectory(opts.legacyPluginHome, target) && await isManagedPluginDirectory(target)) continue;
     }
     throw new Error("DSH 依赖属于其他安装：" + name);
   }

@@ -65,6 +65,9 @@ browserTest('Doubao Work appearance settings synchronize resets and keep library
   assert.equal(apply.mode, 'library');
   assert.equal(apply.libraryId, 'opaque-1');
   assert.equal(apply.path, undefined);
+  await panel.locator('[data-action="clear"]').click();
+  assert.equal(await page.evaluate(request => window.__bcDesktopPrepareFile(request, request.requestId), apply), false);
+  assert.equal(await page.evaluate(() => window.__bcDesktopPendingFile), null);
 
   await page.evaluate(buildDoubaoWorkBackgroundCleanup());
   assert.equal(await panel.count(), 0);

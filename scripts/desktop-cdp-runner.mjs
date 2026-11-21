@@ -318,7 +318,7 @@ async function validateMedia(file) {
   return { path: stable.path, identity: stable.identity };
 }
 
-async function setFileInput(connection, file, meta, project = null) {
+async function setFileInput(connection, file, meta, project = null, expectedRequestId = null) {
   if (!project && args.host === 'doubaowork' && typeof file === 'string' &&
       path.basename(file).toLowerCase() === 'project.json') {
     project = await core.resolveWallpaperProject(file);
@@ -331,7 +331,6 @@ async function setFileInput(connection, file, meta, project = null) {
     ...meta, path: resolved, themePath: project?.projectPath ?? resolved, themeType: project?.type,
     suggestedName: project?.title, requestId,
   };
-  await evaluate(connection, `window.__bcDesktopPrepareFile(${JSON.stringify(prepared)})`);
   await connection.send('DOM.enable');
   const document = await connection.send('DOM.getDocument', { depth: 1 });
   const selector = `#beauticode-${args.host}-background-panel [data-id="fileInput"]`;
@@ -340,6 +339,9 @@ async function setFileInput(connection, file, meta, project = null) {
   });
   const nodeId = query.nodeId || query.result?.nodeId;
   if (!nodeId) throw new Error('找不到背景文件输入框。');
+  const accepted = await evaluate(connection, `window.__bcDesktopPrepareFile(${JSON.stringify(prepared)},${JSON.stringify(expectedRequestId)})`);
+  if (!accepted) return;
+  assertStableMedia(resolved, checked.identity);
   await connection.send('DOM.setFileInputFiles', { files: [resolved], nodeId });
   assertStableMedia(resolved, checked.identity);
   await evaluate(connection, `document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new Event('change',{bubbles:true}))`);
@@ -537,6 +539,7 @@ async function runSession(endpoint, handoff) {
         pick: window.__bcDesktopPickRequest || 0, apply: window.__bcDesktopApplyRequest || null,
         skin: window.__bcDesktopSkinCenterRequest || 0, library: window.__bcDesktopLibraryRequest || null,
         dirty: window.__bcDesktopPersistDirty || 0,
+        hasPersistence: typeof window.__bcDesktopPersistGet === 'function',
         entry: !!document.getElementById('beauticode-${args.host}-background-entry'),
         style: !!document.getElementById('beauticode-${args.host}-background-style'),
         stage: !!document.getElementById('beauticode-bg-stage'),
@@ -551,6 +554,7 @@ async function runSession(endpoint, handoff) {
         dirty: window.__bcDesktopPersistDirty || 0,
         raw: window.__bcDesktopPersistGet?.(),
       })`);
+      if (typeof snapshot.raw !== 'string') { lastDirty = 0; return; }
       if (snapshot.dirty === lastDirty) return;
       writeState(snapshot.raw);
       lastDirty = snapshot.dirty;
@@ -576,7 +580,11 @@ async function runSession(endpoint, handoff) {
       busy = true;
       try {
         const snapshot = await evaluate(connection, snapshotExpression);
-        if (snapshot.dirty !== lastDirty) await flushState();
+        if (!snapshot.hasPersistence) {
+          lastDirty = lastPick = lastSkin = 0;
+          lastApply = lastLibrary = '';
+          library = undefined;
+        } else if (snapshot.dirty !== lastDirty) await flushState();
         if (!snapshot.anchor || !snapshot.anchorTextMatches) {
           reportRuntimeDiagnosis('host-ui-updated');
           await evaluate(connection, buildCleanup());
@@ -596,7 +604,7 @@ async function runSession(endpoint, handoff) {
           let picked = '';
           try { picked = await pickFileNative(); } catch {}
           if (picked) {
-            try { await setFileInput(connection, picked, { mode: 'import', save: false }); }
+            try { await enqueueGalleryApply(() => setFileInput(connection, picked, { mode: 'import', save: false })); }
             catch (error) {
               log.warn(`导入背景失败：${error.message}`);
               await evaluate(connection, `window.__bcDesktopMessage?.(${JSON.stringify(String(error.message || spec.strings.missingFile))})`);
@@ -606,13 +614,15 @@ async function runSession(endpoint, handoff) {
         if (snapshot.apply?.requestId && snapshot.apply.requestId !== lastApply) {
           const request = snapshot.apply;
           lastApply = request.requestId;
-          await evaluate(connection, `if(window.__bcDesktopApplyRequest?.requestId===${JSON.stringify(lastApply)})window.__bcDesktopApplyRequest=null`);
           try {
             const project = request.mode === 'library' ? await library?.resolve(request.libraryId) : null;
             if (request.mode === 'library' && !project) throw new Error('Wallpaper selection expired.');
-            await setFileInput(connection, request.path, request, project);
+            await enqueueGalleryApply(() => setFileInput(connection, request.path, request, project, request.requestId));
           } catch {
-            await evaluate(connection, `window.__bcDesktopMessage?.(${JSON.stringify(spec.strings.missingFile)})`);
+            await evaluate(connection, `if(window.__bcDesktopApplyRequest?.requestId===${JSON.stringify(lastApply)}) {
+              window.__bcDesktopApplyRequest=null;
+              window.__bcDesktopMessage?.(${JSON.stringify(spec.strings.missingFile)});
+            }`);
           }
         }
         if (spec.settings && snapshot.library?.requestId && snapshot.library.requestId !== lastLibrary) {

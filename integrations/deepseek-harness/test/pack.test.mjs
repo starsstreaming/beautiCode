@@ -95,6 +95,8 @@ test("installer backs up and deduplicates its own duplicate loader entries", asy
       "      name: unrelated",
       "      options:",
       "        []",
+      "      rules:",
+      "        - id: beauticode-bridge",
       "    - id: beauticode-bridge",
       "      name: old-a",
       "      inject: [webServer]",
@@ -107,7 +109,8 @@ test("installer backs up and deduplicates its own duplicate loader entries", asy
     await runCli(["--dsh-home", dshHome, "--plugin-home", pluginHome]);
     const patch = await fs.readFile(path.join(web, "cordis.patch.yml"), "utf8");
     // This profile has no beautiCode bundle, so one usable overlay survives.
-    assert.equal((patch.match(/id:\s*beauticode-bridge/g) || []).length, 1);
+    assert.equal((patch.match(/^    - id:\s*beauticode-bridge/gm) || []).length, 1);
+    assert.match(patch, /rules:\n        - id: beauticode-bridge/);
     assert.match(patch, /id:\s*unrelated-plugin/);
     assert.match(patch, /options:\n        \[\]/);
     const pluginPatch = await fs.readFile(path.join(pluginHome, "cordis.patch.yml"), "utf8");
@@ -134,9 +137,32 @@ test("installer follows the selected DSH home junction and reuses its existing p
   await runCli(["--dsh-home", home]);
   await fs.unlink(link);
   await fs.symlink(path.join(alias, "plugins", "beauticode-dsh"), link, type);
+  const oldManifest = { dependencies: { "beauticode-dsh": "link:" + path.join(alias, "plugins", "beauticode-dsh").replaceAll("\\", "/") } };
+  await fs.writeFile(path.join(profile, "package.json"), JSON.stringify(oldManifest));
   const result = await runCli(["--dsh-home", alias]);
   assert.equal(await fs.realpath(result.dest), await fs.realpath(plugin));
   assert.equal(await fs.realpath(link), await fs.realpath(plugin));
+  await fs.writeFile(path.join(profile, "package.json"), JSON.stringify(oldManifest));
+  await runCli(["--remove", "--dsh-home", alias]);
+});
+
+test("retry restores the expected dangling link and preserves an unrelated dangling link", async t => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "bc-dsh-retry-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const profile = path.join(home, "profiles", "web");
+  const dest = path.join(home, "plugins", "beauticode-dsh");
+  const link = path.join(profile, "node_modules", "beauticode-dsh");
+  const type = process.platform === "win32" ? "junction" : "dir";
+  await fs.mkdir(path.dirname(link), { recursive: true });
+  await fs.writeFile(path.join(profile, "package.json"), "{}");
+  await fs.writeFile(path.join(profile, "cordis.patch.yml"), "# header\n  [] # seed\n");
+  await fs.symlink(path.join(home, "elsewhere"), link, type);
+  await assert.rejects(runCli(["--dsh-home", home]), /插件链接属于其他安装/);
+  await fs.unlink(link);
+  await fs.symlink(dest, link, type);
+  await runCli(["--dsh-home", home]);
+  assert.equal(await fs.realpath(link), await fs.realpath(dest));
+  assert.doesNotMatch(await fs.readFile(path.join(profile, "cordis.patch.yml"), "utf8"), /\[\] # seed/);
 });
 
 test("installer refuses to overwrite or remove an unrelated plugin-home directory", async () => {

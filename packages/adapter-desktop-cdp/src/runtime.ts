@@ -2,7 +2,7 @@ import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@beauticode/core";
 import type { DesktopCdpHostKind, DesktopCdpHostSpec } from "./types.js";
 
 export const DESKTOP_BACKGROUND_SCHEMA = "beauticode.desktop-background.v1";
-export const DESKTOP_BACKGROUND_VERSION = "v1.20";
+export const DESKTOP_BACKGROUND_VERSION = "v1.21";
 
 /**
  * Host-parameterized renderer payload. Media bytes never cross Runtime.evaluate:
@@ -236,7 +236,12 @@ function releaseMedia(el){
   }
   el.remove();
 }
-function invalidateMedia(){mediaGeneration++;pendingMedia.forEach(function(cancel){cancel()});pendingMedia.clear()}
+function invalidateMedia(){
+  mediaGeneration++;pendingMedia.forEach(function(cancel){cancel()});pendingMedia.clear();
+  var pending=window.__bcDesktopPendingFile;
+  if(pending&&pending.requestId)receipt(pending.requestId,{status:'error',error:'stale media selection'});
+  window.__bcDesktopPendingFile=null;
+}
 function clearMedia(){invalidateMedia();stage.querySelectorAll('.bc-media').forEach(releaseMedia);root.removeAttribute('data-bc-active');root.removeAttribute('data-bc-media')}
 window.__bcDesktopDispose=function(){disposed=true;clearMedia();aborter.abort();window.__bcDesktopApplyResult={};delete window.__bcDesktopPendingFile};
 function receipt(id,result){if(disposed)return;var results=window.__bcDesktopApplyResult;results[id]=result;var keys=Object.keys(results);while(keys.length>64)delete results[keys.shift()]}
@@ -418,7 +423,13 @@ async function applyFile(file,meta){
   say(storedType==='scene'?CFG.strings.appliedScene||CFG.strings.appliedImage:kind==='video'?CFG.strings.appliedVideo:CFG.strings.appliedImage);
   return true;
 }
-window.__bcDesktopPrepareFile=function(meta){invalidateMedia();window.__bcDesktopPendingFile=meta||null;return true};
+window.__bcDesktopPrepareFile=function(meta,expectedRequestId){
+  if(expectedRequestId){
+    if(window.__bcDesktopApplyRequest?.requestId!==expectedRequestId)return false;
+    window.__bcDesktopApplyRequest=null;
+  }
+  invalidateMedia();window.__bcDesktopPendingFile=meta||null;return true;
+};
 function openName(meta,label,suggestion){
   pendingImport=meta;nameFile.textContent=label;nameError.hidden=true;nameInput.value=suggestion;
   nameDialog.hidden=false;nameInput.focus();nameInput.setSelectionRange(nameInput.value.length,nameInput.value.length);

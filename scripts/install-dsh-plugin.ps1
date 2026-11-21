@@ -89,7 +89,7 @@ function Get-PackageInsert {
 }
 
 function Test-PatchHasBridge([string]$Text) {
-  return [bool]($Text -match "(?m)^[ \t]*-[ \t]*id:[ \t]*$bridgeId[ \t]*(?:#.*)?\r?$")
+  return ((Get-BridgeRewrite $Text).BridgeCount -gt 0)
 }
 
 function Backup-BridgePatch([string]$Path) {
@@ -108,18 +108,21 @@ function Backup-BridgePatch([string]$Path) {
 function Get-BridgeRewrite([string]$Raw) {
   $eol = if ($Raw.Contains("`r`n")) { "`r`n" } elseif ($Raw.Contains("`n")) { "`n" } else { "`r`n" }
   $hasTrailing = $Raw.EndsWith($eol)
-  $lines = if ($Raw.Length -eq 0) { @() } else { $Raw -split "\r\n|\n|\r" }
+  [string[]]$lines = $Raw -split "\r\n|\n|\r"
   if ($hasTrailing -and $lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq "") {
     if ($lines.Count -eq 1) { $lines = @() } else { $lines = $lines[0..($lines.Count - 2)] }
   }
   $removed = New-Object bool[] $lines.Count
   $bridgeCount = 0
   $removedBridgeCount = 0
+  $first = $lines | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') } | Select-Object -First 1
+  $rootIndent = [regex]::Match([string]$first, '^[ \t]*').Length
 
   for ($i = 0; $i -lt $lines.Count; $i += 1) {
     $insert = [regex]::Match([string]$lines[$i], '^([ \t]*)-[ \t]*insert:[ \t]*(?:#.*)?$')
     if (-not $insert.Success) { continue }
     $insertIndent = $insert.Groups[1].Value.Length
+    if ($insertIndent -ne $rootIndent) { continue }
     $blockEnd = $i + 1
     while ($blockEnd -lt $lines.Count) {
       $line = [string]$lines[$blockEnd]
@@ -128,9 +131,13 @@ function Get-BridgeRewrite([string]$Raw) {
     }
     $foundBridge = $false
     $bridgeRanges = @()
+    $childIndent = -1
     for ($j = $i + 1; $j -lt $blockEnd; ) {
+      if ($childIndent -lt 0 -and $lines[$j].Trim() -and -not $lines[$j].TrimStart().StartsWith('#')) {
+        $childIndent = [regex]::Match($lines[$j], '^[ \t]*').Length
+      }
       $bridge = [regex]::Match([string]$lines[$j], '^([ \t]*)-[ \t]*id:[ \t]*' + [regex]::Escape($bridgeId) + '[ \t]*(?:#.*)?$')
-      if (-not $bridge.Success -or $bridge.Groups[1].Value.Length -le $insertIndent) {
+      if (-not $bridge.Success -or $bridge.Groups[1].Value.Length -ne $childIndent) {
         $j += 1
         continue
       }

@@ -2,8 +2,6 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-const bridgeId = "beauticode-bridge";
-
 function fileUriInsert(uri) {
   return [
     "# beauticode-bridge (installer)",
@@ -27,11 +25,7 @@ function packageInsert(pluginName) {
 }
 
 function hasBridge(text) {
-  return new RegExp(`^[ \\t]*-[ \\t]*id:[ \\t]*${bridgeId}[ \\t]*(?:#.*)?\\r?$`, "m").test(text);
-}
-
-function bridgeCount(text) {
-  return (String(text).match(new RegExp(`^[ \\t]*-[ \\t]*id:[ \\t]*${bridgeId}[ \\t]*(?:#.*)?\\r?$`, "gm")) || []).length;
+  return stripBridge(text).count > 0;
 }
 
 async function backupPatch(filePath) {
@@ -47,11 +41,15 @@ function stripBridge(text) {
   const lines = text.split(/\r?\n/);
   const removed = new Array(lines.length).fill(false);
   const indentOf = (line) => line.match(/^[ \t]*/)?.[0].length ?? 0;
+  const content = (line) => line.trim() && !line.trimStart().startsWith("#");
+  const rootIndent = indentOf(lines.find(content) ?? "");
+  let count = 0;
 
   for (let i = 0; i < lines.length; i += 1) {
     const insert = lines[i].match(/^([ \t]*)-\s*insert:\s*(?:#.*)?$/);
     if (!insert) continue;
     const insertIndent = insert[1].length;
+    if (insertIndent !== rootIndent) continue;
     let blockEnd = i + 1;
     while (blockEnd < lines.length) {
       const line = lines[blockEnd];
@@ -60,15 +58,17 @@ function stripBridge(text) {
     }
 
     let foundBridge = false;
+    const childIndent = indentOf(lines.slice(i + 1, blockEnd).find(content) ?? "");
     for (let j = i + 1; j < blockEnd; ) {
       const bridge = lines[j].match(
         /^([ \t]*)-\s*id:\s*beauticode-bridge\s*(?:#.*)?$/,
       );
-      if (!bridge || bridge[1].length <= insertIndent) {
+      if (!bridge || bridge[1].length !== childIndent) {
         j += 1;
         continue;
       }
       foundBridge = true;
+      count++;
       const itemIndent = bridge[1].length;
       let itemEnd = j + 1;
       while (itemEnd < blockEnd) {
@@ -97,7 +97,7 @@ function stripBridge(text) {
     i = blockEnd - 1;
   }
 
-  return lines.filter((_, index) => !removed[index]).join("\n");
+  return { count, text: lines.filter((_, index) => !removed[index]).join("\n") };
 }
 
 function overlayPayload(text) {
@@ -110,7 +110,7 @@ function overlayPayload(text) {
 
 function isEmptyOverlay(text) {
   const payload = overlayPayload(text);
-  return payload === "" || payload === "[]";
+  return payload === "" || /^\[\](?:[ \t]+#.*)?$/.test(payload);
 }
 
 // DSH seeds overlays as `# comment\n[]`. `[]` is already a complete YAML
@@ -136,10 +136,11 @@ async function writePatch(filePath, body) {
     return;
   }
   const raw = await fsp.readFile(filePath, "utf8");
-  if (hasBridge(raw) && bridgeCount(raw) > 1) {
+  const rewrite = stripBridge(raw);
+  if (rewrite.count > 1) {
     await backupPatch(filePath);
   }
-  const remainder = hasBridge(raw) ? stripBridge(raw) : raw;
+  const remainder = rewrite.count ? rewrite.text : raw;
   const kept = keptOverlay(remainder);
   const next = kept ? withTrailingNewline(kept) + insert : insert;
   await fsp.writeFile(filePath, withTrailingNewline(next), "utf8");
@@ -148,8 +149,9 @@ async function writePatch(filePath, body) {
 async function removePatch(filePath) {
   if (!fs.existsSync(filePath)) return false;
   const raw = await fsp.readFile(filePath, "utf8");
-  if (!hasBridge(raw)) return false;
-  const kept = keptOverlay(stripBridge(raw));
+  const rewrite = stripBridge(raw);
+  if (!rewrite.count) return false;
+  const kept = keptOverlay(rewrite.text);
   if (!kept) {
     await fsp.writeFile(
       filePath,
