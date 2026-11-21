@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { inspectDshInstallation } from "./dsh-installation.mjs";
+import { linuxExecutableCandidates, windowsExecutableCandidates, xdgDir } from "./host-executables.mjs";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -14,12 +15,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Platforms with a supported install path. Linux skips Doubao (no Linux client). */
 const SUPPORTED_PLATFORMS = Object.freeze(["win32", "linux"]);
-const LINUX_UNSUPPORTED_HOSTS = Object.freeze(["doubao"]);
-
-function xdgDir(env, key, home, fallback) {
-  const value = env[key];
-  return value && path.isAbsolute(value) ? value : path.join(home, ...fallback);
-}
+const LINUX_UNSUPPORTED_HOSTS = Object.freeze(["doubao", "doubaowork"]);
 
 function canonicalStartupMarker(host, env, home) {
   const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
@@ -32,6 +28,7 @@ export const HOSTS = Object.freeze([
   "workbuddy",
   "cursor",
   "doubao",
+  "doubaowork",
 ]);
 
 export const COMMANDS = Object.freeze(["install", "status", "uninstall"]);
@@ -41,6 +38,7 @@ export const HOST_RUNTIME = Object.freeze({
     required: Object.freeze([
       "dsh/index.mjs",
       "dsh/cli.js",
+      "dsh/profile-patch.mjs",
       "dsh/vendor/core/index.js",
       "dsh/vendor/core/skin-catalog.js",
       "dsh/vendor/adapter-dsh/index.js",
@@ -110,6 +108,21 @@ export const HOST_RUNTIME = Object.freeze({
       "desktop/packages/adapter-desktop-cdp/dist/runtime.js",
     ]),
   }),
+  doubaowork: Object.freeze({
+    required: Object.freeze([
+      "desktop/scripts/desktop-cdp-runner.mjs",
+      "desktop/scripts/quick-launch.mjs",
+      "desktop/scripts/desktop-cdp-setup.mjs",
+      "desktop/scripts/desktop-runner-identity.mjs",
+      "desktop/packages/beauticode-desktop/src/windows-host-install.mjs",
+      "desktop/scripts/portable-runtime.mjs",
+      "desktop/packages/core/dist/index.js",
+      "desktop/packages/core/dist/skin-catalog.js",
+      "desktop/packages/adapter-desktop-cdp/dist/index.js",
+      "desktop/packages/adapter-doubaowork/dist/index.js",
+      "desktop/packages/adapter-desktop-cdp/dist/runtime.js",
+    ]),
+  }),
 });
 
 export function parseCommand(argv) {
@@ -133,16 +146,16 @@ export function parseCommand(argv) {
 
 export function helpText(cliName = "beauticode-desktop", platform = process.platform) {
   const lines = [
-    `用法：${cliName} <dsh|codex|workbuddy|cursor|doubao> <install|status|uninstall|health>`,
+    `用法：${cliName} <dsh|codex|workbuddy|cursor|doubao|doubaowork> <install|status|uninstall|health>`,
     `      ${cliName} all <install|status|health>`,
     "",
-    "宿主：dsh、codex、workbuddy、cursor、doubao",
+    "宿主：dsh、codex、workbuddy、cursor、doubao、doubaowork",
     "命令：install 安装后台接线；status 检查守护；health 检查宿主、CDP 与背景入口；uninstall 卸载后台接线",
     "提示：各宿主的 install/uninstall 只调用包内运行时；不会依赖源码 workspace。",
-    "all install 安装守护并创建四个背景版开始菜单快捷方式；安装时不启动客户端。原图标仍由守护兜底。",
+    "all install 安装守护并创建五个背景版开始菜单快捷方式；安装时不启动客户端。原图标仍由守护兜底。",
   ];
   if (platform === "linux") {
-    lines.push("Linux：支持 codex、workbuddy、cursor（以及已安装的 dsh）；守护写入 ~/.config/autostart，背景版启动项写入 ~/.local/share/applications；doubao 无 Linux 客户端，自动跳过。");
+    lines.push("Linux：支持 codex、workbuddy、cursor（以及已安装的 dsh）；守护写入 ~/.config/autostart，背景版启动项写入 ~/.local/share/applications；doubao 与 doubaowork 无 Linux 客户端，自动跳过。");
   }
   return lines.join("\n");
 }
@@ -213,62 +226,6 @@ export function statusText(status) {
   return JSON.stringify(status, null, 2);
 }
 
-function windowsExecutableCandidates(host, env, home) {
-  const local = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
-  const programFiles = env.ProgramFiles || "C:\\Program Files";
-  const programFilesX86 = env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-  if (host === "codex") return [
-    path.join(local, "Programs", "ChatGPT", "ChatGPT.exe"),
-    path.join(local, "Programs", "chatgpt", "ChatGPT.exe"),
-    path.join(local, "Programs", "Codex", "Codex.exe"),
-    path.join(local, "Programs", "codex", "Codex.exe"),
-    path.join(local, "OpenAI", "Codex", "Codex.exe"),
-    path.join(local, "OpenAI", "ChatGPT", "ChatGPT.exe"),
-    path.join(local, "Codex", "app", "Codex.exe"),
-    path.join(programFiles, "Codex", "Codex.exe"),
-    path.join(programFiles, "ChatGPT", "ChatGPT.exe"),
-    path.join(programFilesX86, "ChatGPT", "ChatGPT.exe"),
-  ];
-  if (host === "workbuddy") return [
-    path.join(local, "Programs", "WorkBuddy", "WorkBuddy.exe"),
-    path.join(local, "WorkBuddy", "WorkBuddy.exe"),
-    path.join(programFiles, "WorkBuddy", "WorkBuddy.exe"),
-    path.join(programFilesX86, "WorkBuddy", "WorkBuddy.exe"),
-  ];
-  if (host === "cursor") return [
-    path.join(local, "Programs", "cursor", "Cursor.exe"),
-    path.join(programFiles, "Cursor", "Cursor.exe"),
-    path.join(programFilesX86, "Cursor", "Cursor.exe"),
-  ];
-  if (host === "doubao") return [
-    path.join(local, "Doubao", "Doubao.exe"),
-    path.join(local, "Programs", "Doubao", "Doubao.exe"),
-    path.join(programFiles, "Doubao", "Doubao.exe"),
-    "D:\\Doubao\\app\\Doubao.exe",
-  ];
-  return [];
-}
-
-/** Mirrors the adapters' Linux executable candidates (deb/rpm/opt and per-user installs). */
-function linuxExecutableCandidates(host, env, home) {
-  const data = xdgDir(env, "XDG_DATA_HOME", home, [".local", "share"]);
-  if (host === "codex") return [
-    "/usr/lib/chatgpt/ChatGPT", "/opt/ChatGPT/ChatGPT", "/opt/chatgpt/ChatGPT",
-    "/usr/lib/codex/Codex", "/opt/Codex/Codex",
-    path.join(data, "chatgpt", "ChatGPT"), path.join(home, ".local", "opt", "ChatGPT", "ChatGPT"),
-  ];
-  if (host === "workbuddy") return [
-    "/opt/WorkBuddy/workbuddy", "/opt/workbuddy/workbuddy", "/usr/lib/workbuddy/workbuddy",
-    path.join(data, "WorkBuddy", "workbuddy"),
-  ];
-  if (host === "cursor") return [
-    ...(env.BEAUTICODE_CURSOR_EXECUTABLE ? [env.BEAUTICODE_CURSOR_EXECUTABLE] : []),
-    "/usr/share/cursor/cursor", "/opt/Cursor/cursor", "/opt/cursor/cursor",
-    path.join(data, "cursor", "cursor"), path.join(home, "Applications", "cursor", "cursor"),
-  ];
-  return [];
-}
-
 function commandOnPath(command, options) {
   const pathValue = options.env.PATH || options.env.Path || "";
   if (options.platform === "linux") {
@@ -319,7 +276,7 @@ export function detectHostAvailability(host, options = {}) {
   } else {
     const installed = getHostStatus(host, resolved).installed;
     if (installed || windowsExecutableCandidates(host, resolved.env, resolved.home).some(resolved.exists) ||
-      ((host === "cursor" || host === "doubao") && resolveRegisteredExecutable(host, {
+      ((host === "cursor" || host === "doubao" || host === "doubaowork") && resolveRegisteredExecutable(host, {
         query: resolved.queryRegistered, exists: resolved.exists, realpath: resolved.realpath,
       })) ||
       (host === "codex" && resolved.probeAppxCodex(resolved))) {

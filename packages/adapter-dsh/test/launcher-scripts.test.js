@@ -176,6 +176,7 @@ test("picker and tray never spawn a DSH process", () => {
     assert.doesNotMatch(source, /install-dsh-runtime/, `${name} must not install DSH`);
   }
   assert.match(installer, /agent\.mjs/);
+  assert.match(installer, /readability\.js/);
   assert.match(installer, /control-client\.mjs/);
   assert.match(installer, /host-apply\.mjs/);
   assert.match(installer, /integration-note\.zh\.txt/);
@@ -247,7 +248,7 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresWi
       }),
       "utf8",
     );
-    fs.writeFileSync(path.join(web, "cordis.patch.yml"), "[]\n", "utf8");
+    fs.writeFileSync(path.join(web, "cordis.patch.yml"), "# Your patch layer for this dsh profile.\r\n[]\r\n", "utf8");
     fs.mkdirSync(path.join(web, "node_modules", "@beauticode"), { recursive: true });
     fs.symlinkSync(pluginRoot, path.join(web, "node_modules", "@beauticode", "dsh-plugin"), "junction");
     const migrate = spawnSync(
@@ -267,7 +268,8 @@ test("install-dsh-plugin wires a missing DSH home and can uninstall", requiresWi
     );
     assert.equal(migrate.status, 0, migrate.stderr || migrate.stdout);
     const webPatch = fs.readFileSync(path.join(web, "cordis.patch.yml"), "utf8");
-    assert.doesNotMatch(webPatch, /id:\s*beauticode-bridge/);
+    assert.doesNotMatch(webPatch, /^\[\]\s*$/m);
+    assert.match(webPatch, /id:\s*beauticode-bridge/);
     assert.doesNotMatch(webPatch, /@beauticode\/dsh-plugin/);
     assert.match(fs.readFileSync(path.join(pluginRoot, "cordis.patch.yml"), "utf8"), /id:\s*beauticode-bridge/);
     assert.equal(fs.existsSync(path.join(home, "cordis.patch.yml")), false);
@@ -454,7 +456,7 @@ test("install-dsh-plugin deduplicates a loader already shipped by the plugin", r
     );
     fs.writeFileSync(
       path.join(web, "cordis.patch.yml"),
-      "- insert:\n    - id: user-loader\n      name: user-plugin\n      inject: [webServer]\n\n# beauticode-bridge (installer)\n- insert:\n    - id: beauticode-bridge\n      name: beauticode-dsh\n      inject: [webServer]\n",
+      "# legacy overlay\n[]\n- insert:\n    - id: user-loader\n      name: user-plugin\n      options:\n        []\n      inject: [webServer]\n\n# beauticode-bridge (installer)\n- insert:\n    - id: beauticode-bridge\n      name: beauticode-dsh\n      inject: [webServer]\n",
       "utf8",
     );
 
@@ -466,8 +468,23 @@ test("install-dsh-plugin deduplicates a loader already shipped by the plugin", r
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const webPatch = fs.readFileSync(path.join(web, "cordis.patch.yml"), "utf8");
     assert.match(webPatch, /id: user-loader/);
-    assert.doesNotMatch(webPatch, /id: beauticode-bridge/);
-    const backups = fs.readdirSync(web).filter((name) => name.startsWith("cordis.patch.yml.beauticode-backup-"));
+    assert.doesNotMatch(webPatch, /^\[\]/m);
+    assert.match(webPatch, /options:\r?\n        \[\]/);
+    assert.match(webPatch, /id: beauticode-bridge/);
+    const manifest = path.join(web, "package.json");
+    const configured = JSON.parse(fs.readFileSync(manifest, "utf8"));
+    configured.dsh = { profile: { bundles: ["@deepseek-ai/dsh-base", "beauticode-dsh"] } };
+    fs.writeFileSync(manifest, JSON.stringify(configured));
+    const backupPrefix = "cordis.patch.yml.beauticode-backup-";
+    const priorBackups = fs.readdirSync(web).filter((name) => name.startsWith(backupPrefix));
+    const repair = spawnSync(
+      powerShellExecutable,
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-PluginRoot", pluginRoot, "-DshHome", home],
+      { encoding: "utf8", windowsHide: true },
+    );
+    assert.equal(repair.status, 0, repair.stderr || repair.stdout);
+    assert.doesNotMatch(fs.readFileSync(path.join(web, "cordis.patch.yml"), "utf8"), /id: beauticode-bridge/);
+    const backups = fs.readdirSync(web).filter((name) => name.startsWith(backupPrefix) && !priorBackups.includes(name));
     assert.equal(backups.length, 1);
     assert.match(fs.readFileSync(path.join(web, backups[0]), "utf8"), /id: beauticode-bridge/);
     assert.match(fs.readFileSync(path.join(pluginRoot, "cordis.patch.yml"), "utf8"), /id: beauticode-bridge/);

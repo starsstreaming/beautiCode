@@ -6,7 +6,7 @@ import {
   DOUBAO_HOST_DESCRIPTOR,
   buildDoubaoBackgroundInjection,
 } from '../dist/index.js';
-import { DesktopStartupRepairController, selectDesktopMainProcesses } from '@beauticode/adapter-desktop-cdp';
+import { DesktopStartupRepairController, pickDesktopTarget, selectDesktopMainProcesses } from '@beauticode/adapter-desktop-cdp';
 
 const customPath = 'D:\\Custom Apps\\豆包\\Doubao.exe';
 const candidateOptions = {
@@ -54,6 +54,13 @@ test('Doubao canonicalizes recorded paths and deduplicates Windows case aliases'
   assert.ok(!values.includes(customPath));
 });
 
+test('Doubao recognizes the current per-user Application install layout', () => {
+  const candidate = 'C:\\Users\\test\\AppData\\Local\\Doubao\\Application\\Doubao.exe';
+  const executableCandidates = doubaoModule.doubaoExecutableCandidates({ ...candidateOptions, readRecord: () => null });
+  const rows = [{ pid: 17, name: 'Doubao.exe', exe: candidate, cmd: candidate, created: 1000 }];
+  assert.deepEqual(selectDesktopMainProcesses({ ...DOUBAO_CDP_SPEC, executableCandidates }, rows, 'win32').map(row => row.pid), [17]);
+});
+
 test('Doubao uses the measured chat target and direct More successor', () => {
   assert.equal(DOUBAO_HOST_DESCRIPTOR.kind, 'doubao');
   assert.equal(DOUBAO_HOST_DESCRIPTOR.capabilities.video, true);
@@ -79,6 +86,20 @@ test('Doubao uses the measured chat target and direct More successor', () => {
   assert.doesNotMatch(source, /PERSIST\.cleared=true;PERSIST\.themes=\[\]/);
   assert.match(source, /data-bc-theme/);
   assert.match(source, /MutationObserver/);
+});
+
+test('Doubao recognizes both chat route spellings and ignores non-chat targets', () => {
+  const overlay = { id: 'overlay', type: 'page', url: 'doubao://doubao-chat/search/' };
+  const frame = { id: 'frame', type: 'iframe', url: 'doubao://doubao-chat/chat/' };
+  const foreign = { id: 'foreign', type: 'page', url: 'doubao://doubao-work/chat/' };
+  const nested = { id: 'nested', type: 'page', url: 'doubao://doubao-chat/chat/settings' };
+  const query = { id: 'query', type: 'page', url: 'doubao://doubao-chat/chat/?other=yes' };
+  const primary = { id: 'main', type: 'page', url: 'doubao://doubao-chat/chat/' };
+  const targets = [overlay, frame, foreign, nested, query];
+  assert.equal(pickDesktopTarget(DOUBAO_CDP_SPEC, targets), null);
+  assert.equal(pickDesktopTarget(DOUBAO_CDP_SPEC, [...targets, primary]), primary);
+  const earlier = { ...primary, url: 'doubao://doubao-chat/chat' };
+  assert.equal(pickDesktopTarget(DOUBAO_CDP_SPEC, [earlier]), earlier);
 });
 
 test('a new Doubao PID and creation time remain repairable after a verified session', async () => {

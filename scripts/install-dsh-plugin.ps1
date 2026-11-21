@@ -88,8 +88,25 @@ function Get-PackageInsert {
   ) -join "`n"
 }
 
+function Split-PatchDocument([string]$Text) {
+  $header = [regex]::Match($Text, '^(?:(?:[ \t]*(?:#[^\r\n]*)?|%[^\r\n]*)\r?\n)*---[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)').Value
+  $content = $Text.Substring($header.Length)
+  $end = [regex]::Match($content, '(?m)^\.\.\.[ \t]*(?:#.*)?\r?$')
+  $footer = ''
+  if ($end.Success) {
+    $footer = $content.Substring($end.Index)
+    $content = $content.Substring(0, $end.Index)
+  }
+  if ($content -match '(?m)^---(?:[ \t]|\r?$)' -or ($footer -split '\r?\n' | Select-Object -Skip 1 | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })) {
+    throw 'Expected one DSH overlay document.'
+  }
+  if ($header -and -not $header.EndsWith("`n")) { $header += "`r`n" }
+  return [pscustomobject]@{ Header = $header; Content = $content; Footer = $footer }
+}
+
 function Test-PatchHasBridge([string]$Text) {
-  return [bool]($Text -match "(?m)^[ \t]*-[ \t]*id:[ \t]*$bridgeId[ \t]*(?:#.*)?\r?$")
+  $doc = Split-PatchDocument $Text
+  return ((Get-BridgeRewrite $doc.Content).BridgeCount -gt 0)
 }
 
 function Backup-BridgePatch([string]$Path) {
@@ -108,18 +125,21 @@ function Backup-BridgePatch([string]$Path) {
 function Get-BridgeRewrite([string]$Raw) {
   $eol = if ($Raw.Contains("`r`n")) { "`r`n" } elseif ($Raw.Contains("`n")) { "`n" } else { "`r`n" }
   $hasTrailing = $Raw.EndsWith($eol)
-  $lines = if ($Raw.Length -eq 0) { @() } else { $Raw -split "\r\n|\n|\r" }
+  [string[]]$lines = $Raw -split "\r\n|\n|\r"
   if ($hasTrailing -and $lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq "") {
     if ($lines.Count -eq 1) { $lines = @() } else { $lines = $lines[0..($lines.Count - 2)] }
   }
   $removed = New-Object bool[] $lines.Count
   $bridgeCount = 0
   $removedBridgeCount = 0
+  $first = $lines | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') } | Select-Object -First 1
+  $rootIndent = [regex]::Match([string]$first, '^[ \t]*').Length
 
   for ($i = 0; $i -lt $lines.Count; $i += 1) {
     $insert = [regex]::Match([string]$lines[$i], '^([ \t]*)-[ \t]*insert:[ \t]*(?:#.*)?$')
     if (-not $insert.Success) { continue }
     $insertIndent = $insert.Groups[1].Value.Length
+    if ($insertIndent -ne $rootIndent) { continue }
     $blockEnd = $i + 1
     while ($blockEnd -lt $lines.Count) {
       $line = [string]$lines[$blockEnd]
@@ -128,9 +148,13 @@ function Get-BridgeRewrite([string]$Raw) {
     }
     $foundBridge = $false
     $bridgeRanges = @()
+    $childIndent = -1
     for ($j = $i + 1; $j -lt $blockEnd; ) {
+      if ($childIndent -lt 0 -and $lines[$j].Trim() -and -not $lines[$j].TrimStart().StartsWith('#')) {
+        $childIndent = [regex]::Match($lines[$j], '^[ \t]*').Length
+      }
       $bridge = [regex]::Match([string]$lines[$j], '^([ \t]*)-[ \t]*id:[ \t]*' + [regex]::Escape($bridgeId) + '[ \t]*(?:#.*)?$')
-      if (-not $bridge.Success -or $bridge.Groups[1].Value.Length -le $insertIndent) {
+      if (-not $bridge.Success -or $bridge.Groups[1].Value.Length -ne $childIndent) {
         $j += 1
         continue
       }
@@ -203,17 +227,24 @@ function Write-RecoverableText([string]$Path, [string]$Text) {
   }
 }
 
+function Remove-SeededRootList([string]$Text) {
+  # Also repair overlays created by older installers that appended a sequence
+  # after DSH's empty root. An indented [] may belong to a user's nested item.
+  return [regex]::Replace($Text, '(?m)^\[\][ \t]*(?:#.*)?(?:\r?\n|$)', '')
+}
+
 function Remove-BridgeFromPatch([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
   $raw = [IO.File]::ReadAllText($Path)
   if (-not (Test-PatchHasBridge $raw)) { return $false }
-  $rewrite = Get-BridgeRewrite $raw
+  $doc = Split-PatchDocument $raw
+  $rewrite = Get-BridgeRewrite $doc.Content
   if (-not $rewrite.Safe -or -not $rewrite.Changed) {
     throw ("Unsafe DSH patch rewrite: cannot locate {0} beauticode bridge entries." -f $rewrite.BridgeCount)
   }
-  $trimmed = $rewrite.Text.Trim()
+  $trimmed = (Remove-SeededRootList $rewrite.Text).TrimEnd()
   $emptyOverlay = $trimmed.Length -eq 0
-  $emptyFlowOverlay = [bool]($trimmed -match '^\[\]$')
+  $emptyFlowOverlay = $trimmed.Trim() -eq '[]'
   if ($emptyOverlay -or $emptyFlowOverlay) {
     $dir = Split-Path -Parent $Path
     if (([IO.Path]::GetFileName($Path) -eq "cordis.patch.yml") -and ($dir -eq $DshHome)) {
@@ -221,10 +252,13 @@ function Remove-BridgeFromPatch([string]$Path) {
       Remove-Item -LiteralPath $Path -Force
       return $true
     }
-    Write-RecoverableText $Path "# Your patch layer for this dsh profile.`r`n[]`r`n"
+    Write-RecoverableText $Path ($doc.Header + "# Your patch layer for this dsh profile.`r`n[]`r`n" + $doc.Footer)
     return $true
   }
-  Write-RecoverableText $Path ($trimmed.TrimEnd() + "`r`n")
+  if (-not ($trimmed -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })) {
+    $trimmed += "`r`n[]"
+  }
+  Write-RecoverableText $Path ($doc.Header + $trimmed + "`r`n" + $doc.Footer)
   return $true
 }
 
@@ -238,22 +272,26 @@ function Write-BridgePatch([string]$Path, [string]$Body) {
     return
   }
   $raw = [IO.File]::ReadAllText($Path)
-  $rewrite = Get-BridgeRewrite $raw
-  if (Test-PatchHasBridge $raw) {
+  $doc = Split-PatchDocument $raw
+  $rewrite = Get-BridgeRewrite $doc.Content
+  $rootLine = $doc.Content -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') } | Select-Object -First 1
+  $indent = [regex]::Match([string]$rootLine, '^[ \t]*').Value
+  $Body = [regex]::Replace($Body, '(?m)^(?=.)', $indent)
+  if ($rewrite.BridgeCount -gt 0) {
     if (-not $rewrite.Safe -or -not $rewrite.Changed) {
       throw ("Unsafe DSH patch rewrite: cannot replace {0} beauticode bridge entries." -f $rewrite.BridgeCount)
     }
-    $stripped = $rewrite.Text.Trim()
+    $stripped = (Remove-SeededRootList $rewrite.Text).TrimEnd()
   } else {
-    $stripped = $raw.Trim()
+    $stripped = (Remove-SeededRootList $doc.Content).TrimEnd()
   }
-  $emptyOverlay = $stripped.Length -eq 0
-  $emptyFlowOverlay = [bool]($stripped -match '^\[\]$')
-  if ($emptyOverlay -or $emptyFlowOverlay) {
-    Write-RecoverableText $Path ($Body + "`r`n")
+  # A seeded DSH overlay may contain comments around the root empty list.
+  $payload = @($stripped -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })
+  if ($payload.Count -eq 0 -or ($payload.Count -eq 1 -and $payload[0].Trim() -match '^\[\](?:[ \t]+#.*)?$')) {
+    Write-RecoverableText $Path ($doc.Header + $Body + "`r`n" + $doc.Footer)
     return
   }
-  Write-RecoverableText $Path ($stripped.TrimEnd() + "`r`n`r`n" + $Body + "`r`n")
+  Write-RecoverableText $Path ($doc.Header + $stripped.TrimEnd() + "`r`n`r`n" + $Body + "`r`n" + $doc.Footer)
 }
 
 function Get-PluginEntry([string]$Path) {
@@ -382,12 +420,19 @@ function Remove-WebPackageDeps {
   if (-not (Test-Path -LiteralPath $webPackage -PathType Leaf)) { return $false }
   $raw = [IO.File]::ReadAllText($webPackage)
   $json = $raw | ConvertFrom-Json
-  if (-not $json.dependencies) { return $false }
   $deps = $json.dependencies
   $changed = $false
   foreach ($name in @($pluginName, $legacyPluginName)) {
-    if ($deps.PSObject.Properties.Name -contains $name) {
+    if ($null -ne $deps -and $deps.PSObject.Properties.Name -contains $name) {
       $deps.PSObject.Properties.Remove($name)
+      $changed = $true
+    }
+  }
+  $bundles = $json.dsh.profile.bundles
+  if ($bundles -is [array]) {
+    $remaining = @($bundles | Where-Object { $_ -cne $pluginName -and $_ -cne $legacyPluginName })
+    if ($remaining.Count -ne $bundles.Count) {
+      $json.dsh.profile.bundles = $remaining
       $changed = $true
     }
   }
@@ -427,17 +472,15 @@ $webExists = Test-Path -LiteralPath $webPackage -PathType Leaf
 if ($webExists) {
   Ensure-PluginJunction
   Ensure-WebPackageDep
-  # DSH also loads a package's own cordis.patch.yml. Keep one loader entry:
-  # when the plugin ships the bridge, retain that patch and remove only our
-  # managed profile block (with a backup); otherwise install the profile entry.
+  # A dependency's patch is only composed when the profile lists it as a bundle.
+  $profileManifest = [IO.File]::ReadAllText($webPackage) | ConvertFrom-Json
+  $loadsPluginBundle = @($profileManifest.dsh.profile.bundles) -ccontains $pluginName
   $pluginShipsBridge = $false
   if (Test-Path -LiteralPath $pluginPatch -PathType Leaf) {
     $pluginShipsBridge = Test-PatchHasBridge ([IO.File]::ReadAllText($pluginPatch))
   }
-  if ($pluginShipsBridge) {
-    if (Test-PatchHasBridge ([IO.File]::ReadAllText($webPatch))) {
-      [void](Remove-BridgeFromPatch $webPatch)
-    }
+  if ($loadsPluginBundle -and $pluginShipsBridge) {
+    [void](Remove-BridgeFromPatch $webPatch)
   } else {
     Write-BridgePatch $webPatch (Get-PackageInsert)
   }

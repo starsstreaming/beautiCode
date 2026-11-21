@@ -29,6 +29,7 @@
     "host-apply.mjs",
     "ui-host.mjs",
     "cli.js",
+    "profile-patch.mjs",
     "bin/beauticode-dsh",
     "cordis.patch.yml",
     "vendor",

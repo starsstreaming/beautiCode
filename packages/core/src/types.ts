@@ -2,7 +2,7 @@ import { SCHEMA_ID } from "./constants.js";
 
 export type BackgroundType = "image" | "video" | "clear";
 export type BackgroundTone = "dark" | "light" | "auto";
-export type HostKind = "codex" | "dsh" | "workbuddy" | "cursor" | "doubao";
+export type HostKind = "codex" | "dsh" | "workbuddy" | "cursor" | "doubao" | "doubaowork";
 export type MediaImportMode = "managed" | "local";
 export type AppliedSourceMode = MediaImportMode | "clear";
 

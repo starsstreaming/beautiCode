@@ -286,6 +286,7 @@ export async function repairDesktopProcess(
   log?: DesktopEnsureLog,
   injected?: Partial<DesktopRepairOperations>,
 ): Promise<DesktopRepairResult> {
+  if (spec.startupRepair === false) return "deferred";
   const operations = { ...defaultRepairOperations(spec), ...injected };
   const startedAt = operations.now();
   const reportElapsed = (stage: string, result: string) => {
@@ -384,6 +385,7 @@ export function startDesktopStartupRepairMonitor(
   spec: DesktopCdpHostSpec,
   log?: DesktopEnsureLog,
 ): DesktopRepairMonitor {
+  if (spec.startupRepair === false) return { close() {} };
   if (process.platform === "linux") return startLinuxDesktopStartupRepairMonitor(spec, log);
   if (process.platform !== "win32") return { close() {} };
   let closed = false;

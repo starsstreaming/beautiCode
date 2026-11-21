@@ -11,19 +11,24 @@ interface CandidateOptions {
 
 export function doubaoExecutableCandidates(options: CandidateOptions = {}): string[] {
   const env = options.env || process.env;
-  const recordPath = path.join(env.LOCALAPPDATA || "", "beauticode", "hosts", "doubao", "executable.json");
-  const readRecord = options.readRecord || (() => JSON.parse(fs.readFileSync(recordPath, "utf8")) as unknown);
+  const local = env.LOCALAPPDATA && /^[a-z]:[\\/]/i.test(env.LOCALAPPDATA) ? env.LOCALAPPDATA : null;
+  const readRecord = options.readRecord || (() => local
+    ? JSON.parse(fs.readFileSync(path.win32.join(local, "beauticode", "hosts", "doubao", "executable.json"), "utf8")) as unknown
+    : null);
   const exists = options.exists || fs.existsSync;
   const realpath = options.realpath || fs.realpathSync.native;
   const values = [
-    env.LOCALAPPDATA
-      ? path.join(env.LOCALAPPDATA, "Doubao", "Doubao.exe")
+    local
+      ? path.win32.join(local, "Doubao", "Application", "Doubao.exe")
       : "",
-    env.LOCALAPPDATA
-      ? path.join(env.LOCALAPPDATA, "Programs", "Doubao", "Doubao.exe")
+    local
+      ? path.win32.join(local, "Doubao", "Doubao.exe")
       : "",
-    env.ProgramFiles
-      ? path.join(env.ProgramFiles, "Doubao", "Doubao.exe")
+    local
+      ? path.win32.join(local, "Programs", "Doubao", "Doubao.exe")
+      : "",
+    env.ProgramFiles && /^[a-z]:[\\/]/i.test(env.ProgramFiles)
+      ? path.win32.join(env.ProgramFiles, "Doubao", "Doubao.exe")
       : "",
     "D:\\Doubao\\app\\Doubao.exe",
   ];
@@ -31,9 +36,9 @@ export function doubaoExecutableCandidates(options: CandidateOptions = {}): stri
     const record = readRecord() as { schema?: unknown; host?: unknown; path?: unknown };
     const candidate = typeof record?.path === "string" ? record.path : "";
     if (record?.schema === "beauticode.host-executable/v1" && record.host === "doubao" &&
-      path.win32.isAbsolute(candidate) && path.win32.basename(candidate).toLowerCase() === "doubao.exe" && exists(candidate)) {
+      /^[a-z]:[\\/]/i.test(candidate) && path.win32.basename(candidate).toLowerCase() === "doubao.exe" && exists(candidate)) {
       const canonical = path.win32.normalize(realpath(candidate));
-      if (path.win32.basename(canonical).toLowerCase() === "doubao.exe") values.push(canonical);
+      if (/^[a-z]:[\\/]/i.test(canonical) && path.win32.basename(canonical).toLowerCase() === "doubao.exe") values.push(canonical);
     }
   } catch { /* Missing or invalid ownership records must not change default discovery. */ }
   const unique = new Map<string, string>();

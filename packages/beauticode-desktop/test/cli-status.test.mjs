@@ -8,7 +8,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cli = path.join(root, "bin", "beauticode-desktop.mjs");
 
 test("each host status command is safe and returns structured JSON", () => {
-  for (const host of ["dsh", "codex", "workbuddy", "cursor", "doubao"]) {
+  for (const host of ["dsh", "codex", "workbuddy", "cursor", "doubao", "doubaowork"]) {
     const result = spawnSync(process.execPath, [cli, host, "status"], {
       encoding: "utf8",
       windowsHide: true,

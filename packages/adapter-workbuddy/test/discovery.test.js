@@ -104,6 +104,14 @@ test("WorkBuddy process matching rejects command lines that only mention its nam
   );
 });
 
+test("Windows WorkBuddy counts its desktop process without stdio and prewarm helpers", () => {
+  const executable = "E:\\WorkBuddy\\WorkBuddy.exe";
+  const isMain = args => isWorkBuddyMainProcess(`"${executable}" ${args}`, "WorkBuddy.exe", executable, "win32");
+  assert.equal(isMain("--disable-warning --stdio"), false);
+  assert.equal(isMain("--optimize-for-size --prewarm --prewarm-id=a"), false);
+  assert.equal(isMain('"E:\\Projects\\test --stdio flag" --user-data-dir=profile'), true);
+});
+
 test("macOS ps elapsed time is parsed without Linux etimes", () => {
   assert.equal(parsePsElapsedSeconds("00:09"), 9);
   assert.equal(parsePsElapsedSeconds("00:00:09"), 9);

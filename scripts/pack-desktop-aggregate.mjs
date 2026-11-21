@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stageCodexPlugin } from "./pack-codex-plugin.mjs";
 import { stageDshPlugin } from "./pack-dsh-plugin.mjs";
+import { rewriteRuntimeWorkspaceImports } from "./portable-runtime.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -57,7 +58,8 @@ function rewriteDesktopRunner(text) {
     .replaceAll("loadModule('@beauticode/adapter-desktop-cdp', '../packages/adapter-desktop-cdp/dist/index.js')", "loadModule('../packages/adapter-desktop-cdp/dist/index.js', '../packages/adapter-desktop-cdp/dist/index.js')")
     .replaceAll("loadModule('@beauticode/core', '../packages/core/dist/index.js')", "loadModule('../packages/core/dist/index.js', '../packages/core/dist/index.js')")
     .replaceAll("loadModule('@beauticode/adapter-cursor', '../packages/adapter-cursor/dist/index.js')", "loadModule('../packages/adapter-cursor/dist/index.js', '../packages/adapter-cursor/dist/index.js')")
-    .replaceAll("loadModule('@beauticode/adapter-doubao', '../packages/adapter-doubao/dist/index.js')", "loadModule('../packages/adapter-doubao/dist/index.js', '../packages/adapter-doubao/dist/index.js')");
+    .replaceAll("loadModule('@beauticode/adapter-doubao', '../packages/adapter-doubao/dist/index.js')", "loadModule('../packages/adapter-doubao/dist/index.js', '../packages/adapter-doubao/dist/index.js')")
+    .replaceAll("loadModule('@beauticode/adapter-doubaowork', '../packages/adapter-doubaowork/dist/index.js')", "loadModule('../packages/adapter-doubaowork/dist/index.js', '../packages/adapter-doubaowork/dist/index.js')");
 }
 
 function rewriteWorkbuddyRunner(text) {
@@ -72,14 +74,6 @@ function rewriteWorkbuddySetup(text) {
     /if \(PACKAGED_RUNTIME\) \{[\s\S]*?^\}\r?\n\r?\nstartDaemon\(\);/m,
     "if (PACKAGED_RUNTIME) {\n  log('  ✓ 使用包内预构建 WorkBuddy adapter');\n}\n\nstartDaemon();",
   );
-}
-
-function rewriteDesktopAdapter(text) {
-  return text
-    .replaceAll('from "@beauticode/adapter-desktop-cdp"', 'from "../../adapter-desktop-cdp/dist/index.js"')
-    .replaceAll("from '@beauticode/adapter-desktop-cdp'", "from '../../adapter-desktop-cdp/dist/index.js'")
-    .replaceAll('from "@beauticode/core"', 'from "../../core/dist/index.js"')
-    .replaceAll("from '@beauticode/core'", "from '../../core/dist/index.js'");
 }
 
 function rewriteCodexCli(text) {
@@ -97,14 +91,6 @@ function rewriteCodexWatchHost(text) {
       "  const file = vendor;",
     )
     .replaceAll("@beauticode/adapter-codex", "Codex adapter");
-}
-
-async function rewriteJsTree(dir) {
-  for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
-    const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) await rewriteJsTree(file);
-    else if (entry.name.endsWith(".js")) await fsp.writeFile(file, rewriteDesktopAdapter(await fsp.readFile(file, "utf8")), "utf8");
-  }
 }
 
 async function copyDesktopRuntime(destRoot) {
@@ -134,15 +120,11 @@ async function copyDesktopRuntime(destRoot) {
     path.join(desktop, "scripts", "portable-runtime.mjs"),
   );
   await copyJsTree(path.join(repoRoot, "packages", "core", "dist"), path.join(desktop, "packages", "core", "dist"));
-  await copyJsTree(path.join(repoRoot, "packages", "adapter-desktop-cdp", "dist"), path.join(desktop, "packages", "adapter-desktop-cdp", "dist"));
-  // launch.js (Linux /proc scan) and startup-repair.js both import core.
-  await rewriteJsTree(path.join(desktop, "packages", "adapter-desktop-cdp", "dist"));
-  await copyJsTree(path.join(repoRoot, "packages", "adapter-cursor", "dist"), path.join(desktop, "packages", "adapter-cursor", "dist"));
-  await copyJsTree(path.join(repoRoot, "packages", "adapter-doubao", "dist"), path.join(desktop, "packages", "adapter-doubao", "dist"));
-  for (const name of ["adapter-cursor", "adapter-doubao"]) {
-    const entry = path.join(desktop, "packages", name, "dist", "index.js");
-    await fsp.writeFile(entry, rewriteDesktopAdapter(await fsp.readFile(entry, "utf8")), "utf8");
+  const adapters = ["adapter-desktop-cdp", "adapter-cursor", "adapter-doubao", "adapter-doubaowork"];
+  for (const name of adapters) {
+    await copyJsTree(path.join(repoRoot, "packages", name, "dist"), path.join(desktop, "packages", name, "dist"));
   }
+  await rewriteRuntimeWorkspaceImports(desktop, adapters);
 }
 
 async function copyWorkbuddyRuntime(destRoot) {
@@ -168,7 +150,7 @@ async function copyWorkbuddyRuntime(destRoot) {
   );
   await copyJsTree(path.join(repoRoot, "packages", "core", "dist"), path.join(workbuddy, "packages", "core", "dist"));
   await copyJsTree(path.join(repoRoot, "packages", "adapter-workbuddy", "dist"), path.join(workbuddy, "packages", "adapter-workbuddy", "dist"));
-  await rewriteJsTree(path.join(workbuddy, "packages", "adapter-workbuddy", "dist"));
+  await rewriteRuntimeWorkspaceImports(workbuddy, ["adapter-workbuddy"]);
   await copyTree(
     path.join(repoRoot, "assets", "themes", "internal-beyond"),
     path.join(workbuddy, "assets", "themes", "internal-beyond"),

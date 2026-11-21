@@ -11,14 +11,16 @@ export function inspectDshInstallation({ home, env, exists = fs.existsSync, read
     try { profilePatch = readFile(path.join(profile, 'cordis.patch.yml'), 'utf8'); }
     catch (error) { if (error.code !== 'ENOENT') continue; }
     const patches = [profilePatch];
-    // The installer removes a duplicate profile bridge when the linked package
-    // ships its own patch. Require the actual dependency and matching link target.
-    if (!/\bbeauticode-bridge\b/.test(profilePatch)) {
+    // A dependency exposes its files to the loader. The profile's bundle list
+    // determines whether the dependency's patch is part of the composition.
+    if (!/\bbeauticode-bridge\b/.test(profilePatch.replace(/^[ \t]*#.*$/gm, ''))) {
       try {
         const manifest = JSON.parse(readFile(path.join(profile, 'package.json'), 'utf8'));
         const dependency = manifest.dependencies?.['beauticode-dsh'];
+        const bundles = manifest.dsh?.profile?.bundles;
         const plugin = path.join(profile, 'node_modules', 'beauticode-dsh');
-        if (typeof dependency === 'string' && dependency.startsWith('link:') && dependency.length > 5) {
+        if (Array.isArray(bundles) && bundles.includes('beauticode-dsh') &&
+            typeof dependency === 'string' && dependency.startsWith('link:') && dependency.length > 5) {
           const target = path.resolve(profile, dependency.slice(5));
           if (fs.realpathSync.native(plugin) === fs.realpathSync.native(target)) {
             patches.push(readFile(path.join(plugin, 'cordis.patch.yml'), 'utf8'));
@@ -28,10 +30,18 @@ export function inspectDshInstallation({ home, env, exists = fs.existsSync, read
     }
     for (const patch of patches) try {
       // Only recognize the installer's active insert record. Unknown wiring is not proof.
-      const inserts = [...patch.matchAll(/^- insert:\s*\r?\n((?:[ \t]+[^\r\n]*(?:\r?\n|$)|\r?\n)*)/gm)];
-      const records = inserts.flatMap(match => match[1].split(/(?=^[ \t]*-[ \t]*id:)/m));
+      const lines = patch.split(/\r?\n/);
+      const rootLine = lines.find(line => line.trim() && !line.trimStart().startsWith('#') && !/^(?:---(?:\s|$)|%)/.test(line));
+      const indent = rootLine?.match(/^([ \t]*)-[ \t]+/)?.[1];
+      if (indent === undefined) continue;
+      const normalized = lines.map(line => line.startsWith(indent) ? line.slice(indent.length) : line).join('\n');
+      const inserts = [...normalized.matchAll(/^- insert:[ \t]*(?:#.*)?\n((?:[ \t]+[^\n]*(?:\n|$)|\n)*)/gm)];
+      const records = inserts.flatMap(match => {
+        const child = match[1].match(/^([ \t]+)-[ \t]+/m)?.[1];
+        return child ? match[1].split(new RegExp('(?=^' + child + '-[ \\t]+)', 'm')) : [];
+      });
       for (const record of records) {
-        if (!/^[ \t]*-[ \t]*id:\s*beauticode-bridge\s*(?:#.*)?$/m.test(record)) continue;
+        if (!/^[ \t]*-[ \t]*id:[ \t]*beauticode-bridge[ \t]*(?:#[^\n]*)?(?:\n|$)/.test(record)) continue;
         const block = record.split(/^\S/m)[0];
         if (/^\s*(?:disabled:\s*true|enabled:\s*false)/m.test(block)) continue;
         if (!/^\s*inject:\s*\[webServer\]\s*$/m.test(block)) continue;

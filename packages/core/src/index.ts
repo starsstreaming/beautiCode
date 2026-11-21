@@ -26,3 +26,6 @@ export * from "./skin-catalog.js";
 export * from "./linux-process.js";
 export * from "./http-boundary.js";
 export * from "./serial-task.js";
+export { resolveWallpaperProject } from "./wallpaper-project.js";
+export { WallpaperLibrary, discoverWallpaperRoots } from "./wallpaper-library.js";
+export * from "./wallpaper-library.js";

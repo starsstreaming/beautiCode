@@ -16,7 +16,7 @@ export async function ensureDesktopCdp(
   const existing = await discoverDesktopCdp(spec, ports);
   if (existing) return existing;
   const processes = await listDesktopProcesses(spec);
-  if (processes.length === 0) {
+  if (processes.length === 0 && spec.startupRepair !== false) {
     throw new Error(`${spec.displayName} 未运行；等待用户从原始图标启动。`);
   }
   const declared = processes
@@ -30,6 +30,9 @@ export async function ensureDesktopCdp(
     );
     if (ready) return ready;
     throw new Error(`${spec.displayName} 已带 CDP 参数，但目标页尚未就绪。`);
+  }
+  if (spec.startupRepair === false) {
+    throw new Error(`${spec.displayName} 未接入 CDP；请使用 BeautiCode 快捷方式启动。`);
   }
   const repairable = processes.filter(
     (row) => classifyDesktopStartupProcess(row) === "repair-now",
