@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { backupPatch, fileUriInsert, hasBridge, packageInsert, removePatch, writePatch } from "./profile-patch.mjs";
 
 function findPackageRoot(startDir) {
   let dir = startDir;
@@ -30,7 +31,6 @@ function findPackageRoot(startDir) {
 
 const here = findPackageRoot(path.dirname(fileURLToPath(import.meta.url)));
 const pluginName = "beauticode-dsh";
-const bridgeId = "beauticode-bridge";
 
 function argValue(argv, name) {
   const idx = argv.indexOf(name);
@@ -134,51 +134,6 @@ function legacyDefaultPluginHome() {
   return path.join(defaultDataRoot(), "plugin");
 }
 
-function toFileUri(filePath) {
-  const full = path.resolve(filePath).replaceAll("\\", "/");
-  if (/^[A-Za-z]:/.test(full)) return `file:///${full}`;
-  return pathToFileURL(full).href;
-}
-
-function fileUriInsert(uri) {
-  return [
-    "# beauticode-bridge (installer)",
-    "- insert:",
-    "    - id: beauticode-bridge",
-    `      name: '${uri}'`,
-    "      inject: [webServer]",
-    "",
-  ].join("\n");
-}
-
-function packageInsert() {
-  return [
-    "# beauticode-bridge (installer)",
-    "- insert:",
-    "    - id: beauticode-bridge",
-    `      name: '${pluginName}'`,
-    "      inject: [webServer]",
-    "",
-  ].join("\n");
-}
-
-function hasBridge(text) {
-  return new RegExp(`^[ \\t]*-[ \\t]*id:[ \\t]*${bridgeId}[ \\t]*(?:#.*)?\\r?$`, "m").test(text);
-}
-
-function bridgeCount(text) {
-  return (String(text).match(new RegExp(`^[ \\t]*-[ \\t]*id:[ \\t]*${bridgeId}[ \\t]*(?:#.*)?\\r?$`, "gm")) || []).length;
-}
-
-async function backupPatch(filePath) {
-  const base = `${filePath}.beauticode-backup-${Date.now()}`;
-  let backup = base;
-  let suffix = 0;
-  while (fs.existsSync(backup)) backup = `${base}-${++suffix}`;
-  await fsp.copyFile(filePath, backup, fs.constants.COPYFILE_EXCL);
-  return backup;
-}
-
 async function backupDirectory(target) {
   const base = `${target}.beauticode-backup-${Date.now()}`;
   let backup = base;
@@ -186,129 +141,6 @@ async function backupDirectory(target) {
   while (await entryExists(backup)) backup = `${base}-${++suffix}`;
   await fsp.rename(target, backup);
   return backup;
-}
-
-async function backupDuplicatePatch(filePath) {
-  return backupPatch(filePath);
-}
-
-function stripBridge(text) {
-  const lines = text.split(/\r?\n/);
-  const removed = new Array(lines.length).fill(false);
-  const indentOf = (line) => line.match(/^[ \t]*/)?.[0].length ?? 0;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const insert = lines[i].match(/^([ \t]*)-\s*insert:\s*(?:#.*)?$/);
-    if (!insert) continue;
-    const insertIndent = insert[1].length;
-    let blockEnd = i + 1;
-    while (blockEnd < lines.length) {
-      const line = lines[blockEnd];
-      if (line.trim() && indentOf(line) <= insertIndent) break;
-      blockEnd += 1;
-    }
-
-    let foundBridge = false;
-    for (let j = i + 1; j < blockEnd; ) {
-      const bridge = lines[j].match(
-        /^([ \t]*)-\s*id:\s*beauticode-bridge\s*(?:#.*)?$/,
-      );
-      if (!bridge || bridge[1].length <= insertIndent) {
-        j += 1;
-        continue;
-      }
-      foundBridge = true;
-      const itemIndent = bridge[1].length;
-      let itemEnd = j + 1;
-      while (itemEnd < blockEnd) {
-        const line = lines[itemEnd];
-        if (line.trim() && indentOf(line) <= itemIndent) break;
-        itemEnd += 1;
-      }
-      for (let k = j; k < itemEnd; k += 1) removed[k] = true;
-      j = itemEnd;
-    }
-
-    if (!foundBridge) continue;
-    const marker = `${insert[1]}# beauticode-bridge (installer)`;
-    if (i > 0 && lines[i - 1].trimEnd() === marker) removed[i - 1] = true;
-    const hasSibling = lines
-      .slice(i + 1, blockEnd)
-      .some(
-        (line, offset) =>
-          !removed[i + 1 + offset] &&
-          line.trim() !== "" &&
-          !line.trimStart().startsWith("#"),
-      );
-    if (!hasSibling) {
-      for (let k = i; k < blockEnd; k += 1) removed[k] = true;
-    }
-    i = blockEnd - 1;
-  }
-
-  return lines.filter((_, index) => !removed[index]).join("\n");
-}
-
-function overlayPayload(text) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .join("\n");
-}
-
-function isEmptyOverlay(text) {
-  const payload = overlayPayload(text);
-  return payload === "" || payload === "[]";
-}
-
-// DSH seeds overlays as `# comment\n[]`. `[]` is already a complete YAML
-// document, so appending `- insert:` makes js-yaml throw.
-function keptOverlay(text) {
-  const withoutFlowEmpty = text
-    .split(/\r?\n/)
-    .filter((line) => line.trim() !== "[]")
-    .join("\n");
-  if (isEmptyOverlay(withoutFlowEmpty)) return "";
-  return withoutFlowEmpty.trim();
-}
-
-function withTrailingNewline(text) {
-  return text.endsWith("\n") ? text : `${text}\n`;
-}
-
-async function writePatch(filePath, body) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  const insert = withTrailingNewline(body);
-  if (!fs.existsSync(filePath)) {
-    await fsp.writeFile(filePath, insert, "utf8");
-    return;
-  }
-  const raw = await fsp.readFile(filePath, "utf8");
-  if (hasBridge(raw) && bridgeCount(raw) > 1) {
-    await backupDuplicatePatch(filePath);
-  }
-  const remainder = hasBridge(raw) ? stripBridge(raw) : raw;
-  const kept = keptOverlay(remainder);
-  const next = kept ? `${kept}\n\n${insert}` : insert;
-  await fsp.writeFile(filePath, withTrailingNewline(next), "utf8");
-}
-
-async function removePatch(filePath) {
-  if (!fs.existsSync(filePath)) return false;
-  const raw = await fsp.readFile(filePath, "utf8");
-  if (!hasBridge(raw)) return false;
-  const kept = keptOverlay(stripBridge(raw));
-  if (!kept) {
-    await fsp.writeFile(
-      filePath,
-      "# Your patch layer for this dsh profile.\n[]\n",
-      "utf8",
-    );
-    return true;
-  }
-  await fsp.writeFile(filePath, withTrailingNewline(kept), "utf8");
-  return true;
 }
 
 function shouldCopy(source) {
@@ -404,8 +236,7 @@ async function sameLinkTarget(link, dest) {
   try {
     const stat = await fsp.lstat(link);
     if (stat.isSymbolicLink()) {
-      const target = await fsp.readlink(link);
-      return path.resolve(path.dirname(link), target) === path.resolve(dest);
+      return path.relative(await fsp.realpath(link), await fsp.realpath(dest)) === "";
     }
     if (stat.isDirectory()) {
       return path.resolve(link) === path.resolve(dest);
@@ -488,9 +319,12 @@ async function ensureWebPackageDep(webPackage, pluginHome) {
   );
   delete json.dependencies["@beauticode/dsh-plugin"];
   const current = json.dependencies[pluginName];
-  if (current === spec && !hadLegacy) return;
+  const bundles = json.dsh?.profile?.bundles;
+  const loadsPluginBundle = Array.isArray(bundles) && bundles.includes(pluginName);
+  if (current === spec && !hadLegacy) return loadsPluginBundle;
   json.dependencies[pluginName] = spec;
   await fsp.writeFile(webPackage, `${JSON.stringify(json, null, 2)}\n`, "utf8");
+  return loadsPluginBundle;
 }
 
 async function removeWebPackageDep(webPackage) {
@@ -501,6 +335,14 @@ async function removeWebPackageDep(webPackage) {
   for (const name of [pluginName, "@beauticode/dsh-plugin"]) {
     if (Object.prototype.hasOwnProperty.call(json.dependencies, name)) {
       delete json.dependencies[name];
+      changed = true;
+    }
+  }
+  const bundles = json.dsh?.profile?.bundles;
+  if (Array.isArray(bundles)) {
+    const remaining = bundles.filter((name) => name !== pluginName && name !== "@beauticode/dsh-plugin");
+    if (remaining.length !== bundles.length) {
+      json.dsh.profile.bundles = remaining;
       changed = true;
     }
   }
@@ -526,15 +368,13 @@ async function install(opts) {
 
   if (fs.existsSync(webPackage)) {
     await linkPluginIntoProfile(webProfile, dest);
-    await ensureWebPackageDep(webPackage, dest);
+    const loadsPluginBundle = await ensureWebPackageDep(webPackage, dest);
     const pluginPatch = path.join(dest, "cordis.patch.yml");
     const pluginShipsBridge =
       fs.existsSync(pluginPatch) && hasBridge(await fsp.readFile(pluginPatch, "utf8"));
-    if (pluginShipsBridge) {
-      // DSH loads the package patch as well as the profile patch. Keep the
-      // package's canonical loader and remove only beautiCode's managed
-      // profile block, preserving unrelated profile configuration. Back up
-      // the user's profile before this repair, even when it had one entry.
+    if (loadsPluginBundle && pluginShipsBridge) {
+      // DSH composes only the bundles listed by this profile. Keep its
+      // existing bundle mount and back up any redundant overlay entry.
       if (fs.existsSync(webPatch)) {
         const profilePatch = await fsp.readFile(webPatch, "utf8");
         if (hasBridge(profilePatch)) {
@@ -543,7 +383,7 @@ async function install(opts) {
         }
       }
     } else {
-      await writePatch(webPatch, packageInsert());
+      await writePatch(webPatch, packageInsert(pluginName));
     }
     if (fs.existsSync(homePatch)) {
       const homeRaw = await fsp.readFile(homePatch, "utf8");
@@ -558,7 +398,7 @@ async function install(opts) {
   }
 
   await fsp.mkdir(dshHome, { recursive: true });
-  await writePatch(homePatch, fileUriInsert(toFileUri(indexFile)));
+  await writePatch(homePatch, fileUriInsert(pathToFileURL(indexFile).href));
   const migrated = await removeLegacyManagedPlugin(opts.legacyPluginHome, dest);
   console.log(`DSH web profile 还不存在，已写入 ${homePatch}`);
   console.log(copied ? `插件已安装到 ${dest}` : `已复用已安装的插件 ${dest}`);
@@ -625,7 +465,12 @@ export async function runCli(argv = process.argv.slice(2)) {
     console.log(version);
     return { version };
   }
-  const dshHome = argValue(argv, "--dsh-home") || defaultDshHome();
+  const selectedHome = argValue(argv, "--dsh-home") || defaultDshHome();
+  // A relocated DSH home defines the installation boundary. Guard its child paths separately.
+  const dshHome = await fsp.realpath(selectedHome).catch(error => {
+    if (error.code === "ENOENT") return selectedHome;
+    throw error;
+  });
   const requestedPluginHome = argValue(argv, "--plugin-home");
   const pluginHome = requestedPluginHome || defaultPluginHome(dshHome);
   const opts = {

@@ -391,6 +391,14 @@ function Remove-WebPackageDeps {
       $changed = $true
     }
   }
+  $bundles = $json.dsh.profile.bundles
+  if ($bundles -is [array]) {
+    $remaining = @($bundles | Where-Object { $_ -cne $pluginName -and $_ -cne $legacyPluginName })
+    if ($remaining.Count -ne $bundles.Count) {
+      $json.dsh.profile.bundles = $remaining
+      $changed = $true
+    }
+  }
   if (-not $changed) { return $false }
   $text = $json | ConvertTo-Json -Depth 8
   Write-RecoverableText $webPackage ($text.TrimEnd() + "`n")
@@ -427,17 +435,15 @@ $webExists = Test-Path -LiteralPath $webPackage -PathType Leaf
 if ($webExists) {
   Ensure-PluginJunction
   Ensure-WebPackageDep
-  # DSH also loads a package's own cordis.patch.yml. Keep one loader entry:
-  # when the plugin ships the bridge, retain that patch and remove only our
-  # managed profile block (with a backup); otherwise install the profile entry.
+  # A dependency's patch is only composed when the profile lists it as a bundle.
+  $profileManifest = [IO.File]::ReadAllText($webPackage) | ConvertFrom-Json
+  $loadsPluginBundle = @($profileManifest.dsh.profile.bundles) -ccontains $pluginName
   $pluginShipsBridge = $false
   if (Test-Path -LiteralPath $pluginPatch -PathType Leaf) {
     $pluginShipsBridge = Test-PatchHasBridge ([IO.File]::ReadAllText($pluginPatch))
   }
-  if ($pluginShipsBridge) {
-    if (Test-PatchHasBridge ([IO.File]::ReadAllText($webPatch))) {
-      [void](Remove-BridgeFromPatch $webPatch)
-    }
+  if ($loadsPluginBundle -and $pluginShipsBridge) {
+    [void](Remove-BridgeFromPatch $webPatch)
   } else {
     Write-BridgePatch $webPatch (Get-PackageInsert)
   }

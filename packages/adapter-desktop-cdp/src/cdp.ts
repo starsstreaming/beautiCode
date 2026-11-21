@@ -127,7 +127,11 @@ export function isDesktopTarget(
 ): boolean {
   if (target.type !== "page") return false;
   const identity = spec.targetIdentity;
-  if (!identity) return target.url === spec.targetUrl || (!!spec.targetHostnames?.length && sameChatPath(spec, target));
+  if (!identity) {
+    const route = spec.targetUrl.replace(/\/$/, "");
+    return target.url === route || target.url === route + "/" ||
+      (!!spec.targetHostnames?.length && sameChatPath(spec, target));
+  }
   let parsed: URL;
   try {
     parsed = new URL(target.url);

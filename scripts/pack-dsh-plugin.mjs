@@ -31,6 +31,7 @@ const PLUGIN_FILES = [
   "gallery-host.mjs",
   "skin-center.json",
   "cli.js",
+  "profile-patch.mjs",
   "bin/beauticode-dsh",
   "cordis.patch.yml",
   "package.json",

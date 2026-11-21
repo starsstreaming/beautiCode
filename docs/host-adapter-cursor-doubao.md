@@ -35,6 +35,8 @@ runtime\node.exe scripts\desktop-cdp-setup.mjs --host doubao install
 | Cursor | 3.18.9 | 9341 | `vscode-file://vscode-app/d:/cursor/resources/app/out/vs/code/electron-sandbox/workbench/workbench.html` | `[data-action-id="marketplace"][data-sidebar-primary-action]`，标签 `Customize` |
 | 豆包 | 2.29.12 | 9342 | `doubao://doubao-chat/chat` | `[data-testid="skill-page-item-more"]`，标签 `更多` |
 
+豆包 2.31.4 的当前 Windows 安装程序默认写入 %LOCALAPPDATA%\Doubao\Application\Doubao.exe，主窗口启动阶段也会报告 doubao://doubao-chat/chat/。两种精确主路由都可匹配，其他窗口或路径会被忽略。
+
 锚点或标签不一致时注入会失败关闭，不会用模糊文本匹配插入其他页面。客户端升级后应先重新测量这些契约。
 
 Cursor 的入口是 `background`，直接位于 `Customize` 后；所有面板文案为英文。豆包的入口是 `自定义背景`，直接位于 `更多` 后；面板文案为中文。
