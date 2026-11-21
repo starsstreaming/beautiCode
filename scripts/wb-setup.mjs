@@ -73,7 +73,7 @@ let portExplicit = false;
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === 'install' || a === 'uninstall' || a === 'status') cmd = a;
-  else if (a === '--port' || a === '-p') { port = String(parseInt(argv[++i], 10)); portExplicit = true; }
+  else if (a === '--port' || a === '-p') { port = argv[++i] ?? ''; portExplicit = true; }
   else if (a === '--help' || a === '-h') cmd = 'help';
 }
 if (cmd === 'help') {
@@ -85,6 +85,10 @@ if (cmd === 'help') {
     'uninstall 拆除守护、自启项与环境变量',
   ].join('\n'));
   process.exit(0);
+}
+if (cmd !== 'install' && !portExplicit) {
+  const configured = readConfiguredPort();
+  if (configured) port = String(configured);
 }
 if (!/^\d+$/.test(port) || +port < 1 || +port > 65535) {
   console.error(`端口无效：${port}`); process.exit(2);
@@ -103,6 +107,7 @@ const home = os.homedir();
 function readConfiguredPort() {
   try {
     const value = JSON.parse(fs.readFileSync(PORT_FILE, 'utf8')).port;
+    if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+$/.test(value))) return null;
     const n = Number(value);
     return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null;
   } catch { return null; }
@@ -153,11 +158,6 @@ async function chooseInstallPort() {
     if (await isLoopbackPortFree(candidate)) return String(candidate);
   }
   throw new Error('没有可用的 WorkBuddy loopback CDP 端口。');
-}
-
-if (cmd !== 'install' && !portExplicit) {
-  const configured = readConfiguredPort();
-  if (configured) port = String(configured);
 }
 
 function broadcastWindowsEnvironment() {
@@ -415,68 +415,68 @@ if (!fs.existsSync(RUNNER)) {
   console.error(`找不到 ${RUNNER} —— 请在 beautiCode 仓库里运行本脚本`); process.exit(2);
 }
 
-if (cmd === 'status') {
+async function reportStatus() {
   if ((PLAT === 'win32' || PLAT === 'linux') && process.argv.includes('--machine-status')) {
     let health = { state: 'probe-failed' };
     try {
       const adapterUrl = pathToFileURL(path.join(REPO, 'packages', 'adapter-workbuddy', 'dist', 'index.js')).href;
       const adapter = await import(adapterUrl);
-      health = await adapter.inspectWorkBuddyUiHealth();
+      health = await adapter.inspectWorkBuddyUiHealth(Number(port));
     } catch { /* report a sanitized failure instead of spawning the long-lived runner */ }
     process.stdout.write(JSON.stringify({
       installed: fs.existsSync(PLAT === 'linux' ? LINUX_DESKTOP : STARTUP_VBS),
       running: Boolean(managedWindowsRunnerProcess()),
       health,
     }) + '\n');
-    process.exit(0);
+    return;
   }
   log(`平台：${PLAT}   端口：${port}`);
   if (PLAT === 'darwin') statusMac(); else if (PLAT === 'win32') statusWin(); else statusLinux();
   log(`  CDP：${(await cdpUp()) ? '在线（WorkBuddy 正带着调试端口运行）' : '离线（WorkBuddy 未启动，或本次启动还没带 CDP）'}`);
   log('  提示：CDP 离线时点一次 WorkBuddy 图标，守护会在 3 秒内自动连上注入。');
-  process.exit(0);
 }
 
-if (cmd === 'uninstall') {
+if (cmd === 'status') {
+  await reportStatus();
+} else if (cmd === 'uninstall') {
   log('拆除 beautiCode × WorkBuddy：');
   stopManagedDaemon();
   if (PLAT === 'darwin') uninstallMac(); else if (PLAT === 'win32') uninstallWin(); else uninstallLinux();
   log('完成。已停止受管理的守护并拆除自启项。');
-  process.exit(0);
-}
-
-if (PACKAGED_RUNTIME) {
-  log('  ✓ 使用包内预构建 WorkBuddy adapter');
-} else if (!fs.existsSync(path.join(REPO, 'package-lock.json'))) {
-  throw new Error('包内 WorkBuddy runtime 不完整：缺少预构建 adapter；拒绝访问源码或临时 npm 缓存。');
 } else {
-  const build = spawnSync('npm', ['run', 'build', '-w', '@beauticode/adapter-workbuddy'], {
-    cwd: REPO, encoding: 'utf8', shell: PLAT === 'win32',
-  });
-  log(build.status === 0 ? '  ✓ adapter 编译通过' : `  ✗ adapter 编译失败：\n${(build.stderr || build.stdout || '').slice(0, 400)}`);
+  if (PACKAGED_RUNTIME) {
+    log('  ✓ 使用包内预构建 WorkBuddy adapter');
+  } else if (!fs.existsSync(path.join(REPO, 'package-lock.json'))) {
+    throw new Error('包内 WorkBuddy runtime 不完整：缺少预构建 adapter；拒绝访问源码或临时 npm 缓存。');
+  } else {
+    const build = spawnSync('npm', ['run', 'build', '-w', '@beauticode/adapter-workbuddy'], {
+      cwd: REPO, encoding: 'utf8', shell: PLAT === 'win32',
+    });
+    log(build.status === 0 ? '  ✓ adapter 编译通过' : `  ✗ adapter 编译失败：\n${(build.stderr || build.stdout || '').slice(0, 400)}`);
+  }
+
+  // install — resolve and stage first; startup wiring is only replaced after
+  // the stable runtime and verified Node are ready.
+  log(`安装 beautiCode × WorkBuddy（${PLAT}，端口 ${port}）：`);
+  const stableRuntime = PLAT === 'win32' || PLAT === 'linux' ? await prepareStableRuntime() : null;
+  if(stableRuntime) {
+    await commitWorkbuddyInstall({
+      runtime:stableRuntime, expectedLauncher:()=>PLAT==='linux'?renderRuntimeLauncherSh({host:'workbuddy',startupLogPath:LINUX_LOG,nodePath:stableRuntime.node.path}):renderRuntimeLauncherPs1({host:'workbuddy',startupLogPath:WIN_LOG}), portFile:PORT_FILE, portText:JSON.stringify({port:Number(port)},null,2)+'\n',
+      install:()=>PLAT==='win32'?installWin(stableRuntime):installLinux(stableRuntime),
+      activate:()=>activateStableRuntime(stableRuntime,{nodePath:stableRuntime.node.path,startupLogPath:PLAT==='linux'?LINUX_LOG:WIN_LOG}),
+      discard:()=>discardStableRuntime(stableRuntime),
+    });
+    if (PLAT === 'win32') broadcastWindowsEnvironment();
+  } else { writeConfiguredPort(port); installMac(); }
+
+  startDaemon(stableRuntime);
+
+  const up = await cdpUp();
+  if (up) {
+    log('  ✓ WorkBuddy CDP 在线 —— 注入应已完成，侧栏找「自定义背景」');
+  } else {
+    log('  ⚠ WorkBuddy 当前没带 CDP（还没重启过）。点一次 WorkBuddy 图标重启它，');
+    log('    守护会在 3 秒内自动连上注入 —— 之后每次点图标都直接生效。');
+  }
+  log('完成。卸载：node wb-setup.mjs uninstall');
 }
-
-// install — resolve and stage first; startup wiring is only replaced after
-// the stable runtime and verified Node are ready.
-log(`安装 beautiCode × WorkBuddy（${PLAT}，端口 ${port}）：`);
-const stableRuntime = PLAT === 'win32' || PLAT === 'linux' ? await prepareStableRuntime() : null;
-if(stableRuntime) {
-  await commitWorkbuddyInstall({
-    runtime:stableRuntime, expectedLauncher:()=>PLAT==='linux'?renderRuntimeLauncherSh({host:'workbuddy',startupLogPath:LINUX_LOG,nodePath:stableRuntime.node.path}):renderRuntimeLauncherPs1({host:'workbuddy',startupLogPath:WIN_LOG}), portFile:PORT_FILE, portText:JSON.stringify({port:Number(port)},null,2)+'\n',
-    install:()=>PLAT==='win32'?installWin(stableRuntime):installLinux(stableRuntime),
-    activate:()=>activateStableRuntime(stableRuntime,{nodePath:stableRuntime.node.path,startupLogPath:PLAT==='linux'?LINUX_LOG:WIN_LOG}),
-    discard:()=>discardStableRuntime(stableRuntime),
-  });
-  if (PLAT === 'win32') broadcastWindowsEnvironment();
-} else { writeConfiguredPort(port); installMac(); }
-
-startDaemon(stableRuntime);
-
-const up = await cdpUp();
-if (up) {
-  log('  ✓ WorkBuddy CDP 在线 —— 注入应已完成，侧栏找「自定义背景」');
-} else {
-  log('  ⚠ WorkBuddy 当前没带 CDP（还没重启过）。点一次 WorkBuddy 图标重启它，');
-  log('    守护会在 3 秒内自动连上注入 —— 之后每次点图标都直接生效。');
-}
-log('完成。卸载：node wb-setup.mjs uninstall');
